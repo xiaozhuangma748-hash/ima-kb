@@ -1,0 +1,37 @@
+# ===== Web 框架 =====
+streamlit>=1.32.0
+pandas>=2.0.0
+fastapi>=0.110.0          # 备用
+uvicorn>=0.27.0
+
+# ===== 文档解析 =====
+PyMuPDF>=1.24.0            # PDF
+python-docx>=1.1.0         # Word .docx
+openpyxl>=3.1.0            # Excel .xlsx
+python-pptx>=0.6.23        # PowerPoint .pptx
+markdown>=3.5.0            # Markdown 渲染
+trafilatura>=1.8.0         # 网页正文抓取
+Pillow>=10.0.0             # 图片处理（OCR 输入）
+
+# ===== OCR（可选，用于扫描版 PDF 和图片）=====
+# 系统依赖：brew install tesseract tesseract-lang
+pytesseract>=0.3.10        # Tesseract Python 封装
+
+# ===== LLM & 检索（P2 阶段）=====
+openai>=1.12.0             # 兼容 Agnes AI 的 OpenAI 协议
+httpx>=0.27.0
+jieba>=0.42.1              # 中文分词（BM25 检索）
+
+# ===== 向量检索（可选，用 `bash install.sh --vector` 启用）=====
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+
+# ===== 数据库 =====
+sqlalchemy>=2.0.0
+
+# ===== 工具库 =====
+python-dotenv>=1.0.0       # 读取 .env
+click>=8.1.0               # CLI 框架
+rich>=13.7.0               # 终端美化输出
+prompt_toolkit>=3.0.0      # REPL 输入补全（命令自动提示）
+pydantic>=2.6.0            # 数据校验

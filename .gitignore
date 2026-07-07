@@ -1,0 +1,41 @@
+# ===== 敏感文件 =====
+.env
+storage/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+
+# ===== 数据库 =====
+*.db
+*.sqlite
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== 构建/打包产物 =====
+*.egg-info/
+dist/
+build/
+*.tar.gz
+
+# ===== 测试缓存 =====
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ===== 模型文件（向量检索用，体积大，不上传）=====
+storage/models/
+
+# ===== 日志 =====
+*.log
+logs/
+
