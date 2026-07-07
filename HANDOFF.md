@@ -68,7 +68,7 @@
 ## 📂 项目结构
 
 ```
-34-知识库/
+ima-kb/
 ├── HANDOFF.md                    # ← 本文档
 ├── README.md（如有）
 ├── requirements.txt              # 含 Pillow + pytesseract（OCR 可选依赖）
@@ -281,20 +281,19 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 1. **jieba 启动提示**：每次启动会输出 `Building prefix dict from the default dictionary ...`，正常现象，可忽略
 2. **流式 chunk 空 choices**：Agnes 偶尔发空 chunk，已在 `client.py:88` 修复
 3. **macOS Streamlit 沙盒**：启动 Web 时设了 `STREAMLIT_HOME=/tmp` 避免创建 `~/.streamlit` 权限问题（`run.py:115`）
-4. **中文路径**：项目路径含中文（拱墅区/2025身后事（殡葬）项目），所有 IO 用 Path 对象，无问题；但 shell 命令需要正确转义
-5. **.env 不要提交**：包含真实 API Key，`.gitignore` 已忽略
-6. **storage/ 不要提交**：用户私有数据，`.gitignore` 已忽略
-7. **Python 版本**：项目兼容 Python 3.9+（macOS 自带 3.9.6），但 3.10+ 体验更好
-8. **prompt_toolkit 中文宽度**：补全菜单已用 wcwidth 处理中文对齐，若仍有偏移可升级 prompt_toolkit
-9. **`def list()` 命名陷阱**：曾用 `list()` 作函数名覆盖内置 `list()`，已改名为 `list_docs` 并用 `@cli.command(name="list")` 修复
-10. **pyproject.toml py-modules**：因 `run.py` 在根目录不在包内，必须显式声明 `py-modules = ["run", "repl", "config"]`，否则 `pip install -e .` 后 `ima` 找不到 `run` 模块
+4. **.env 不要提交**：包含真实 API Key，`.gitignore` 已忽略
+5. **storage/ 不要提交**：用户私有数据，`.gitignore` 已忽略
+6. **Python 版本**：项目兼容 Python 3.9+（macOS 自带 3.9.6），但 3.10+ 体验更好
+7. **prompt_toolkit 中文宽度**：补全菜单已用 wcwidth 处理中文对齐，若仍有偏移可升级 prompt_toolkit
+8. **`def list()` 命名陷阱**：曾用 `list()` 作函数名覆盖内置 `list()`，已改名为 `list_docs` 并用 `@cli.command(name="list")` 修复
+9. **pyproject.toml py-modules**：因 `run.py` 在根目录不在包内，必须显式声明 `py-modules = ["run", "repl", "config"]`，否则 `pip install -e .` 后 `ima` 找不到 `run` 模块
 
 ---
 
 ## 🧪 验证清单（开工时跑一遍）
 
 ```bash
-cd /Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库
+cd ima-kb  # 进入项目目录
 source .venv/bin/activate
 
 # 1. 确认 ima 命令可用

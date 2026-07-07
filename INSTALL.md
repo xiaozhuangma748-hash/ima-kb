@@ -7,7 +7,7 @@
 ## 🚀 一行命令安装（推荐）
 
 ```bash
-git clone <仓库地址> && cd 34-知识库 && ./install.sh
+git clone <仓库地址> && cd ima-kb && ./install.sh
 ```
 
 **就这样。** 脚本会自动完成所有事情：检查 Python → 创建虚拟环境 → 装依赖 → 配置 `ima` 命令 → 验证。
@@ -25,7 +25,7 @@ git clone <仓库地址> && cd 34-知识库 && ./install.sh
 
 ```bash
 git clone <仓库地址>
-cd 34-知识库
+cd ima-kb
 ```
 
 ### 第 2 步：运行安装脚本
