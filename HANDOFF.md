@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-06（P4 全部完成 + Claude Code 风格 CLI + 知识图谱）
+> 最后更新：2026-07-07（P5 全部完成 + 宠物管理员 v4.0 + 混合检索 + 增量同步 + 子命令菜单）
 
 ---
 
@@ -27,6 +27,7 @@
 | **P2 智能** | BM25 中文检索 + Agnes LLM 接入 + RAG 问答（流式/非流式） | ✅ 完成 |
 | **P3 体系** | Streamlit Web 界面 + 终端交互式 REPL + `ima` 全局命令 | ✅ 完成 |
 | **P4 增强** | OCR 补齐 + 自动标签 + 分发安装脚本 + Claude Code 风格 CLI + 知识图谱 | ✅ 完成 |
+| **P5 智能化** | 宠物管理员 v4.0 + 混合检索（BM25+向量+RRF+重排）+ 记忆系统 + 人格风格 + 增量同步 + 质量检查 + 近似去重 + 子命令菜单 + 数据分析 + 报告生成 | ✅ 完成 |
 
 ### 实测可用功能
 
@@ -43,7 +44,18 @@
 - ✅ **REPL 命令自动补全**（prompt_toolkit，输入 `/` 弹出命令列表）
 - ✅ **Claude Code 风格 CLI**（ASCII Logo + 分栏面板 + 橙色提示符 + 流式 `⏺` 标记）
 - ✅ **知识图谱**（LLM 抽取实体关系，networkx 存储，vis.js 可视化）
-- ✅ **一键安装**（`install.sh` + `pyproject.toml`，支持 `--ocr` / `--dev` / `--no-venv`）
+- ✅ **一键安装**（`install.sh` + `pyproject.toml`，支持 `--ocr` / `--dev` / `--no-venv` / `--vector`）
+- ✅ **宠物管理员 v4.0**（统一 AI 交互入口，4 种人格风格 scholar/warrior/artisan/neutral，像素风 ASCII 艺术）
+- ✅ **混合检索**（BM25 + 向量 bge-small-zh-v1.5 + RRF 融合 k=60 + LLM 重排序，四层流水线）
+- ✅ **记忆系统**（用户偏好 + 跨会话任务 + jieba 主题提取 + 非重叠 2-gram 工作流识别）
+- ✅ **增量同步**（`ima sync`，文件 mtime/hash 追踪，仅处理变更）
+- ✅ **质量检查**（`ima health`，检测空文档/超长块/低质量内容）
+- ✅ **近似去重**（`ima dedup`，MinHash + LSH，相似度阈值可调）
+- ✅ **数据分析**（`/analyze` 命令，Excel 多 sheet 自动统计 + 字符图 + AI 解读）
+- ✅ **报告生成**（`/report` 命令，Markdown 报告自动生成）
+- ✅ **子命令菜单**（8 个主命令 `/memory /pet /graph /sync /session /tag /dedup /health` 用 `radiolist_dialog` 弹出选择菜单）
+- ✅ **快速入库**（`/note`/`/clip`/`/url` 命令，支持剪贴板/URL/截图 OCR）
+- ✅ **会话管理**（`/session save/load/list`，跨会话恢复对话历史）
 
 ---
 
@@ -52,16 +64,19 @@
 | 层 | 选型 |
 |---|---|
 | 后端 | Python 3.9+（兼容 macOS 自带 3.9.6） |
-| CLI 框架 | click + rich + prompt_toolkit（补全） |
+| CLI 框架 | click + rich + prompt_toolkit（补全 + `radiolist_dialog` 子命令菜单） |
 | Web 框架 | Streamlit |
 | 元数据库 | SQLite（单文件 metadata.db） |
 | 文档解析 | PyMuPDF / python-docx / openpyxl / python-pptx / trafilatura / **Pillow + pytesseract（OCR）** / **macOS textutil（.doc）** |
 | 中文检索 | jieba + 自实现 BM25 |
+| **向量检索**（P5） | **ChromaDB + sentence-transformers（bge-small-zh-v1.5）+ RRF 融合 + LLM 重排序** |
 | LLM | Agnes AI（OpenAI 兼容协议，模型 `agnes-2.0-flash`） |
 | 知识图谱 | networkx + vis.js（HTML 可视化） |
+| **记忆系统**（P5） | **MemoryStore（JSON 原子写入）+ TaskManager + ProfileManager（jieba 主题）+ WorkflowTracker（2-gram）** |
+| **人格系统**（P5） | **4 风格 scholar/warrior/artisan/neutral + 像素风 ASCII 艺术** |
 | API Key | 配置在 `.env` 中（`AGNES_API_KEY`） |
 
-**注意**：原方案设计了 ChromaDB 向量库，但 P2 实际只用 BM25 就够用，向量库目录 `storage/chroma/` 暂时是空的。如果后续需要语义检索可以补上。
+**注意**：P5 已补齐 ChromaDB 向量检索，与 BM25 混合（RRF 融合 + LLM 重排）。向量库不可用时自动降级为纯 BM25，功能正常但语义理解较弱。
 
 ---
 
@@ -70,60 +85,109 @@
 ```
 ima-kb/
 ├── HANDOFF.md                    # ← 本文档
-├── README.md（如有）
-├── requirements.txt              # 含 Pillow + pytesseract（OCR 可选依赖）
+├── INSTALL.md                    # 同事安装指南
+├── requirements.txt              # 含 Pillow + pytesseract + chromadb + sentence-transformers
 ├── pyproject.toml                # 打包配置，定义 ima = "run:cli" 入口点
-├── install.sh                    # 一键安装脚本（--ocr / --dev / --no-venv）
+├── install.sh                    # 一键安装脚本（--ocr / --dev / --no-venv / --vector）
 ├── .env                          # ✅ 已配置 AGNES_API_KEY（不要提交 git）
 ├── .env.example                  # 模板（Agnes 配置）
 ├── .gitignore
 ├── config.py                     # 配置中心（Settings 单例）
-├── run.py                        # CLI 入口（chat/web/ingest/list/search/ask/show/stats/retag/delete/rebuild + graph 子命令组）
-├── repl.py                       # 交互式 REPL（IMA v4.0 · Claude Code 风格）
+├── run.py                        # CLI 入口（21 个命令，无子命令时进入 REPL）
+├── repl.py                       # 交互式 REPL（IMA v4.0 · Claude Code 风格 + 30+ 子命令）
 │
 ├── core/
 │   ├── ingestion/
 │   │   ├── parser.py             # 多格式解析（11 种）+ OCR 降级 + .doc textutil
-│   │   └── chunker.py            # 智能分块（按段落+重叠+句子边界）
+│   │   ├── chunker.py            # 智能分块（按段落+重叠+句子边界）
+│   │   └── quick.py              # 快速入库（/note /clip /url）
 │   ├── llm/
-│   │   └── client.py             # Agnes LLM 客户端（chat / chat_stream）
+│   │   ├── client.py             # Agnes LLM 客户端（chat / chat_stream）
+│   │   └── degrade.py            # 统一降级提示
 │   ├── search/
 │   │   └── bm25.py               # BM25 索引 + 检索
+│   ├── retrieval/                # P5 新增：混合检索
+│   │   ├── vector.py             # ChromaDB + bge-small-zh-v1.5 向量索引
+│   │   ├── hybrid.py             # BM25 + 向量 + RRF 融合（k=60）
+│   │   ├── rerank.py             # LLM 重排序
+│   │   └── citation.py           # 引用编号提取
 │   ├── qa/
-│   │   └── chain.py              # RAG 问答链（SYSTEM_PROMPT + _build_user_prompt）
+│   │   └── chain.py              # RAG 问答链（降级到 PetAdministrator 时用）
 │   ├── classify/
 │   │   └── tagger.py             # LLM 自动标签生成
 │   ├── graph/
-│   │   ├── __init__.py
 │   │   ├── extractor.py          # LLM 抽取实体关系（region/agency/topic + 3 种关系）
 │   │   ├── store.py              # networkx 图谱存储 + JSON 持久化 + cytoscape 导出
 │   │   └── visualizer.py         # 自包含 HTML 可视化（vis.js CDN，暗色主题）
-│   └── storage.py                # SQLite 存储（documents/chunks 表 + tags 字段 + 标签查询）
+│   ├── memory/                   # P5 新增：记忆系统
+│   │   ├── store.py              # MemoryStore（JSON 原子写入）
+│   │   ├── tasks.py              # TaskManager（跨会话任务）
+│   │   ├── profile.py            # ProfileManager（jieba 主题提取 + 4 级过滤）
+│   │   └── workflow.py           # WorkflowTracker（非重叠 2-gram）
+│   ├── persona/                  # P5 新增：人格系统
+│   │   ├── prompts.py            # build_system_prompt（4 风格分系 prompt）
+│   │   └── styles.py             # 风格定义
+│   ├── pet/                      # P5 新增：宠物管理员
+│   │   ├── administrator.py      # 编排层（检索→重排→prompt→LLM→引用→记忆→经验）
+│   │   ├── pet.py                # 宠物实体（等级/经验/状态）
+│   │   ├── interact.py           # 喂食/玩耍/训练
+│   │   ├── shop.py               # 商店
+│   │   ├── tasks.py              # 宠物任务
+│   │   ├── art.py                # 像素风 ASCII 艺术加载
+│   │   ├── arts/                 # 20 个 ASCII 艺术文件（4 风格 × 5 等级）
+│   │   └── storage.py            # 宠物持久化
+│   ├── session/                  # P5 新增：会话管理
+│   │   └── store.py              # 跨会话历史保存/恢复
+│   ├── sync/                     # P5 新增：同步与质量
+│   │   ├── tracker.py            # 增量同步（mtime/hash 追踪）
+│   │   ├── checker.py            # 质量检查（空文档/超长块）
+│   │   └── dedup.py              # 近似去重（MinHash + LSH）
+│   ├── analyze/                  # P5 新增：数据分析
+│   │   └── analyzer.py           # Excel 多 sheet 统计 + 字符图
+│   ├── report/                   # P5 新增：报告生成
+│   │   └── generator.py          # Markdown 报告
+│   ├── reader/                   # P5 新增：文档阅读
+│   │   ├── reader.py             # 文档阅读器
+│   │   └── comparator.py         # 文档对比
+│   ├── agent/                    # P5 新增：Agent 工具调用
+│   │   └── agent.py              # LLM Agent（12 步工具调用）
+│   ├── ui/
+│   │   └── theme.py              # 终端主题
+│   └── storage.py                # SQLite 存储（documents/chunks 表 + tags + 向量同步）
 │
 ├── web/
 │   ├── app.py                    # Streamlit 主入口（5 个页面）
+│   ├── pixel_theme.py            # 像素风主题
 │   └── pages/
-│       ├── dashboard.py          # 仪表盘（含标签分布柱状图）
-│       ├── search_page.py        # BM25 搜索页（含标签筛选）
+│       ├── dashboard.py          # 仪表盘
+│       ├── search_page.py        # 搜索页
 │       ├── qa_page.py            # AI 问答页（流式）
-│       ├── graph_page.py         # 知识图谱页（vis.js 交互可视化 + 邻居查询 + 导出）
+│       ├── graph_page.py         # 知识图谱页
 │       └── ingest_page.py        # 入库管理页
 │
+├── tests/                        # 153+ 测试
+│   ├── retrieval/                # 混合检索测试
+│   ├── memory/                   # 记忆系统测试
+│   ├── pet/                      # 宠物系统测试
+│   ├── persona/                  # 人格测试
+│   ├── sync/                     # 同步/去重测试
+│   └── ...
+│
 ├── test_data/                    # 5 个测试文件
-│   ├── 向量检索示例.py
-│   ├── 服务办理指南.docx
-│   ├── 殡葬改革汇报.pptx
-│   ├── 殡葬政策示例.md
-│   ├── 殡葬服务收费.xlsx
-│   └── 项目复盘.txt
 │
 └── storage/                      # 本地数据（gitignore）
     ├── metadata.db               # SQLite 元数据
     ├── bm25_index.pkl            # BM25 持久化索引
-    ├── graph.json                # 知识图谱持久化（nodes + edges）
-    ├── graph.html                # 知识图谱 HTML 可视化（vis.js）
+    ├── graph.json                # 知识图谱持久化
+    ├── graph.html                # 知识图谱 HTML 可视化
+    ├── memory.json               # 记忆系统持久化
+    ├── pet.json                  # 宠物状态持久化
+    ├── sessions/                 # 会话历史
     ├── uploads/                  # 原文件副本
-    └── cache/                    # 解析缓存
+    ├── uploads/quick/            # 快速入库内容
+    ├── cache/                    # 解析缓存
+    ├── chroma/                   # ChromaDB 向量库
+    └── models/bge-small-zh-v1.5/ # 本地向量模型
 ```
 
 ---
@@ -267,12 +331,16 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 
 ## ⏳ 后续可优化方向（非必须）
 
-1. **向量检索**：补齐 ChromaDB，加语义检索（BM25 + 向量混合）
-2. **OCR 优化**：PaddleOCR 替代 Tesseract（中文识别更准）
-3. **图谱扩展**：增加实体类型（人物/时间/金额）和关系类型
-4. **Web 端 REPL**：把 Claude Code 风格界面也搬到 Web 端
-5. **多用户**：FastAPI 后端 + 多用户隔离
-6. **向量化文档入库**：当前 RAG 用 BM25，可加 Embedding 缓存层
+> 已评估难度和工作量，按从易到难排序。建议按此顺序推进。
+
+| # | 优化项 | 难度 | 工作量 | 状态 | 核心要点 |
+|---|---|---|---|---|---|
+| 1 | **Embedding 缓存层** | ★ | ~1 小时 | ❌ 未做 | vector.py 加 SQLite 缓存（chunk hash → embedding），处理失效即可 |
+| 2 | **OCR 优化：PaddleOCR** | ★★ | 1-2 小时 | ❌ 未做 | 替换 parser.py 的 OCR 调用；主要痛点是 paddlepaddle ~500MB 依赖 |
+| 3 | **图谱扩展：人物/时间/金额** | ★★★ | 2-3 小时 | ❌ 未做 | LLM prompt 调优 + 新关系类型 + store/visualizer 适配 + 重建图谱验证 |
+| 4 | **Web 端 REPL** | ★★★★ | 4-6 小时 | ❌ 未做 | Streamlit 非 REPL 设计：radiolist_dialog 无法复用、补全要重写、ASCII 艺术等宽字体 |
+| 5 | **多用户：FastAPI + 隔离** | ★★★★★ | 8-12 小时 | ❌ 未做 | 断层式最难：全栈改造，所有 storage/bm25/vector/graph 加 user_id，认证体系从零写 |
+| ✅ | ~~**向量检索：ChromaDB + BM25 混合**~~ | — | — | ✅ **P5 已完成** | BM25 + 向量 + RRF(k=60) + LLM 重排四层流水线，见 core/retrieval/ |
 
 ---
 
@@ -337,12 +405,14 @@ open storage/graph.html
 1. **为什么用 BM25 而不是向量检索**：用户资料以政策文档为主，关键词匹配足够准；BM25 免费、本地、秒级，向量检索需要额外 API 费用和向量化预处理
 2. **为什么用 Agnes 而不是 DeepSeek**：用户已有 Agnes API Key，先跑通再说；接口是 OpenAI 兼容的，后续切换其他 LLM 只改 `config.py`
 3. **为什么用 Streamlit 而不是 React**：纯 Python，开发快，单文件部署，个人用够了
-4. **为什么不用 ChromaDB**：BM25 已经够用，引入向量库会增加复杂度；`storage/chroma/` 目录保留是为了以后扩展
+4. **为什么用 ChromaDB + BM25 混合**（P5 更新）：BM25 关键词匹配 + 向量语义检索 + RRF 融合 + LLM 重排，四层流水线互补；向量库不可用时自动降级为纯 BM25
 5. **`ima` 命令通过 pip install -e . 注册**：比 zsh function 更标准，自动同步更新；老的 `ima-command.zsh` 保留兼容
-6. **为什么用 prompt_toolkit 而不是 rich Prompt**：rich Prompt 不支持弹窗式补全菜单，prompt_toolkit 的 WordCompleter 是终端补全标准方案
+6. **为什么用 prompt_toolkit 而不是 rich Prompt**：rich Prompt 不支持弹窗式补全菜单，prompt_toolkit 的 WordCompleter 是终端补全标准方案；子命令菜单用 `radiolist_dialog`（带边框、方向键导航）
 7. **为什么用 networkx + vis.js 而不是 pyvis**：networkx 提供图算法支持（degree、neighbors 等），vis.js 直接 CDN 嵌入无依赖，pyvis 只是对 vis.js 的薄包装
 8. **为什么图谱抽取用 temperature=0.1**：实体关系抽取要求确定性输出，低温保证 LLM 输出稳定可解析的 JSON
+9. **为什么宠物管理员是统一入口**（P5 新增）：所有 AI 交互走 PetAdministrator，串联检索→重排→prompt→LLM→引用→记忆→宠物经验，失败时降级到 RAGChain
+10. **为什么主题提取用 jieba 分词**（P5 新增）：比简单 `[:10]` 截断更智能，"骨灰安置政策"→"骨灰安置"；并加了 4 级过滤（空白/停用词/单字/代词开头）
 
 ---
 
-**项目状态**：P1-P4 全部完成，IMA v4.0 可用于日常使用。后续优化方向见上方「后续可优化方向」章节。
+**项目状态**：P1-P5 全部完成，IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），153+ 测试通过，可用于日常使用。后续优化方向见上方「后续可优化方向」章节（5 项剩余，已按难度排序）。
