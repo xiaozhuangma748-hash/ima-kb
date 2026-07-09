@@ -265,7 +265,9 @@ HELP_TEXT = """
 - [cyan]/sync <目录>[/cyan]          增量同步目录（自动检测新增/修改/删除）
 - [cyan]/health[/cyan]               知识库数据质量报告
 - [cyan]/dedup[/cyan]                扫描近似重复 chunk
-
+- [cyan]/draw <id>[/cyan] [dim](--style 风格)[/dim]  基于文档生成配图
+- [cyan]/daily[/cyan] [dim](--topics 主题1,主题2)[/dim]   生成每日知识卡片
+- [cyan]/pic <描述>[/cyan]                 直接文生图
 [bold]管道用法（链式调用）[/bold]
 - [cyan]/search 骨灰 | ask 这些政策有什么差异[/cyan]   搜索结果喂给 AI 分析
 - [cyan]/list | ask 按类型分类统计[/cyan]              文档列表喂给 AI
@@ -330,6 +332,9 @@ COMMAND_LIST = [
     ("/sync",    "增量同步目录（自动检测新增/修改/删除）"),
     ("/health",  "知识库数据质量报告"),
     ("/dedup",   "扫描近似重复 chunk"),
+    ("/draw",    "基于文档生成配图（--style 风格）"),
+    ("/daily",   "生成每日知识卡片（--topics 主题）"),
+    ("/pic",     "直接文生图（/pic <描述>）"),
     # 帮助/退出
     ("/help",    "显示帮助"),
     ("/h",       "= /help（别名）"),
@@ -1250,6 +1255,12 @@ class REPL:
             self._cmd_health(arg)
         elif cmd == "/dedup":
             self._cmd_dedup(arg)
+        elif cmd == "/draw":
+            self._cmd_draw(arg)
+        elif cmd == "/daily":
+            self._cmd_daily(arg)
+        elif cmd == "/pic":
+            self._cmd_pic(arg)
         else:
             console.print(f"[red]未知命令:[/red] {cmd}  [dim]输入 /help 查看所有命令[/dim]")
             return
@@ -2251,6 +2262,132 @@ class REPL:
                 f"相似度 {d.similarity:.1%}"
             )
         console.print(f"\n[dim]用 /dedup delete <chunk_id> 删除重复 chunk[/dim]")
+
+
+    # ---- 图像生成 ----
+
+    def _cmd_draw(self, arg: str) -> None:
+        """基于文档内容生成配图：/draw <文档ID前8位> [--style 风格]"""
+        from core.image import ImageGenerator, ImageError
+
+        if not arg:
+            console.print("[yellow]用法: /draw <文档ID前8位> [--style 水墨/赛博/绘本/简洁信息图][/yellow]")
+            console.print("[dim]示例: /draw 862e0973 --style 水墨[/dim]")
+            return
+
+        # 解析参数
+        doc_id_prefix = arg.split("--")[0].strip()
+        style = "简洁信息图"
+        if "--style" in arg:
+            parts = arg.split("--style")
+            if len(parts) > 1:
+                style = parts[1].lstrip(" ").split("--")[0].strip() or "简洁信息图"
+
+        try:
+            gen = ImageGenerator()
+        except ImageError as e:
+            console.print(f"[red]图像生成未配置:[/red] {e}")
+            console.print("[dim]请在 .env 中设置 AGNES_API_KEY（与 LLM 共用）[/dim]")
+            return
+
+        # 获取文档
+        doc = self.storage.get_document(doc_id_prefix)
+        if not doc:
+            console.print(f"[red]文档不存在:[/red] {doc_id_prefix}")
+            return
+
+        # 获取文档前几段内容
+        try:
+            chunks = self.storage.get_chunks_by_doc(doc.id, limit=3)
+            content = "\n".join(c.content for c in chunks)[:500]
+        except Exception:
+            content = doc.title
+
+        # 生成图片
+        console.print(f"[bold yellow]🎨 正在为「{doc.title}」生成配图...[/bold yellow] [dim](风格: {style})[/dim]")
+        try:
+            url = gen.doc_to_image(doc.title, content, style=style)
+            console.print(f"\n[green]✓ 配图已生成[/green] [dim]({url})[/dim]")
+            console.print("[dim]在浏览器中打开图片 URL 查看[/dim]")
+            # 尝试打开浏览器
+            import webbrowser
+            webbrowser.open(url)
+        except ImageError as e:
+            console.print(f"[red]✗ 生图失败:[/red] {e}")
+            console.print("[dim]检查 AGNES_API_KEY 是否正确配置[/dim]")
+
+    def _cmd_daily(self, arg: str) -> None:
+        """生成每日知识卡片：/daily [--date YYYY-MM-DD] [--topics 主题1,主题2]"""
+        from datetime import datetime
+        from core.image import ImageGenerator, ImageError
+
+        try:
+            gen = ImageGenerator()
+        except ImageError as e:
+            console.print(f"[red]图像生成未配置:[/red] {e}")
+            return
+
+        # 解析参数
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        topics = []
+
+        if "--date" in arg:
+            parts = arg.split("--date")
+            if len(parts) > 1:
+                date_str = parts[1].split("--")[0].strip() or date_str
+
+        if "--topics" in arg:
+            parts = arg.split("--topics")
+            if len(parts) > 1:
+                topic_str = parts[1].split("--")[0].strip()
+                topics = [t.strip() for t in topic_str.split(",") if t.strip()]
+
+        # 如果没有手动指定主题，从记忆中提取
+        if not topics and self.memory_store:
+            try:
+                profile = self.memory_store.get_profile()
+                if profile.focus_topics:
+                    topics = profile.focus_topics[:5]
+            except Exception:
+                pass
+
+        # 如果还是没有主题，生成一个默认的
+        if not topics:
+            topics = [f"2026年7月知识回顾"]
+
+        console.print(f"[bold yellow]📋 正在生成每日知识卡片...[/bold yellow] [dim]({date_str})[/dim]")
+        try:
+            url = gen.daily_card(topics, date_str)
+            console.print(f"\n[green]✓ 知识卡片已生成[/green] [dim]({url})[/dim]")
+            import webbrowser
+            webbrowser.open(url)
+        except ImageError as e:
+            console.print(f"[red]✗ 生图失败:[/red] {e}")
+
+    def _cmd_pic(self, arg: str) -> None:
+        """直接文生图：/pic <描述>"""
+        from core.image import ImageGenerator, ImageError
+
+        if not arg.strip():
+            console.print("[yellow]用法: /pic <图像描述>[/yellow]")
+            console.print("[dim]示例: /pic 一只在竹林中散步的猫[/dim]")
+            return
+
+        try:
+            gen = ImageGenerator()
+        except ImageError as e:
+            console.print(f"[red]图像生成未配置:[/red] {e}")
+            return
+
+        console.print(f"[bold yellow]🎨 正在生成图像...[/bold yellow]")
+        try:
+            url = gen.text_to_image(arg.strip())
+            console.print(f"\n[green]✓ 图像已生成[/green] [dim]({url})[/dim]")
+            console.print("[dim]正在打开浏览器...[/dim]")
+            import webbrowser
+            webbrowser.open(url)
+        except ImageError as e:
+            console.print(f"[red]✗ 生图失败:[/red] {e}")
 
     # ---- 会话持久化 ----
 
@@ -3561,7 +3698,7 @@ class REPL:
                     console.print(f"[red]追问失败:[/red] {type(e).__name__}: {err_msg}")
                 return
 
-        # 懒加载 RAGChain
+        # 懒加载 RAGChain（已升级为混合检索 + 多轮 query expansion）
         if self.rag is None:
             try:
                 self.rag = RAGChain(storage=self.storage)
@@ -3570,82 +3707,75 @@ class REPL:
                 self.llm_available = False
                 return
 
-        # 第一步：检索（带 Spinner）
-        with console.status("[bold yellow]🔍 检索知识库...[/bold yellow]", spinner="dots"):
-            results = self.storage.bm25_search(user_input, top_k=settings.rag_top_k)
+        # 使用改进的 RAGChain：混合检索 + 重排序 + 多轮上下文扩展
+        with console.status("[bold yellow]🔍 混合检索知识库...[/bold yellow]", spinner="dots"):
+            answer = self.rag.ask(user_input, history=self.history)
 
-        if results:
-            console.print(f"[dim]✓ 找到 {len(results)} 条相关资料[/dim]\n")
-        else:
-            console.print("[yellow]⚠ 未检索到相关资料，AI 将基于通用知识回答（不推荐）[/yellow]\n")
-
-        # 第二步：构造 prompt（含历史）
-        from core.qa.chain import SYSTEM_PROMPT, _build_user_prompt
-        user_prompt = _build_user_prompt(user_input, results)
-
-        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
-        messages.extend(self.history)
-        messages.append({"role": "user", "content": user_prompt})
-
-        # 第三步：流式输出（橙色圆点标记 + 首 token Spinner）
-        console.print("[bold yellow]⏺[/bold yellow] [dim]AI 正在思考...[/dim]")
-        full_content: list[str] = []
-        first_token = True
-        try:
-            for token in self.rag.llm.chat_stream(messages, temperature=0.3):
-                if first_token:
-                    # 首 token：上移一行清掉"正在思考"，输出圆点 + AI 标记
-                    sys.stdout.write("\033[1A\r")  # 光标上移一行 + 回到行首
-                    sys.stdout.write("\033[K")     # 清除该行
+        if not answer.has_answer:
+            console.print("[yellow]⚠ 知识库中没有相关资料，尝试基于通用知识回答[/yellow]\n")
+            # 退化为纯对话
+            try:
+                console.print("[bold yellow]⏺[/bold yellow] [dim]AI 正在思考...[/dim]")
+                full_content: list[str] = []
+                first_token = True
+                for token in self.rag.llm.chat_stream(
+                    [{"role": "user", "content": user_input}], temperature=0.5
+                ):
+                    if first_token:
+                        sys.stdout.write("\033[1A\r")
+                        sys.stdout.write("\033[K")
+                        sys.stdout.flush()
+                        console.print("[bold yellow]⏺[/bold yellow] [bold cyan]AI[/bold cyan]", end="")
+                        first_token = False
+                    sys.stdout.write(token)
                     sys.stdout.flush()
-                    console.print("[bold yellow]⏺[/bold yellow] [bold cyan]AI[/bold cyan]", end="")
-                    first_token = False
-                sys.stdout.write(token)
-                sys.stdout.flush()
-                full_content.append(token)
-            if first_token:
-                sys.stdout.write("\033[1A\r\033[K")
-                sys.stdout.flush()
-                console.print("[bold yellow]⏺[/bold yellow] [dim]（无响应）[/dim]")
-            console.print()  # 换行
-
-            # 第四步：保存到历史
-            assistant_content = "".join(full_content)
-            self.history.append({"role": "user", "content": user_prompt})
-            self.history.append({"role": "assistant", "content": assistant_content})
-            # 历史最多保留 10 条（5 轮）
-            if len(self.history) > 10:
-                self.history = self.history[-10:]
-
-            # 第五步：显示引用（青色框）
-            if results:
+                    full_content.append(token)
                 console.print()
-                ref_lines = []
-                for i, r in enumerate(results, 1):
-                    ref_lines.append(
-                        f"  [{i}] [cyan]{r.doc_title}[/cyan] "
-                        f"[dim](相关度 {r.score:.2f})[/dim]"
-                    )
-                ref_panel = Panel(
-                    "\n".join(ref_lines),
-                    border_style="cyan",
-                    title="[bold cyan]📚 引用来源[/bold cyan]",
-                    title_align="left",
-                    padding=(0, 1),
+                assistant_content = "".join(full_content)
+            except LLMError:
+                console.print("[yellow]（AI 暂时无法回答）[/yellow]\n")
+                return
+        else:
+            # 同步模式：RAGChain 已生成完整回答，直接输出
+            console.print("[bold yellow]⏺[/bold yellow] [bold cyan]AI[/bold cyan]")
+            assistant_content = answer.content
+
+        # 显示引用来源
+        if answer.citations:
+            console.print()
+            ref_lines = []
+            for c in answer.citations:
+                score_str = f" (相关度 {c.get('score', 0):.4f})" if 'score' in c else ""
+                source_str = f" [{c.get('source', '?')}]" if 'source' in c else ""
+                ref_lines.append(
+                    f"  [{c['index']}] [cyan]{c['doc_title']}[/cyan]"
+                    f"[dim]{score_str}{source_str}[/dim]"
                 )
-                console.print(ref_panel)
-                console.print()
+            if answer.low_confidence:
+                ref_lines.insert(0, "  [dim]⚠ 检索相关度较低，仅供参考[/dim]")
+            ref_panel = Panel(
+                "\n".join(ref_lines),
+                border_style="cyan",
+                title="[bold cyan]📚 引用来源[/bold cyan]",
+                title_align="left",
+                padding=(0, 1),
+            )
+            console.print(ref_panel)
+            console.print()
 
-            # 宠物经验埋点：qa 行为
-            self._pet_gain_exp(10, "qa")
-            # 同时恢复能量
-            if self.pet:
-                self.pet.energy = min(100, self.pet.energy + 2)
-                self.pet_storage.save(self.pet)
+        # 保存历史
+        self.history.append({"role": "user", "content": user_input})
+        self.history.append({"role": "assistant", "content": assistant_content})
+        if len(self.history) > 20:
+            self.history = self.history[-20:]
 
-        except LLMError as e:
-            console.print(f"\r[red]✗ LLM 调用失败:[/red] {e}")
+        # 宠物经验 + 能量
+        self._pet_gain_exp(10, "qa")
+        if self.pet:
+            self.pet.energy = min(100, self.pet.energy + 2)
+            self.pet_storage.save(self.pet)
 
+    # ---- 管理员回答渲染 + 工作流 ----
     # ---- 管理员回答渲染 + 工作流 ----
 
     def _render_answer(self, result: AnswerResult) -> None:

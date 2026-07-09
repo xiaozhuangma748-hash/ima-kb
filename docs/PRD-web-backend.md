@@ -1,9 +1,9 @@
 # IMA 知识库 Web 后台 · PRD
 
-> **版本**:v1.0
-> **日期**:2026-07-07
+> **版本**:v1.1
+> **日期**:2026-07-09
 > **作者**:知识库团队
-> **状态**:待评审
+> **状态**:已实现（技术方案从 Streamlit 调整为 FastAPI）
 
 ---
 
@@ -27,7 +27,7 @@
 **本期范围(v1.0)**:
 - 7 个 Web 页面(问答/入库/搜索/分析/仪表盘/图谱/宠物)
 - 单用户模式(内网开放访问,共享一个知识库)
-- Streamlit 技术栈(复用现有 core/ 模块)
+- FastAPI + 单页 HTML+JS 技术栈(复用现有 core/ 模块)
 
 **不在本期范围**:
 - 多用户账号系统(留待 v2.0)
@@ -207,9 +207,9 @@ IMA Web 后台
 
 ### 4.2 页面布局规范
 
-- **布局**:宽屏布局(layout="wide")
-- **主题**:暗色主题(继承现有 pixel_theme.py)
-- **配色**:背景 #1a1a2e / 主色 #FFA500(橙) / 强调 #00CED1(青)
+- **布局**:宽屏布局,左侧导航栏 + 右侧主内容区
+- **主题**:亮色简约风（白色背景 + 橙色主色 #F59E0B + 青色强调 #06B6D4 + 卡片阴影 + 顶部色条）
+- **配色**:背景 #fff / 主色 #F59E0B(橙) / 强调 #06B6D4(青) / 卡片 #fff + 阴影
 - **字体**:系统默认,等宽字体用于代码/数据
 - **间距**:页面边距 2rem,卡片间距 1rem
 
@@ -231,23 +231,23 @@ IMA Web 后台
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 前端框架 | Streamlit | 复用现有,纯 Python |
-| 图表 | Streamlit Charts + plotly | 柱状图/饼图 |
-| 可视化 | vis.js(CDN) | 知识图谱 |
-| 后端 | 现有 core/ 模块 | 无需改动 |
-| 部署 | `ima web --host 0.0.0.0` | 内网访问 |
+| 前端框架 | 单页 HTML + JS | `web/templates/index.html` + `web/static/app.js`，侧边栏切换 7 页面 |
+| 图表 | 原生 JS + vis.js(CDN) | 搜索结果/数据分析/知识图谱 |
+| 后端 | FastAPI + uvicorn | 7 个路由模块，复用 core/ |
+| 通信 | SSE (Server-Sent Events) | AI 问答流式输出 |
+| 部署 | `ima web` 或 `uvicorn web.app:create_app --factory` | 内网访问 |
 
 ### 5.2 模块复用
 
-| Web 页面 | 复用的 core 模块 |
-|---|---|
-| AI 问答 | `core/pet/administrator.py` + `core/persona/prompts.py` |
-| 文档入库 | `core/ingestion/parser.py` + `core/classify/tagger.py` |
-| 搜索 | `core/retrieval/hybrid.py` + `core/retrieval/rerank.py` |
-| 数据分析 | `core/analyze/analyzer.py` |
-| 仪表盘 | `core/storage.py` + `core/sync/checker.py` |
-| 知识图谱 | `core/graph/store.py` + `core/graph/visualizer.py` |
-| 宠物管理 | `core/pet/pet.py` + `core/pet/interact.py` |
+| Web 页面 | 复用的 core 模块 | 后端 API 路由 |
+|---|---|---|
+| AI 问答 | `core/pet/administrator.py` + `core/persona/prompts.py` | `web/routes/qa.py`（SSE 流式） |
+| 文档入库 | `core/ingestion/parser.py` + `core/classify/tagger.py` | `web/routes/ingest.py` |
+| 搜索 | `core/retrieval/hybrid.py` + `core/retrieval/rerank.py` | `web/routes/search.py` |
+| 数据分析 | `core/analyze/analyzer.py` | `web/routes/analyze.py` |
+| 仪表盘 | `core/storage.py` + `core/sync/checker.py` | `web/routes/stats.py` |
+| 知识图谱 | `core/graph/store.py` + `core/graph/visualizer.py` | `web/routes/graph.py` |
+| 宠物管理 | `core/pet/pet.py` + `core/pet/interact.py` | `web/routes/pet.py` |
 
 ### 5.3 部署架构
 
@@ -255,7 +255,7 @@ IMA Web 后台
 内网用户浏览器
     ↓ http://192.168.x.x:8501
 部署机器(Mac/Linux)
-    ├── Streamlit 进程(ima web)
+    ├── FastAPI 进程(ima web / uvicorn，默认端口 8501)
     ├── .venv(Python 环境)
     ├── storage/(知识库数据)
     └── .env(API Key)
@@ -295,6 +295,7 @@ IMA Web 后台
 - [ ] 仪表盘:总览数据准确,告警正确
 - [ ] 知识图谱:节点可交互,导出可用
 - [ ] 内网访问:同事浏览器可打开,响应 < 3s
+- [ ] ✅ 已实现:FastAPI 后端 + 单页 HTML 前端,7 页面全部可用
 
 ### 7.2 非功能验收
 
@@ -309,7 +310,7 @@ IMA Web 后台
 
 | 风险 | 概率 | 影响 | 对策 |
 |---|---|---|---|
-| Streamlit 并发限制 | 中 | 多人同时 AI 问答会排队 | 限制 1-5 人,或升级 FastAPI |
+| FastAPI 并发限制 | 低 | 1-5 人内网使用足够 | 单进程 uvicorn 即可，需要时加 workers |
 | 大文件上传超时 | 中 | 上传 > 50MB PDF 失败 | 分块上传 + 进度条 |
 | LLM API 限流 | 低 | 高频问答被限流 | 加重试 + 友好降级提示 |
 | 向量模型加载慢 | 中 | 首次启动 > 30s | 预加载 + 缓存 |

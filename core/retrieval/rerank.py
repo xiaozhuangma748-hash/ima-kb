@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -37,16 +38,7 @@ class Reranker:
         candidates: List[HybridResult],
         top_n: int = 5,
     ) -> List[RerankResult]:
-        """对候选列表用 LLM 打分并重排。
-
-        Args:
-            query: 用户查询
-            candidates: 混合检索结果
-            top_n: 返回前 N 个
-
-        Returns:
-            重排序后的结果列表，降级时保留原顺序
-        """
+        """对候选列表用 LLM 打分并重排。"""
         if not candidates:
             return []
 
@@ -71,7 +63,6 @@ class Reranker:
                 reason=score_data.get("reason", ""),
             ))
 
-        # 按 relevance_score 降序
         results.sort(key=lambda r: r.relevance_score, reverse=True)
         return results[:top_n]
 
@@ -81,14 +72,9 @@ class Reranker:
         Returns:
             {index: {"score": float, "reason": str}}
         """
-        # 构造候选列表文本
         candidate_texts = []
         for i, c in enumerate(candidates):
-            # 截取前 200 字避免 token 过长；超出部分用省略号标记
-            if c.content:
-                snippet = c.content[:200] + ("..." if len(c.content) > 200 else "")
-            else:
-                snippet = ""
+            snippet = c.content[:200] + ("..." if len(c.content) > 200 else "") if c.content else ""
             candidate_texts.append(f"[{i}] {c.doc_title}: {snippet}")
 
         prompt = f"""请对以下候选文档与查询的相关性打分（0-10 分，10 最相关）。
@@ -106,16 +92,83 @@ class Reranker:
         messages = [{"role": "user", "content": prompt}]
         response = self.llm.chat(messages, temperature=0.0, max_tokens=1000)
 
-        # 解析 JSON
-        data = json.loads(response)
+        # 健壮解析：先尝试直接解析，失败则提取 JSON 片段
+        return self._parse_scores(response)
+
+    @staticmethod
+    def _parse_scores(response: str) -> dict:
+        """从 LLM 响应中解析打分 JSON，支持多种格式。
+
+        策略：
+        1. 直接 json.loads
+        2. 提取第一个 [...] 或 {...} 片段
+        3. 清理 markdown code block 标记
+        """
+        # 1. 直接尝试
+        try:
+            data = json.loads(response)
+            return Reranker._normalize_scores(data)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # 2. 提取 JSON 数组或对象
+        # 先尝试匹配 [...].pattern
+        match = re.search(r'(\[.*\])', response, re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group(1))
+                return Reranker._normalize_scores(data)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # 3. 尝试匹配 {...}
+        match = re.search(r'(\{.*\})', response, re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group(1))
+                return Reranker._normalize_scores(data)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        raise ValueError(f"无法从 LLM 响应中提取 JSON: {response[:200]}")
+
+    @staticmethod
+    def _normalize_scores(data) -> dict:
+        """标准化 LLM 返回的数据结构。
+
+        支持：
+        - [{"index": 0, "score": 8.5}, ...]  列表格式
+        - {"0": 8.5, "1": 9.0}              字典格式
+        - 其他 → 返回空 dict（降级）
+        """
         scores = {}
-        for item in data:
-            idx = item.get("index")
-            if idx is not None:
-                scores[idx] = {
-                    "score": float(item.get("score", 0)),
-                    "reason": item.get("reason", ""),
-                }
+
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    idx = item.get("index")
+                    if idx is not None:
+                        scores[int(idx)] = {
+                            "score": float(item.get("score", 0)),
+                            "reason": item.get("reason", ""),
+                        }
+        elif isinstance(data, dict):
+            for key, val in data.items():
+                try:
+                    idx = int(key)
+                    if isinstance(val, dict):
+                        scores[idx] = {
+                            "score": float(val.get("score", 0)),
+                            "reason": val.get("reason", ""),
+                        }
+                    elif isinstance(val, (int, float)):
+                        scores[idx] = {
+                            "score": float(val),
+                            "reason": "",
+                        }
+                except (ValueError, TypeError):
+                    continue
+
         return scores
 
     def _fallback_results(
@@ -123,7 +176,7 @@ class Reranker:
         candidates: List[HybridResult],
         top_n: int,
     ) -> List[RerankResult]:
-        """降级：保留原顺序，relevance_score=0。"""
+        """降级：保留原顺序。"""
         return [
             RerankResult(
                 chunk_id=c.chunk_id,

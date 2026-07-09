@@ -160,7 +160,7 @@ ima                          # 进入 REPL
 
 ### 宠物养成
 
-- 每次问答宠物获得经验，升级后可以分系（Lv6 时选择 scholar/warrior/artisan）
+- 每次问答宠物获得经验，最高等级 Lv10；Lv5 时分系（scholar/warrior/artisan）
 - `/pet feed` 喂食、`/pet play` 玩耍、`/pet train` 训练
 - 宠物状态（心情/饱食/能量）影响回答质量
 
@@ -233,7 +233,11 @@ CHUNK_OVERLAP=64                     # 块间重叠
 # ===== RAG 参数 =====
 RAG_TOP_K=6                          # 检索返回数量
 LLM_MAX_TOKENS=1024                  # AI 回答最大长度
-```
+
+# ===== 图像生成 =====
+IMAGE_MODEL=agnes-image-2.1-flash    # 图像生成模型
+IMAGE_SIZE=1024x1024                  # 图像尺寸
+IMAGE_RESPONSE_FORMAT=url             # 返回格式：url 或 base64```
 
 ### 向量检索配置
 
@@ -335,3 +339,46 @@ rm -rf .venv storage
 ## 📞 联系
 
 遇到问题看 `HANDOFF.md` 的「已知问题与注意事项」章节，或联系项目负责人。
+
+---
+
+## 🎨 图像生成功能（v4.1 新增）
+
+IMA 现已集成 **Agnes Image 2.1 Flash** 生图能力，可以为知识库内容自动生成配图。
+
+### 使用方法
+
+进入 REPL（`ima`）后使用以下命令：
+
+| 命令 | 功能 | 示例 |
+|---|---|---|
+| `/pic <描述>` | 直接文生图 | `/pic 一只在竹林中散步的猫` |
+| `/draw <文档ID> [--style 风格]` | 基于文档生成配图 | `/draw 862e0973 --style 水墨` |
+| `/daily [--topics 主题1,主题2]` | 生成每日知识卡片 | `/daily --topics 政策,补贴` |
+
+### 支持的图像风格
+
+- `简洁信息图`（默认）— 适合政策文档配图
+- `水墨` — 中国风水墨画风格
+- `赛博` — 赛博朋克风格
+- `绘本` — 儿童绘本风格
+- `极简卡片` — 适合知识卡片
+
+### 配置
+
+`.env` 文件中已包含生图配置：
+
+```env
+IMAGE_MODEL=agnes-image-2.1-flash
+IMAGE_SIZE=1024x1024
+IMAGE_RESPONSE_FORMAT=url
+```
+
+> **注意**：生图使用与 LLM 相同的 `AGNES_API_KEY`，无需额外配置。
+
+### 使用场景
+
+1. **问答配图**：生图后可配合 `/pic` 为知识内容添加可视化
+2. **文档插图**：为入库的文档自动生成主题配图
+3. **知识卡片**：每日回顾时生成可分享的摘要卡片
+4. **汇报材料**：基于文档内容生成配图，辅助制作汇报 PPT

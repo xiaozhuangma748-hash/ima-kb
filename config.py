@@ -33,6 +33,11 @@ class Settings:
     )
     llm_model: str = field(default_factory=lambda: _get_env("LLM_MODEL", "agnes-2.0-flash"))
 
+    # ---- 图像生成 (Agnes Image) ----
+    image_model: str = field(default_factory=lambda: _get_env("IMAGE_MODEL", "agnes-image-2.1-flash"))
+    image_size: str = field(default_factory=lambda: _get_env("IMAGE_SIZE", "1024x1024"))
+    image_response_format: str = field(default_factory=lambda: _get_env("IMAGE_RESPONSE_FORMAT", "url"))
+
     # ---- 存储 ----
     storage_path: Path = field(
         default_factory=lambda: PROJECT_ROOT / _get_env("STORAGE_PATH", "./storage")
@@ -76,9 +81,14 @@ class Settings:
         """BM25 索引文件路径。"""
         return self.storage_path / "bm25_index.pkl"
 
+    @property
+    def images_dir(self) -> Path:
+        """生成的图片存储目录。"""
+        return self.storage_path / "images"
+
     def ensure_dirs(self) -> None:
         """创建所有必要的存储目录。"""
-        for d in (self.storage_path, self.uploads_dir, self.chroma_dir, self.cache_dir):
+        for d in (self.storage_path, self.uploads_dir, self.chroma_dir, self.cache_dir, self.images_dir):
             d.mkdir(parents=True, exist_ok=True)
 
     def has_llm(self) -> bool:

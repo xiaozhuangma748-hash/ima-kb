@@ -41,7 +41,6 @@ async def qa_stream(
     async def _stream():
         """生成 SSE 事件流。"""
         try:
-            from core.pet.administrator import PetAdministrator
             from core.pet.storage import PetStorage
             from core.memory.store import MemoryStore
             from core.retrieval.hybrid import HybridRetriever
@@ -176,13 +175,11 @@ async def qa_stream(
             yield _build_sse_event("done", {"full_text": full_text})
 
             # 8. 更新记忆
-            if memory_store and pet:
+            if memory_store:
                 try:
-                    admin = PetAdministrator(
-                        pet=pet, storage=storage, memory_store=memory_store,
-                        hybrid_retriever=hybrid, reranker=reranker, llm=llm,
-                    )
-                    admin._update_memory(q, full_text)
+                    from core.memory.profile import ProfileManager
+                    pm = ProfileManager(memory_store)
+                    pm.update_from_query(q, full_text)
                 except Exception:
                     pass
 
