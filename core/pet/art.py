@@ -50,16 +50,23 @@ class ArtLibrary:
         level: int,
         small: bool = False,
     ) -> str:
-        """占位符。small=True 时返回更短的版本以满足缩略要求。"""
+        """占位符。small=True 时返回更短的版本以满足缩略要求。
+
+        采用 block-style 像素风格（与 HAOJIU 字体类似），避免 ??? 占位。
+        """
         branch_label = branch or "未分系"
         if small:
             return f"""
-   ???
- [{branch_label} Lv{level}]
+  ▄▄▄
+ ▄●●▄
+ ▀██▀
+[{branch_label} Lv{level}]
 """
         return f"""
-   ???
-  ( ? )
-   |||
+   ▄▄▄▄
+  ▄●  ●▄
+  █▄██▄█
+   ▀██▀
+    ▐  ▌
  [{branch_label} Lv{level}]
 """

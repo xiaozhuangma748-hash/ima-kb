@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [
     { name = "IMA" },
 ]
-keywords = ["knowledge-base", "rag", "bm25", "llm", "streamlit"]
+keywords = ["knowledge-base", "rag", "bm25", "llm"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
@@ -26,7 +26,6 @@ classifiers = [
 
 # 运行时依赖（与 requirements.txt 保持一致）
 dependencies = [
-    "streamlit>=1.32.0",
     "pandas>=2.0.0",
     "PyMuPDF>=1.24.0",
     "python-docx>=1.1.0",
@@ -42,6 +41,9 @@ dependencies = [
     "rich>=13.7.0",
     "prompt_toolkit>=3.0.0",
     "pydantic>=2.6.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -65,11 +67,12 @@ Homepage = "https://github.com/yourname/ima-kb"
 
 [tool.setuptools]
 # 显式指定包含哪些包（避免把 test_data、storage 误打包）
-packages = ["core", "core.classify", "core.ingestion", "core.llm", "core.qa", "core.search", "web", "web.pages"]
+packages = ["core", "core.classify", "core.ingestion", "core.llm", "core.qa", "core.search",
+    "core.retrieval", "core.memory", "core.persona", "core.pet", "core.pet.arts",
+    "core.session", "core.sync", "core.analyze", "core.report", "core.reader",
+    "core.agent", "core.graph", "core.classify", "core.ui",
+    "web", "web.routes"]
 # 根目录的顶层 .py 文件（run.py / repl.py / config.py）
 py-modules = ["run", "repl", "config"]
-# 包含非 Python 文件（如 web 模板）
+# 包含非 Python 文件
 include-package-data = true
-
-[tool.setuptools.package-data]
-web = ["*.py"]

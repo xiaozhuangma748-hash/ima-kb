@@ -19,6 +19,20 @@ import jieba
 from config import settings
 
 
+# ---- 抑制 jieba 首次加载时的 stdout 输出 ----
+def _suppress_jieba_init_output() -> None:
+    """jieba 首次调用时会打印 'Building prefix dict...' 到 stdout，这里静默完成初始化。"""
+    from contextlib import redirect_stdout
+    import io
+
+    with redirect_stdout(io.StringIO()):
+        # 触发字典加载，所有输出会被重定向到内存缓冲区
+        list(jieba.cut(""))
+
+
+_suppress_jieba_init_output()
+
+
 # ---- 停用词（无意义的常见词，不参与检索）----
 _STOP_WORDS: Set[str] = {
     "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",

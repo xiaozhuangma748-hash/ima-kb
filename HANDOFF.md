@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-07（P5 全部完成 + 宠物管理员 v4.0 + 混合检索 + 增量同步 + 子命令菜单）
+> 最后更新：2026-07-08（Web 后台 + 命令补全修复 + Markdown 渲染 + 启动页固定布局 + 宠物像素图/进度条 + 背包bug修复 + 图谱抽取优化 + 自动打开浏览器 + 工作流状态展示）
 
 ---
 
@@ -25,7 +25,7 @@
 |---|---|---|
 | **P1 骨架** | 项目结构 + 多格式解析 + SQLite 存储 + CLI 入库 | ✅ 完成 |
 | **P2 智能** | BM25 中文检索 + Agnes LLM 接入 + RAG 问答（流式/非流式） | ✅ 完成 |
-| **P3 体系** | Streamlit Web 界面 + 终端交互式 REPL + `ima` 全局命令 | ✅ 完成 |
+| **P3 体系** | 终端交互式 REPL + `ima` 全局命令 | ✅ 完成 |
 | **P4 增强** | OCR 补齐 + 自动标签 + 分发安装脚本 + Claude Code 风格 CLI + 知识图谱 | ✅ 完成 |
 | **P5 智能化** | 宠物管理员 v4.0 + 混合检索（BM25+向量+RRF+重排）+ 记忆系统 + 人格风格 + 增量同步 + 质量检查 + 近似去重 + 子命令菜单 + 数据分析 + 报告生成 | ✅ 完成 |
 
@@ -36,14 +36,15 @@
 - ✅ BM25 中文分词搜索（jieba）
 - ✅ RAG 问答带引用编号
 - ✅ 流式输出（已修复 Agnes 空 choices chunk 问题）
-- ✅ 多轮对话（REPL 保留 5 轮历史，Web session_state 保留全部）
-- ✅ Streamlit Web 界面（**5 个页面**：仪表盘/搜索/问答/知识图谱/入库）
+- ✅ 多轮对话（REPL 保留 5 轮历史）
 - ✅ `ima` 全局终端命令（pip install -e . 注册）
 - ✅ **OCR 补齐**（Tesseract + pytesseract，4 扫描 PDF + 4 PNG 入库）
 - ✅ **自动标签**（LLM 生成，27 文档共 67 个标签，可按标签筛选）
-- ✅ **REPL 命令自动补全**（prompt_toolkit，输入 `/` 弹出命令列表）
-- ✅ **Claude Code 风格 CLI**（ASCII Logo + 分栏面板 + 橙色提示符 + 流式 `⏺` 标记）
+- ✅ **REPL 命令自动补全**（prompt_toolkit，输入 `/` 弹出命令列表 + 中文描述 + 子命令中文描述）
+- ✅ **Claude Code 风格 CLI**（固定双栏欢迎面板 + ASCII Logo + 橙色提示符 + 流式 `⏺` 标记）
+- ✅ **AI 回答 Markdown 渲染**（`rich.Markdown` 渲染，**加粗**、列表、代码块等正确显示）
 - ✅ **知识图谱**（LLM 抽取实体关系，networkx 存储，vis.js 可视化）
+- ✅ **Web 后台**（`/web` 后台线程启动 FastAPI、`/web stop` 关闭，不阻塞 REPL）
 - ✅ **一键安装**（`install.sh` + `pyproject.toml`，支持 `--ocr` / `--dev` / `--no-venv` / `--vector`）
 - ✅ **宠物管理员 v4.0**（统一 AI 交互入口，4 种人格风格 scholar/warrior/artisan/neutral，像素风 ASCII 艺术）
 - ✅ **混合检索**（BM25 + 向量 bge-small-zh-v1.5 + RRF 融合 k=60 + LLM 重排序，四层流水线）
@@ -65,7 +66,6 @@
 |---|---|
 | 后端 | Python 3.9+（兼容 macOS 自带 3.9.6） |
 | CLI 框架 | click + rich + prompt_toolkit（补全 + `radiolist_dialog` 子命令菜单） |
-| Web 框架 | Streamlit |
 | 元数据库 | SQLite（单文件 metadata.db） |
 | 文档解析 | PyMuPDF / python-docx / openpyxl / python-pptx / trafilatura / **Pillow + pytesseract（OCR）** / **macOS textutil（.doc）** |
 | 中文检索 | jieba + 自实现 BM25 |
@@ -155,16 +155,6 @@ ima-kb/
 │   │   └── theme.py              # 终端主题
 │   └── storage.py                # SQLite 存储（documents/chunks 表 + tags + 向量同步）
 │
-├── web/
-│   ├── app.py                    # Streamlit 主入口（5 个页面）
-│   ├── pixel_theme.py            # 像素风主题
-│   └── pages/
-│       ├── dashboard.py          # 仪表盘
-│       ├── search_page.py        # 搜索页
-│       ├── qa_page.py            # AI 问答页（流式）
-│       ├── graph_page.py         # 知识图谱页
-│       └── ingest_page.py        # 入库管理页
-│
 ├── tests/                        # 153+ 测试
 │   ├── retrieval/                # 混合检索测试
 │   ├── memory/                   # 记忆系统测试
@@ -200,8 +190,8 @@ ima-kb/
 - 全局单例 `settings`
 
 ### `run.py` — CLI 入口
-- `cli` group（**注意**：之前的 bug 是 chat/web 命令放在 cli 定义之前导致 NameError，已修复，新增命令要放在 `cli` 之后）
-- **顶层命令**：`chat` `web` `ingest` `list` `search`（带 `--tag` 筛选） `ask` `show` `stats` `retag`（重打标签） `delete` `rebuild`
+- `cli` group（**注意**：之前的 bug 是 chat 命令放在 cli 定义之前导致 NameError，已修复，新增命令要放在 `cli` 之后）
+- **顶层命令**：`chat` `ingest` `list` `search`（带 `--tag` 筛选） `ask` `show` `stats` `retag`（重打标签） `delete` `rebuild`
 - **`graph` 子命令组**（5 个）：
   - `ima graph build [--force] [-d ID] [-n N]`：调 LLM 抽取实体关系构建图谱
   - `ima graph stats [-t TYPE]`：图谱统计 + 节点列表
@@ -210,12 +200,20 @@ ima-kb/
   - `ima graph clear`：清空图谱
 
 ### `repl.py` — IMA REPL（v4.0 · Claude Code 风格）
-- **欢迎面板**：ASCII Logo（IMA 字符艺术）+ 左右分栏（青色 Welcome / 黄色 Tips）
-- **命令补全**：prompt_toolkit WordCompleter，输入 `/` 弹出 13 个命令列表 + 描述
+- **欢迎面板**：固定双栏布局（左侧 Welcome / 右侧 Tips），底部边框严格对齐，不再自适应缩放
+- **命令补全**：自定义 `CommandCompleter`（继承 `Completer`）取代旧 `NestedCompleter`
+  - 输入 `/` 弹出所有命令 + 中文描述
+  - 输入 `/s` 自动匹配 search/session/show/stats/sync 等 s 开头命令
+  - 子命令也带中文描述（如 `/memory ` 弹出 clear清空/format格式/style风格...）
+  - 支持多级嵌套（如 `/memory format ` → table表格/list列表/prose散文）
+  - 别名自动解析（`/m` → `/memory` 子命令）
+- **AI 回答 Markdown 渲染**：`_render_answer()` 用 `rich.Markdown(result.text)` 渲染，**粗体**、列表、标题正确显示
 - **橙色 `>` 提示符**（Claude Code 风格）
-- **AI 对话**：橙色 `⏺` 圆点标记 + 首 token 显示 Spinner + 流式输出
-- 命令：`/help /search /ingest /list /show /tags /tag /delete /stats /rebuild /clear /exit /quit`
+- **AI 对话**：橙色 `⏺` 圆点标记 + 首 token Spinner + 流式输出
+- **Web 后台**：`/web` 后台线程启动 FastAPI、`/web stop` 关闭；支持 `--host --port` 参数
+- 命令：`/help /search /ingest /list /show /tags /tag /delete /stats /rebuild /clear /web /web stop /exit /quit`
 - 多轮对话：保留最近 10 条 history（5 轮）
+- **已移除**：自适应 Logo 切换（`_pick_logo`、`ASCII_LOGO_SMALL`、`ASCII_LOGO_MINI`）
 
 ### `core/ingestion/parser.py` — 多格式解析
 - **支持 11 种格式**：PDF/Word(.docx/.doc)/Excel/PPT/MD/TXT/HTML/代码/.png/.jpg/.tif/.bmp/.webp
@@ -273,7 +271,7 @@ ima-kb/
 ### `ima-command.zsh` — 全局命令（保留兼容）
 - 已 `source` 到 `~/.zshrc`
 - 现已可由 `pip install -e .` 替代（推荐用 pip install）
-- 用法：`ima` / `ima web` / `ima search "词"` / `ima ask "问题"`
+- 用法：`ima` / `ima search "词"` / `ima ask "问题"`
 
 ---
 
@@ -282,7 +280,6 @@ ima-kb/
 ### 终端（推荐）
 ```bash
 ima                    # 进入 REPL（Claude Code 风格界面）
-ima web                # 启动 Web（http://localhost:8501）
 ima search "骨灰"      # BM25 搜索
 ima search "骨灰" --tag 殡葬改革  # 按标签筛选搜索
 ima ask "退役军人抚恤金？"  # 单次 RAG 问答
@@ -302,6 +299,8 @@ ima graph export       # 导出 HTML 可视化（storage/graph.html）
 > /search 骨灰
 > /tags                    # 查看所有标签
 > /tag 殡葬改革           # 按标签筛选文档
+> /web                     # 启动 Web 后台
+> /web stop                # 停止 Web 后台
 > /clear                  # 清空对话
 > /exit
 ```
@@ -348,13 +347,12 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 
 1. **jieba 启动提示**：每次启动会输出 `Building prefix dict from the default dictionary ...`，正常现象，可忽略
 2. **流式 chunk 空 choices**：Agnes 偶尔发空 chunk，已在 `client.py:88` 修复
-3. **macOS Streamlit 沙盒**：启动 Web 时设了 `STREAMLIT_HOME=/tmp` 避免创建 `~/.streamlit` 权限问题（`run.py:115`）
-4. **.env 不要提交**：包含真实 API Key，`.gitignore` 已忽略
-5. **storage/ 不要提交**：用户私有数据，`.gitignore` 已忽略
-6. **Python 版本**：项目兼容 Python 3.9+（macOS 自带 3.9.6），但 3.10+ 体验更好
-7. **prompt_toolkit 中文宽度**：补全菜单已用 wcwidth 处理中文对齐，若仍有偏移可升级 prompt_toolkit
-8. **`def list()` 命名陷阱**：曾用 `list()` 作函数名覆盖内置 `list()`，已改名为 `list_docs` 并用 `@cli.command(name="list")` 修复
-9. **pyproject.toml py-modules**：因 `run.py` 在根目录不在包内，必须显式声明 `py-modules = ["run", "repl", "config"]`，否则 `pip install -e .` 后 `ima` 找不到 `run` 模块
+3. **.env 不要提交**：包含真实 API Key，`.gitignore` 已忽略
+4. **storage/ 不要提交**：用户私有数据，`.gitignore` 已忽略
+5. **Python 版本**：项目兼容 Python 3.9+（macOS 自带 3.9.6），但 3.10+ 体验更好
+6. **prompt_toolkit 中文宽度**：补全菜单已用 wcwidth 处理中文对齐，若仍有偏移可升级 prompt_toolkit
+7. **`def list()` 命名陷阱**：曾用 `list()` 作函数名覆盖内置 `list()`，已改名为 `list_docs` 并用 `@cli.command(name="list")` 修复
+8. **pyproject.toml py-modules**：因 `run.py` 在根目录不在包内，必须显式声明 `py-modules = ["run", "repl", "config"]`，否则 `pip install -e .` 后 `ima` 找不到 `run` 模块
 
 ---
 
@@ -387,11 +385,7 @@ ima
 > 退役军人抚恤金有什么新规定？
 > /exit
 
-# 7. Web（含知识图谱页）
-ima web
-# 浏览器打开 http://localhost:8501 → 切到「🌐 知识图谱」页
-
-# 8. 导出图谱 HTML
+# 7. 导出图谱 HTML
 ima graph export
 open storage/graph.html
 ```
@@ -404,15 +398,100 @@ open storage/graph.html
 
 1. **为什么用 BM25 而不是向量检索**：用户资料以政策文档为主，关键词匹配足够准；BM25 免费、本地、秒级，向量检索需要额外 API 费用和向量化预处理
 2. **为什么用 Agnes 而不是 DeepSeek**：用户已有 Agnes API Key，先跑通再说；接口是 OpenAI 兼容的，后续切换其他 LLM 只改 `config.py`
-3. **为什么用 Streamlit 而不是 React**：纯 Python，开发快，单文件部署，个人用够了
-4. **为什么用 ChromaDB + BM25 混合**（P5 更新）：BM25 关键词匹配 + 向量语义检索 + RRF 融合 + LLM 重排，四层流水线互补；向量库不可用时自动降级为纯 BM25
-5. **`ima` 命令通过 pip install -e . 注册**：比 zsh function 更标准，自动同步更新；老的 `ima-command.zsh` 保留兼容
-6. **为什么用 prompt_toolkit 而不是 rich Prompt**：rich Prompt 不支持弹窗式补全菜单，prompt_toolkit 的 WordCompleter 是终端补全标准方案；子命令菜单用 `radiolist_dialog`（带边框、方向键导航）
-7. **为什么用 networkx + vis.js 而不是 pyvis**：networkx 提供图算法支持（degree、neighbors 等），vis.js 直接 CDN 嵌入无依赖，pyvis 只是对 vis.js 的薄包装
-8. **为什么图谱抽取用 temperature=0.1**：实体关系抽取要求确定性输出，低温保证 LLM 输出稳定可解析的 JSON
-9. **为什么宠物管理员是统一入口**（P5 新增）：所有 AI 交互走 PetAdministrator，串联检索→重排→prompt→LLM→引用→记忆→宠物经验，失败时降级到 RAGChain
-10. **为什么主题提取用 jieba 分词**（P5 新增）：比简单 `[:10]` 截断更智能，"骨灰安置政策"→"骨灰安置"；并加了 4 级过滤（空白/停用词/单字/代词开头）
+3. **为什么用 ChromaDB + BM25 混合**（P5 更新）：BM25 关键词匹配 + 向量语义检索 + RRF 融合 + LLM 重排，四层流水线互补；向量库不可用时自动降级为纯 BM25
+4. **`ima` 命令通过 pip install -e . 注册**：比 zsh function 更标准，自动同步更新；老的 `ima-command.zsh` 保留兼容
+5. **为什么用 prompt_toolkit 而不是 rich Prompt**：rich Prompt 不支持弹窗式补全菜单，prompt_toolkit 的 Completer 是终端补全标准方案；自定义 `CommandCompleter` 支持中文描述 + 子命令嵌套；子命令菜单用 `radiolist_dialog`（带边框、方向键导航）
+6. **为什么用 networkx + vis.js 而不是 pyvis**：networkx 提供图算法支持（degree、neighbors 等），vis.js 直接 CDN 嵌入无依赖，pyvis 只是对 vis.js 的薄包装
+7. **为什么图谱抽取用 temperature=0.1**：实体关系抽取要求确定性输出，低温保证 LLM 输出稳定可解析的 JSON
+8. **为什么宠物管理员是统一入口**（P5 新增）：所有 AI 交互走 PetAdministrator，串联检索→重排→prompt→LLM→引用→记忆→宠物经验，失败时降级到 RAGChain
+9. **为什么主题提取用 jieba 分词**（P5 新增）：比简单 `[:10]` 截断更智能，"骨灰安置政策"→"骨灰安置"；并加了 4 级过滤（空白/停用词/单字/代词开头）
 
 ---
 
 **项目状态**：P1-P5 全部完成，IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），153+ 测试通过，可用于日常使用。后续优化方向见上方「后续可优化方向」章节（5 项剩余，已按难度排序）。
+
+---
+
+## 📋 今日工作总结（2026-07-08）
+
+### ✅ 已完成
+
+| # | 任务 | 影响文件 | 说明 |
+|---|---|---|---|
+| 1 | **修复子命令补全消失** | `repl.py` | 输入空格后 `parts` 丢失尾部空格导致找不到子命令，增加 `trailing` 检测 |
+| 2 | **子命令中文描述** | `repl.py` | 新增 `_SUB_MENU_DESC` 字典（tuple path → 中文描述），补全菜单显示中文解释 |
+| 3 | **修复 Markdown 渲染** | `repl.py` | `_render_answer` 改用 `rich.Markdown(result.text)`，**粗体**、列表、标题正确显示 |
+| 4 | **启动页固定布局** | `repl.py` | 移除自适应宽度逻辑，改用 `Table.grid(ratio=1)` 实现固定双栏布局 |
+| 5 | **底部边框对齐** | `repl.py` | 用 `Console.capture()` 动态测量左侧面板高度，统一设置两个面板 `height` |
+| 6 | **移除死代码** | `repl.py` | 删除 `_pick_logo`、`ASCII_LOGO_SMALL`、`ASCII_LOGO_MINI` |
+| 7 | **修复主题切换丢宠物** | `repl.py` | `_cmd_theme` 补上 `pet=self.pet` 参数 |
+| 8 | **更新文档** | `HANDOFF.md`, `INSTALL.md` | 同步所有变更到交接文档和安装指南 |
+| 9 | **宠物 block-style 像素化 + 进度条** | `core/pet/arts/`、`core/pet/art.py`、`repl.py` | 补充 scholar/warrior/artisan 1-5 级 15 个更精致的像素图；fallback 占位符也改为 block-style；`/pet` 状态数值改为彩色进度条（饱食/心情/能量/清洁/经验） |
+| 10 | **修复背包显示 + use 序号** | `repl.py` | `buy()` 存的 `{item_id, count}` 没有 name/effect，背包显示从 `shop.list_items()` 查找名称和效果；`/pet use 1` 支持序号映射到 item_id |
+| 11 | **智能路由 404 降级提示** | `repl.py` | `/smart` LLM 调用失败时检测 404 → 给出切换模型建议 + 手动命令替代方案 |
+| 12 | **图谱抽取优化** | `core/graph/extractor.py`、`repl.py` | 提示词放宽为非限定"政策文档"；内容<50字跳过LLM调用；空结果显示"无可抽取实体"而非模糊错误 |
+| 13 | **图谱导出自动打开浏览器** | `repl.py`、`run.py` | `/graph export` 完成后 `webbrowser.open()` 自动在浏览器中打开，不再需要手动 `open` |
+| 14 | **工作流 suggest 无参数显示状态** | `repl.py` | `/memory workflow suggest` 不加参数时显示当前开关状态，不再报"无效值" |
+| 15 | **全量命令操作逻辑统计** | — | 梳理 67+ 命令的操作逻辑，含 15 类别、分发流程、核心方法映射 |
+
+### ❌ 未完成（下一步）
+
+| # | 任务 | 优先级 | 说明 |
+|---|---|---|---|
+| 1 | **Web 前端开发** | 🔴 高 | 旧 Streamlit 页面已删除，新目录 `web/routes/` `web/static/` `web/templates/` 已创建但页面为空 |
+| 2 | **Web 原型图实现** | 🔴 高 | 7 个页面未实现：[docs/prototype/web-prototype.html](docs/prototype/web-prototype.html) |
+| 3 | **PDF 重新解析** | 🟡 中 | OCR 已安装可用，但之前入库的 PDF 是在装 OCR 前入库的，需 `/reparse` 重新解析提取内容 |
+| 4 | **Embedding 缓存层** | 🟡 低 | `vector.py` 可加 SQLite 缓存（chunk hash → embedding） |
+| 5 | **OCR 优化** | 🟡 低 | 可选替换为 PaddleOCR |
+
+---
+
+## 📅 明日待办（Web 端开发）
+
+### 任务目标
+按 PRD 重新开发 Web 端，替换已删除的旧 `web/` 目录。原型图沿用单文件多页面方案，不拆分。
+
+### 设计基准
+- **原型图**：[docs/prototype/web-prototype.html](docs/prototype/web-prototype.html)（单文件含 7 页面，侧边栏 `data-page` 切换）
+- **PRD**：[docs/PRD-web-backend.md](docs/PRD-web-backend.md)
+- **设计风格**：亮色简约风（白色背景 + 橙色主色 #F59E0B + 青色强调 #06B6D4 + 卡片阴影 + 顶部色条）
+- **设计令牌**：见原型图 `:root` CSS 变量（--bg-canvas / --bg-card / --accent-orange 等）
+
+### 原型图页面清单（按 PRD 优先级）
+
+| 优先级 | 页面 | 原型图 ID | 核心元素 | 开发复用模块 |
+|---|---|---|---|---|
+| **P0** | 💬 AI 问答 | `#page-qa` | 左右分栏(聊天 2/3 + 引用 1/3) · 人格 chips · 消息气泡 · 引用编号卡 | PetAdministrator + Reranker |
+| **P0** | 📥 文档入库 | `#page-ingest` | 拖拽上传区 · URL/剪贴板入库 · 入库进度 · 最近文档卡 | core/ingestion + Storage |
+| **P0** | 🔍 搜索 | `#page-search` | 搜索框 · 标签筛选 · 结果卡(相关度色条 + 高亮) | HybridRetriever |
+| **P0** | 📊 数据分析 | `#page-analyze` | Excel 上传 · Sheet 切换 · 统计表 · 字符图 · AI 解读 | DataAnalyzer |
+| **P1** | 📈 仪表盘 | `#page-dashboard` | 4 指标卡(顶部色条) · 质量告警 · 标签分布 · 最近活动 | Storage.stats + HealthChecker |
+| **P1** | 🕸️ 知识图谱 | `#page-graph` | 4 统计卡 · vis.js 网络(亮色) · 节点表格 · 关系查询 · 导出 | GraphStore |
+| **P2** | 🐾 宠物管理 | `#page-pet` | ASCII 艺术 · HTML 状态条 · 4 人格卡 · 经验记录 | Pet + PersonaManager |
+
+### 开发要点
+1. **严格对照原型图**：用 `st.markdown(unsafe_allow_html=True)` 注入自定义 HTML/CSS，不要依赖 Streamlit 原生组件外观
+2. **左右分栏**：`st.columns([2, 1])` 实现问答页聊天 + 引用分区
+3. **顶部色条指标卡**：`position:absolute; top:0; height:3px` 叠加在白卡上
+4. **状态条**：HTML `<div>` 进度条（宠物心情/饥饿/能量/洁净）
+5. **知识图谱**：vis.js 通过 `streamlit.components.v1.components.html()` 嵌入，亮色主题
+6. **内网部署**：`/web --host 0.0.0.0 --port 8501` 启动、`/web stop` 停止；Web 运行在后台线程，不阻塞 REPL
+
+### 验收标准
+- [ ] 7 个页面 HTTP 200，无运行时错误
+- [ ] 每个页面视觉与原型图一致（分栏/色条/状态条/卡片样式）
+- [ ] AI 问答能流式输出 + 引用编号
+- [ ] 文档入库支持拖拽 + 进度显示
+- [ ] 搜索结果有相关度色条 + 关键词高亮
+- [ ] 知识图谱 vis.js 节点可交互（拖拽/缩放）
+- [ ] `ima web -h 0.0.0.0` 内网可访问
+
+### 当前 Web 状态
+- 旧 Streamlit 代码（`web/pages/*.py`、`web/pixel_theme.py`）已全部删除
+- 新 FastAPI 骨架已创建：`web/routes/`、`web/static/`、`web/templates/`（页面内容为空，待填充）
+- `web/app.py` 已修改为 FastAPI 基础服务
+- REPL 中 `/web` 和 `/web stop` 命令可用（后台线程启动/关闭 Web 服务）
+- 7 个原型页面均未实现，需从头开发
+
+### 注意
+- `streamlit` 依赖已从 requirements.txt / pyproject.toml 移除，如决定继续用 Streamlit 需加回；如用 FastAPI 原生方案则不需要

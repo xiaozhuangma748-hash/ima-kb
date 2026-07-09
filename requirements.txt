@@ -1,8 +1,5 @@
-# ===== Web 框架 =====
-streamlit>=1.32.0
+# ===== 数据处理 =====
 pandas>=2.0.0
-fastapi>=0.110.0          # 备用
-uvicorn>=0.27.0
 
 # ===== 文档解析 =====
 PyMuPDF>=1.24.0            # PDF
@@ -35,3 +32,8 @@ click>=8.1.0               # CLI 框架
 rich>=13.7.0               # 终端美化输出
 prompt_toolkit>=3.0.0      # REPL 输入补全（命令自动提示）
 pydantic>=2.6.0            # 数据校验
+
+# ===== Web 后台 =====
+fastapi>=0.110.0           # Web 框架
+uvicorn>=0.27.0            # ASGI 服务器
+python-multipart>=0.0.9    # 文件上传

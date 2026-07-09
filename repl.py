@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -30,7 +31,7 @@ from rich.align import Align
 from rich.spinner import Spinner
 from rich.live import Live
 from prompt_toolkit import prompt as pt_prompt
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.completion import Completer, Completion, NestedCompleter
 from prompt_toolkit.styles import Style as PtStyle
 
 from config import settings
@@ -63,7 +64,7 @@ console = Console()
 # Claude Code 风格界面元素
 # ============================================================
 
-# ASCII 艺术字 Logo（IMA）— 三种尺寸，按终端宽度自适应
+# ASCII 艺术字 Logo（IMA）
 ASCII_LOGO_LARGE = """
 ██╗  ██╗ █████╗ ██████╗ ██╗███╗   ██╗
 ██║  ██║██╔══██╗██╔══██╗██║████╗  ██║
@@ -73,64 +74,29 @@ ASCII_LOGO_LARGE = """
 ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝╚═╝  ╚═══╝
 """
 
-ASCII_LOGO_SMALL = """
-█╗  ██╗ █████╗ ██████╗ ██╗███╗   ██╗
-██║  ██║██╔══██╗██╔══██╗██║████╗  ██║
-███████║███████║██║  ██║██║██╔██╗ ██║
-██╔══██║██╔══██║██║  ██║██║██║╚██╗██║
-██║  ██║██║  ██║██████╔╝██║██║ ╚████║
-╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝╚═╝  ╚═══╝
-"""
-
-ASCII_LOGO_MINI = "📚 IMA · 个人知识库"
-
-
-def _pick_logo(width: int) -> str:
-    """根据终端宽度选 Logo：>=80 用大版，>=50 用小版，再窄用纯文字。"""
-    if width >= 80:
-        return ASCII_LOGO_LARGE
-    if width >= 50:
-        return ASCII_LOGO_SMALL
-    return ASCII_LOGO_MINI
-
 
 def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"] = None) -> None:
-    """渲染自适应欢迎面板：根据终端宽度切换布局 + 应用当前主题配色。
-
-    - 宽屏 (>=90 列)：顶部 Logo + 左右分栏（Welcome / Tips）
-    - 中屏 (60-89 列)：顶部 Logo + 纵向堆叠两个面板
-    - 窄屏 (<60 列)：精简 Logo + 纵向堆叠
-    """
-    width = console.width
+    """渲染欢迎面板：固定双栏布局 + 主题配色，底部边框对齐。"""
     t = get_theme()  # 当前主题
 
     # ---- 顶部 Logo 面板 ----
-    logo_str = _pick_logo(width)
+    logo_str = ASCII_LOGO_LARGE
     subtitle = Text("✨ 个人知识库 · 智能问答终端 v4.0", style=t.colors["secondary"])
-    if logo_str == ASCII_LOGO_MINI:
-        # 窄屏：Logo 和副标题同一行
-        logo_panel = Panel(
-            Align.center(Text.from_markup(f"[{t.colors['text_title']}]{logo_str}[/{t.colors['text_title']}]  [{t.colors['secondary']}]{subtitle}[/{t.colors['secondary']}]")),
-            border_style=t.colors["border_logo"],
-            padding=(0, 1),
-        )
-    else:
-        logo_text = Text(logo_str, style=t.colors["text_title"])
-        logo_panel = Panel(
-            Align.center(Group(logo_text, Text(""), subtitle)),
-            border_style=t.colors["border_logo"],
-            padding=(0, 2),
-        )
+    logo_text = Text(logo_str, style=t.colors["text_title"])
+    logo_panel = Panel(
+        Align.center(Group(logo_text, Text(""), subtitle)),
+        border_style=t.colors["border_logo"],
+        padding=(0, 2),
+    )
     console.print(logo_panel)
 
     # ---- 左栏：知识库状态 ----
     status_line = "[green]✓ 在线[/green]" if llm_available else "[red]✗ 未配置[/red]"
-    # 宠物紧凑横版：1 行头像 + 1 行属性条（共 2 行）
     pet_line1, pet_line2 = _render_pet_compact(pet) if pet else _render_pet_empty_compact()
     left_content = Group(
-        pet_line1,  # 🐾 小白 (Lv5 学者)
-        pet_line2,  # ❤️80 ⚡90 😊75 🛁88 ✨120/200
-        Text("─" * 30, style="dim"),  # 分隔线
+        pet_line1,
+        pet_line2,
+        Text("─" * 30, style="dim"),
         Text("📊 知识库状态", style=f"bold {t.colors['secondary']}"),
         Text(""),
         Text.from_markup(f"  文档总数   [{t.colors['secondary']}]{stats['documents']}[/{t.colors['secondary']}]"),
@@ -143,56 +109,53 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
         Text(""),
         Text.from_markup(f"  当前主题   [{t.colors['primary']}]{t.label}[/{t.colors['primary']}] [dim](/theme 切换)[/dim]"),
     )
-    left_panel = Panel(
+
+    # ---- 右栏：使用提示 ----
+    tips_lines = [
+        Text("  直接输入问题    AI 问答（多轮对话）", style="white"),
+        Text("  输入 /          弹出命令列表", style="white"),
+        Text("  /search <词>    BM25 搜索", style="white"),
+        Text("  /ingest <路径>  入库文件", style="white"),
+        Text("  /analyze <路径> 数据分析", style="white"),
+        Text("  /read <id>      智能阅读", style="white"),
+        Text("  /compare A B    智能对比", style="white"),
+        Text("  /graph stats    知识图谱", style="white"),
+        Text("  /theme          切换主题", style="white"),
+        Text("  /exit           退出", style="white"),
+    ]
+    right_content = Group(
+        Text("🎯 快速开始", style=f"bold {t.colors['primary']}"),
+        Text(""),
+        *tips_lines,
+    )
+
+    # ---- 先测量左侧面板在半宽下的高度，让两边底部对齐 ----
+    target_width = max(30, (console.width - 1) // 2)
+    measure_console = Console(
+        force_terminal=True,
+        width=target_width,
+        height=console.height,
+        color_system=console.color_system,
+    )
+    tmp_left_panel = Panel(
         left_content,
         border_style=t.colors["border_welcome"],
         title=f"[bold {t.colors['secondary']}]Welcome[/bold {t.colors['secondary']}]",
         title_align="left",
         padding=(1, 2),
     )
+    with measure_console.capture() as capture:
+        measure_console.print(tmp_left_panel)
+    panel_height = len(capture.get().splitlines())
 
-    # ---- 右栏：使用提示（根据宽度调整提示条数）----
-    if width >= 100:
-        tips_lines = [
-            Text("  直接输入问题    AI 问答（多轮对话）", style="white"),
-            Text("  输入 /          弹出命令列表", style="white"),
-            Text("  /search <词>    BM25 搜索", style="white"),
-            Text("  /ingest <路径>  入库文件", style="white"),
-            Text("  /analyze <路径> 数据分析", style="white"),
-            Text("  /read <id>      智能阅读", style="white"),
-            Text("  /compare A B    智能对比", style="white"),
-            Text("  /graph stats    知识图谱", style="white"),
-            Text("  /theme          切换主题", style="white"),
-            Text("  /exit           退出", style="white"),
-        ]
-    elif width >= 70:
-        tips_lines = [
-            Text("  输入问题       AI 问答", style="white"),
-            Text("  /search <词>   BM25 搜索", style="white"),
-            Text("  /ingest <路径> 入库文件", style="white"),
-            Text("  /analyze <路径> 数据分析", style="white"),
-            Text("  /read <id>     智能阅读", style="white"),
-            Text("  /compare A B   智能对比", style="white"),
-            Text("  /theme         切换主题", style="white"),
-            Text("  /help          帮助", style="white"),
-            Text("  /exit          退出", style="white"),
-        ]
-    else:
-        tips_lines = [
-            Text("  输入问题    AI 问答", style="white"),
-            Text("  /search     搜索", style="white"),
-            Text("  /ingest     入库", style="white"),
-            Text("  /analyze    分析", style="white"),
-            Text("  /read       阅读", style="white"),
-            Text("  /theme      主题", style="white"),
-            Text("  /help       帮助", style="white"),
-            Text("  /exit       退出", style="white"),
-        ]
-
-    right_content = Group(
-        Text("🎯 快速开始", style=f"bold {t.colors['primary']}"),
-        Text(""),
-        *tips_lines,
+    # ---- 使用相同高度构建两个面板 ----
+    left_panel = Panel(
+        left_content,
+        border_style=t.colors["border_welcome"],
+        title=f"[bold {t.colors['secondary']}]Welcome[/bold {t.colors['secondary']}]",
+        title_align="left",
+        padding=(1, 2),
+        height=panel_height,
     )
     right_panel = Panel(
         right_content,
@@ -200,16 +163,15 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
         title=f"[bold {t.colors['primary']}]Tips for getting started[/bold {t.colors['primary']}]",
         title_align="left",
         padding=(1, 2),
+        height=panel_height,
     )
 
-    # ---- 根据宽度决定布局：宽屏左右分栏，窄屏纵向堆叠 ----
-    if width >= 90:
-        # 左右分栏（每个面板宽度自适应剩余空间）
-        console.print(Columns([left_panel, right_panel], expand=True, equal=True))
-    else:
-        # 纵向堆叠
-        console.print(left_panel)
-        console.print(right_panel)
+    # ---- 固定左右分栏 ----
+    grid = Table.grid(expand=True, padding=(0, 1))
+    grid.add_column(ratio=1)
+    grid.add_column(ratio=1)
+    grid.add_row(left_panel, right_panel)
+    console.print(grid)
     console.print()
 
 
@@ -237,6 +199,26 @@ def _render_pet_empty_compact() -> tuple:
         Text.from_markup("  🐣 [bold magenta]虚拟宠物[/bold magenta] [dim]/pet adopt 领养[/dim]"),
         Text(""),  # 空行占位
     )
+
+
+def _render_bar(value: int, width: int = 16) -> str:
+    """渲染一个进度条（0-100）。
+
+    返回 rich markup 字符串，颜色随数值变化：
+    - >=70 绿色
+    - >=40 黄色
+    - <40  红色
+    """
+    value = max(0, min(100, value))
+    filled = round(value / 100 * width)
+    empty = width - filled
+    if value >= 70:
+        color = "green"
+    elif value >= 40:
+        color = "yellow"
+    else:
+        color = "red"
+    return f"[{color}]{'█' * filled}[/][dim]{'░' * empty}[/dim]"
 
 
 # 帮助文本
@@ -275,7 +257,7 @@ HELP_TEXT = """
 - [cyan]/rebuild [--vector][/cyan]  重建 BM25 索引（--vector 同时重建向量索引并热更新）
 - [cyan]/retag [-f] [-d ID][/cyan]   重新生成/补全文档标签（-f 强制全部）
 - [cyan]/watch <目录>[/cyan]         监控文件夹自动入库（Ctrl+C 退出）
-- [cyan]/web [-p 端口][/cyan]        启动 Streamlit Web 界面
+- [cyan]/web [-p 端口][/cyan]        启动 Web 后台（FastAPI + 单页 HTML）
 - [cyan]/session <子命令>[/cyan]     会话管理（save/load/list/export）
   例: [dim]/session save[/dim] / [dim]/session list[/dim] / [dim]/session load xxx[/dim]
 - [cyan]/graph <子命令>[/cyan]       知识图谱（build/stats/neighbors/export/clear）
@@ -298,7 +280,7 @@ HELP_TEXT = """
 - AI 回答带 [1][2] 编号，对应 /stats 后的引用来源
 - 命令可以简写：[cyan]/s 骨灰[/cyan] = [cyan]/search 骨灰[/cyan]
 - 复杂任务用 [cyan]/agent[/cyan]，简单总结用 [cyan]/smart[/cyan]
-- 输入主命令回车会弹出子命令菜单：[cyan]/memory[/cyan] → 显示 11 个子命令供选择
+- 输入 [cyan]/memory[/cyan] 回车显示内联帮助，直接输入 [cyan]/memory clear[/cyan] 或 [cyan]/m c[/cyan] 执行
 """
 
 
@@ -358,13 +340,178 @@ COMMAND_LIST = [
     ("/quit",    "退出"),
 ]
 
-# WordCompleter：输入 / 时自动弹出命令列表
-_command_completer = WordCompleter(
-    words=[cmd for cmd, _ in COMMAND_LIST],
-    meta_dict={cmd: desc for cmd, desc in COMMAND_LIST},
-    sentence=True,
-    ignore_case=True,
-)
+# NestedCompleter：输入命令+空格后自动弹出子命令补全
+# 格式：命令 → 子命令 → 选项（多级嵌套）
+_SUB_MENU_NESTED = {
+    '/memory': {
+        'clear': None,
+        'format': {'table': None, 'list': None, 'prose': None, 'auto': None, 'none': None},
+        'style': {'scholar': None, 'warrior': None, 'artisan': None, 'auto': None},
+        'topic': {'add': None, 'remove': None, 'clear': None},
+        'region': {'add': None, 'remove': None, 'clear': None},
+        'task': {'add': None, 'done': None, 'cancel': None, 'reopen': None, 'start': None, 'delete': None},
+        'tasks': None,
+        'workflow': {'clear': None, 'suggest': None},
+    },
+    '/pet': {
+        'feed': None, 'play': None, 'train': None, 'wash': None, 'sleep': None,
+        'tasks': None, 'shop': None, 'bag': None, 'reset': None,
+    },
+    '/graph': {
+        'stats': None, 'build': None, 'neighbors': None, 'export': None, 'clear': None,
+    },
+    '/sync': {'reset': None},
+    '/session': {'save': None, 'load': None, 'list': None, 'export': None, 'delete': None},
+    '/tag': {'rename': None, 'merge': None},
+    '/dedup': {'delete': None},
+    '/health': {'list': None},
+}
+
+# 子命令中文描述（path → 描述，path 是命令+各层级子命令组成的 tuple）
+_SUB_MENU_DESC = {
+    ('/memory', 'clear'): '清空所有记忆',
+    ('/memory', 'format'): '设置输出格式',
+    ('/memory', 'format', 'table'): '表格',
+    ('/memory', 'format', 'list'): '列表',
+    ('/memory', 'format', 'prose'): '散文',
+    ('/memory', 'format', 'auto'): '自动',
+    ('/memory', 'format', 'none'): '无',
+    ('/memory', 'style'): '切换人格风格',
+    ('/memory', 'style', 'scholar'): '学者风格',
+    ('/memory', 'style', 'warrior'): '战士风格',
+    ('/memory', 'style', 'artisan'): '工匠风格',
+    ('/memory', 'style', 'auto'): '自动',
+    ('/memory', 'topic'): '管理主题偏好',
+    ('/memory', 'topic', 'add'): '添加',
+    ('/memory', 'topic', 'remove'): '移除',
+    ('/memory', 'topic', 'clear'): '清空',
+    ('/memory', 'region'): '管理地区偏好',
+    ('/memory', 'region', 'add'): '添加',
+    ('/memory', 'region', 'remove'): '移除',
+    ('/memory', 'region', 'clear'): '清空',
+    ('/memory', 'task'): '管理任务',
+    ('/memory', 'task', 'add'): '添加',
+    ('/memory', 'task', 'done'): '完成',
+    ('/memory', 'task', 'cancel'): '取消',
+    ('/memory', 'task', 'reopen'): '重新打开',
+    ('/memory', 'task', 'start'): '开始',
+    ('/memory', 'task', 'delete'): '删除',
+    ('/memory', 'tasks'): '查看任务列表',
+    ('/memory', 'workflow'): '清空/推荐工作流',
+    ('/memory', 'workflow', 'clear'): '清空',
+    ('/memory', 'workflow', 'suggest'): '推荐工作流',
+    ('/pet', 'feed'): '喂食',
+    ('/pet', 'play'): '玩耍',
+    ('/pet', 'train'): '训练',
+    ('/pet', 'wash'): '洗澡',
+    ('/pet', 'sleep'): '睡觉',
+    ('/pet', 'tasks'): '查看任务',
+    ('/pet', 'shop'): '商店',
+    ('/pet', 'bag'): '背包',
+    ('/pet', 'reset'): '重置宠物',
+    ('/graph', 'stats'): '统计信息',
+    ('/graph', 'build'): '构建图谱',
+    ('/graph', 'neighbors'): '查询邻居',
+    ('/graph', 'export'): '导出 HTML',
+    ('/graph', 'clear'): '清空图谱',
+    ('/sync', 'reset'): '清空追踪记录',
+    ('/session', 'save'): '保存会话',
+    ('/session', 'load'): '加载会话',
+    ('/session', 'list'): '会话列表',
+    ('/session', 'export'): '导出会话',
+    ('/session', 'delete'): '删除会话',
+    ('/tag', 'rename'): '重命名标签',
+    ('/tag', 'merge'): '合并标签',
+    ('/dedup', 'delete'): '删除近似重复',
+    ('/health', 'list'): '列出质量问题',
+}
+
+# 别名 → 完整命令
+_CMD_ALIASES = {
+    '/s': '/search', '/l': '/list', '/sh': '/show', '/st': '/stats',
+    '/i': '/ingest', '/r': '/read', '/a': '/agent', '/t': '/tag',
+    '/m': '/memory', '/g': '/graph', '/p': '/pet', '/h': '/help',
+    '/q': '/quit',
+}
+
+
+class CommandCompleter(Completer):
+    """命令补全器：支持中文描述 + 子命令嵌套。"""
+
+    def __init__(self, commands, sub_menus, sub_desc):
+        self._cmd_meta = dict(commands)       # 命令 → 中文描述
+        self._sub_menus = sub_menus           # 完整命令 → 子命令字典
+        self._sub_desc = sub_desc           # tuple path → 子命令描述
+
+    def _resolve(self, cmd: str) -> str:
+        """解析别名到完整命令名。"""
+        return _CMD_ALIASES.get(cmd, cmd)
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor.lstrip()
+        parts = text.split() if text else []
+        trailing = text.endswith(" ")              # 是否已按空格 → 进入下一级
+
+        if not parts:
+            # 空输入 → 显示所有命令
+            for cmd, meta in sorted(self._cmd_meta.items()):
+                yield Completion(cmd, start_position=0, display_meta=meta)
+            return
+
+        first = parts[0]
+
+        # 仅一个词 且 未按空格 → 正在输入命令名
+        if len(parts) == 1 and not trailing:
+            for cmd, meta in sorted(self._cmd_meta.items()):
+                if cmd.startswith(first):
+                    yield Completion(cmd, start_position=-len(first), display_meta=meta)
+            return
+
+        # ——— 走到这里说明需要子命令 / 多级嵌套 ———
+
+        resolved = self._resolve(first)
+        menu = self._sub_menus.get(resolved)
+        if menu is None:
+            return
+
+        # 把 parts[1:] 作为导航路径，trailing 表示最后一级也已完成
+        nav = list(parts[1:])
+        if trailing:
+            nav.append("")                          # 空字符串 → 展示当前级全部选项
+
+        # 逐级深入子菜单；path 用于描述查找
+        path = [resolved]
+
+        for i, seg in enumerate(nav):
+            if isinstance(menu, dict) and seg in menu:
+                # 该级已命中 → 进入下一级
+                menu = menu[seg]
+                path.append(seg)
+            elif isinstance(menu, dict):
+                # 未命中(或空串) → 在当前级做前缀匹配并显示描述
+                for sub_cmd in sorted(menu.keys()):
+                    if sub_cmd.startswith(seg):
+                        desc_path = tuple(path + [sub_cmd])
+                        desc = self._sub_desc.get(desc_path)
+                        yield Completion(
+                            sub_cmd, start_position=-len(seg),
+                            display_meta=desc if desc else None,
+                        )
+                return
+            else:
+                return
+
+
+def _build_nested_completer() -> CommandCompleter:
+    """构建命令补全器，顶层命令带中文描述，子命令按嵌套字典补全。"""
+    commands = list(COMMAND_LIST)
+    # 别名命令也纳入补全
+    commands.append(('/m', '/memory（别名）'))
+    commands.append(('/g', '/graph（别名）'))
+    commands.append(('/p', '/pet（别名）'))
+    commands.append(('/h', '/help（别名）'))
+    commands.append(('/q', '/quit（别名）'))
+    return CommandCompleter(commands, _SUB_MENU_NESTED, _SUB_MENU_DESC)
 
 # 输入提示符样式（橙色粗体 > Claude Code 风格）
 _INPUT_STYLE = PtStyle.from_dict({
@@ -389,7 +536,7 @@ def _read_input() -> str:
     try:
         text = pt_prompt(
             [("class:prompt", "\n> ")],
-            completer=_command_completer,
+            completer=_build_nested_completer(),
             complete_while_typing=True,
             style=_INPUT_STYLE,
         )
@@ -410,6 +557,9 @@ class REPL:
         self.llm_available: bool = settings.has_llm()
         # 运行中
         self.running: bool = True
+        # Web 后台服务（后台线程运行的 uvicorn Server）
+        self._web_server = None
+        self._web_thread: Optional[threading.Thread] = None
         # 当前数据分析结果（用于 /analyze 后追问）
         self.current_analysis = None
         # 智能阅读状态（用于 /read 模式）
@@ -962,15 +1112,13 @@ class REPL:
         cmd = self.CMD_ALIASES.get(cmd, cmd)
 
         # 子命令菜单：主命令在菜单表中时，以下情况触发菜单
-        # 1. 无参数：直接弹菜单
-        # 2. 参数为纯数字（如 "/memory 3"）：作为菜单编号处理
+        # 1. 参数为纯数字（如 "/memory 3"）：作为菜单编号处理
+        # 2. 空参数/有参数：直接交给命令处理器（显示帮助或执行）
         # _menu_skip 标志用于递归调用时跳过菜单（避免死循环）
         trigger_menu = False
         menu_numeric_arg = None
         if cmd in self.SUBCOMMAND_MENU and not getattr(self, '_menu_skip', False):
-            if not arg:
-                trigger_menu = True
-            elif arg.isdigit():
+            if arg.isdigit():
                 # 纯数字参数 → 菜单编号选择
                 trigger_menu = True
                 menu_numeric_arg = arg
@@ -1886,24 +2034,64 @@ class REPL:
             console.print(f"\n[yellow]监控已停止[/yellow]")
 
     def _cmd_web(self, arg: str) -> None:
-        """启动 Streamlit Web 界面。"""
-        import subprocess as sp
-        port = "8501"
-        parts = arg.split()
-        for i, p in enumerate(parts):
-            if p in ("-p", "--port") and i + 1 < len(parts):
-                port = parts[i + 1]
-
-        console.print(f"[bold green]启动 Web 界面[/bold green]  端口: {port}")
-        console.print("[dim]浏览器访问: http://localhost:" + port + "[/dim]")
-        console.print("[dim]按 Ctrl+C 停止[/dim]\n")
+        """启动/停止 FastAPI Web 后台。
+        用法:
+          /web                  启动 Web（默认 127.0.0.1:8501）
+          /web --host 0.0.0.0 --port 8080  自定义地址和端口
+          /web stop             停止 Web 后台服务
+        """
         try:
-            sp.run([
-                sys.executable, "-m", "streamlit", "run", "web/app.py",
-                "--server.port", port, "--server.headless", "true",
-            ])
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Web 已停止[/yellow]")
+            import uvicorn
+        except ImportError:
+            console.print("[red]缺少 Web 依赖，请运行: pip install uvicorn fastapi[/red]")
+            return
+
+        parts = arg.strip().split()
+
+        # ---- 停止子命令 ----
+        if parts and parts[0] == "stop":
+            if self._web_server is None:
+                console.print("[yellow]Web 服务未在运行[/yellow]")
+                return
+            console.print("[yellow]正在停止 Web 服务...[/yellow]")
+            self._web_server.should_exit = True
+            if self._web_thread is not None:
+                self._web_thread.join(timeout=5)
+            self._web_server = None
+            self._web_thread = None
+            console.print("[green]✓ Web 服务已停止[/green]")
+            return
+
+        # ---- 已运行时给出提示 ----
+        if self._web_server is not None:
+            console.print("[yellow]Web 服务已在运行中，请先执行 /web stop 停止[/yellow]")
+            return
+
+        host = "127.0.0.1"
+        port = 8501
+        for i, p in enumerate(parts):
+            if p in ("--host", "-h") and i + 1 < len(parts):
+                host = parts[i + 1]
+            elif p in ("-p", "--port") and i + 1 < len(parts):
+                port = int(parts[i + 1])
+
+        from web.app import create_app
+        app = create_app()
+        config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+        self._web_server = uvicorn.Server(config)
+
+        def _run_server():
+            try:
+                self._web_server.run()
+            except Exception:
+                pass
+
+        self._web_thread = threading.Thread(target=_run_server, daemon=True)
+        self._web_thread.start()
+
+        console.print(f"\n[bold green]🚀 IMA Web 后台启动[/bold green]\n")
+        console.print(f"  地址: [cyan]http://{host}:{port}[/cyan]")
+        console.print(f"  停止: [dim]/web stop[/dim]\n")
 
     # ---- 同步与维护 ----
 
@@ -2521,6 +2709,14 @@ class REPL:
         except LLMError as e:
             err_msg = str(e).replace("[", "\\[")
             console.print(f"[red]路由失败:[/red] {err_msg}")
+            # 404 通常意味着模型下线了，给出排查建议
+            if "404" in err_msg or "NotFound" in err_msg:
+                console.print("\n[yellow]💡 可能原因：模型已下线或 API 地址变更[/yellow]")
+                console.print("[dim]  1. 检查模型名是否正确：[/dim]")
+                console.print(f"[dim]     cat .env | grep LLM_MODEL[/dim]")
+                console.print("[dim]  2. 尝试备用模型 agnes-1.5-flash：[/dim]")
+                console.print(f"[dim]     sed -i '' 's/LLM_MODEL=.*/LLM_MODEL=agnes-1.5-flash/' .env[/dim]")
+            console.print("[dim]  你也可以直接用对应命令：/search /report /compare /analyze /read /agent[/dim]")
 
     def _cmd_theme(self, arg: str) -> None:
         """切换主题：/theme [claude|mimo|minimal]"""
@@ -2559,7 +2755,7 @@ class REPL:
         console.print(f"[dim]{new_t.desc}[/dim]\n")
         # 重新渲染欢迎面板
         stats = self.storage.stats()
-        _render_welcome_panel(stats, self.llm_available)
+        _render_welcome_panel(stats, self.llm_available, pet=self.pet)
 
     # ---- 记忆管理 ----
 
@@ -2594,6 +2790,20 @@ class REPL:
         parts = arg.split(maxsplit=1) if arg else []
         sub = parts[0].lower() if parts else ""
         sub_arg = parts[1].strip() if len(parts) > 1 else ""
+
+        # 子命令缩写（支持 /m c = /memory clear, /m f table = /memory format table）
+        SUB_ALIASES = {
+            "c": "clear", "cl": "clear",
+            "f": "format", "fmt": "format",
+            "s": "style", "sty": "style",
+            "t": "tasks", "ts": "tasks",
+            "top": "topic", "tp": "topic",
+            "reg": "region", "r": "region",
+            "ta": "task", "tk": "task",
+            "w": "workflow", "wf": "workflow",
+            "a": "add", "sh": "show",
+        }
+        sub = SUB_ALIASES.get(sub, sub)
 
         if sub in ("", "show"):
             self._memory_show()
@@ -2860,6 +3070,13 @@ class REPL:
             elif val in ("off", "false", "0", "关", "关闭"):
                 tracker.set_suggestions_enabled(False)
                 console.print("[green]✓ 已关闭下一步推荐[/green]")
+            elif val == "":
+                # 无参数：显示当前状态
+                data = self.memory_store.get_data() if self.memory_store else {}
+                enabled = data.get("workflow", {}).get("suggestions_enabled", True)
+                state = "[green]已启用[/green]" if enabled else "[red]已关闭[/red]"
+                console.print(f"  工作流推荐: {state}")
+                console.print("[dim]  用法: /memory workflow suggest on|off[/dim]")
             else:
                 console.print(f"[red]无效值: '{val}'[/red]  允许: on / off")
         else:
@@ -3132,7 +3349,17 @@ class REPL:
         for i, doc in enumerate(target_docs, 1):
             chunks = self.storage.get_chunks(doc.id)
             content = "\n".join(c.content for c in chunks)
-            console.print(f"[{i}/{len(target_docs)}] [cyan]{doc.title[:50]}[/cyan]")
+            title_display = doc.title[:50]
+            content_preview = content.strip()[:200]
+
+            # 预检：内容过短或无实质信息的文档，跳过 LLM 调用
+            if len(content_preview) < 50:
+                console.print(f"[{i}/{len(target_docs)}] [cyan]{title_display}[/cyan]")
+                console.print(f"  [dim]跳过（内容过短 {len(content)} 字）[/dim]")
+                fail += 1
+                continue
+
+            console.print(f"[{i}/{len(target_docs)}] [cyan]{title_display}[/cyan]")
             try:
                 result = extractor.extract_from_document(
                     doc_id=doc.id, doc_title=doc.title, content=content,
@@ -3145,7 +3372,7 @@ class REPL:
                     )
                     success += 1
                 else:
-                    console.print("  [yellow]未抽取到实体[/yellow]")
+                    console.print("  [dim]该文档无可抽取的实体（内容可能非政策/无实质信息）[/dim]")
                     fail += 1
             except Exception as e:
                 err_msg = str(e).replace("[", "\\[")
@@ -3203,6 +3430,7 @@ class REPL:
 
     def _graph_export(self, gs) -> None:
         """导出 HTML 可视化：/graph export"""
+        import webbrowser
         from core.graph.visualizer import generate_html
 
         if gs.graph.number_of_nodes() == 0:
@@ -3214,7 +3442,11 @@ class REPL:
         console.print(f"\n[green]✓ 已导出[/green]")
         console.print(f"  文件: {html_path}")
         console.print(f"  节点: {s['nodes']} · 边: {s['edges']}")
-        console.print(f"  [dim]浏览器打开: open '{html_path}'[/dim]\n")
+
+        # 自动打开浏览器
+        file_url = html_path.as_uri()
+        webbrowser.open(file_url)
+        console.print(f"  [green]✓ 已在浏览器中打开[/green]\n")
 
     def _graph_clear(self, gs) -> None:
         """清空图谱：/graph clear"""
@@ -3417,30 +3649,52 @@ class REPL:
     # ---- 管理员回答渲染 + 工作流 ----
 
     def _render_answer(self, result: AnswerResult) -> None:
-        """渲染带引用的管理员回答：宠物头像 + 回答文本 + 引用溯源区块。"""
-        # 宠物头像行
+        """渲染带引用的管理员回答：宠物头像标题 + Markdown 回答面板 + 引用溯源 + 经验提示。"""
+        t = get_theme()
+
+        # 宠物头像标题栏（带系别标签）
         if self.pet is not None:
             avatar = {"scholar": "🦉", "warrior": "🐺", "artisan": "🦡"}.get(self.pet.branch, "🐣")
             color = {"scholar": "cyan", "warrior": "red", "artisan": "yellow"}.get(self.pet.branch, "white")
-            console.print(f"[{color}]{avatar}[/{color}] [bold magenta]{self.pet.name}[/bold magenta] "
-                          f"[dim]Lv{self.pet.level}[/dim]")
+            branch_label = {"scholar": "学者", "warrior": "战士", "artisan": "工匠"}.get(self.pet.branch, "")
+            branch_tag = f" · {branch_label}" if branch_label else ""
+            header = (
+                f"[{color}]{avatar}[/{color}] "
+                f"[bold magenta]{self.pet.name}[/bold magenta] "
+                f"[dim]Lv{self.pet.level}{branch_tag}[/dim]"
+            )
+        else:
+            header = f"[{t.colors['ai_marker']}]⏺[/{t.colors['ai_marker']}] [bold]AI 助手[/bold]"
 
-        # 回答正文
-        console.print(result.text)
+        # 回答正文（Markdown 渲染，带面板）
+        subtitle = (
+            f"[dim]基于 {len(result.citations)} 条引用[/dim]"
+            if result.citations else "[dim]基于知识库回答[/dim]"
+        )
+        answer_panel = Panel(
+            Markdown(result.text),
+            title=header,
+            title_align="left",
+            border_style=t.colors["border_ai"],
+            padding=(1, 2),
+            subtitle=subtitle,
+            subtitle_align="right",
+        )
+        console.print(answer_panel)
         console.print()
 
-        # 引用溯源区块
+        # 引用溯源区块（更紧凑的编号列表）
         if result.citations:
             ref_lines = []
-            for c in result.citations:
+            for i, c in enumerate(result.citations, 1):
                 ref_lines.append(
-                    f"  {c.marker} [cyan]{c.title}[/cyan] "
+                    f"  [bold cyan]{i}.[/bold cyan] [cyan]{c.title}[/cyan] "
                     f"[dim]§{c.paragraph_num} · doc:{c.doc_id[:8]}[/dim]"
                 )
             ref_panel = Panel(
                 "\n".join(ref_lines),
-                border_style="cyan",
-                title="[bold cyan]📚 引用溯源[/bold cyan]",
+                border_style="dim cyan",
+                title="[dim]📚 引用溯源[/dim]",
                 title_align="left",
                 padding=(0, 1),
             )
@@ -3547,13 +3801,13 @@ class REPL:
             Text(""),
             Text.from_markup(f"  [bold magenta]{p.name}[/bold magenta]  Lv{p.level} {branch_label}"),
             Text(""),
-            Text.from_markup(f"  ❤️ 饱食   {p.hunger}/100"),
-            Text.from_markup(f"  😊 心情   {p.mood}/100"),
-            Text.from_markup(f"  ⚡ 能量   {p.energy}/100"),
-            Text.from_markup(f"  🛁 清洁   {p.cleanliness}/100"),
+            Text.from_markup(f"  ❤️ 饱食   {_render_bar(p.hunger)}  [dim]{p.hunger}/100[/dim]"),
+            Text.from_markup(f"  😊 心情   {_render_bar(p.mood)}  [dim]{p.mood}/100[/dim]"),
+            Text.from_markup(f"  ⚡ 能量   {_render_bar(p.energy)}  [dim]{p.energy}/100[/dim]"),
+            Text.from_markup(f"  🛁 清洁   {_render_bar(p.cleanliness)}  [dim]{p.cleanliness}/100[/dim]"),
             Text(""),
-            Text.from_markup(f"  ✨ 经验   {p.exp}/{p.exp_needed()}" + (
-                f"  [dim]→Lv{p.level+1} 还需 {p.exp_remaining()}[/dim]" if p.level < 10 else "  [dim](最高级)[/dim]"
+            Text.from_markup(f"  ✨ 经验   {_render_bar(round(p.exp / p.exp_needed() * 100))}  [dim]{p.exp}/{p.exp_needed()}[/dim]" + (
+                f"  →Lv{p.level+1} 还需 {p.exp_remaining()}" if p.level < 10 else "  [dim](最高级)[/dim]"
             )),
         )
         console.print(Panel(info, border_style="magenta", title=f"[bold magenta]🐾 {p.name}[/bold magenta]", padding=(1, 2)))
@@ -3653,13 +3907,27 @@ class REPL:
             console.print(f"[red]{e}[/red]")
 
     def _pet_use(self, item_id: str) -> None:
-        """使用道具。"""
+        """使用道具。支持序号（/pet use 1）或道具 ID（/pet use energy_drink）。"""
         if self.pet is None:
             console.print("[yellow]还没有宠物[/yellow]")
             return
         if not item_id:
-            console.print("[yellow]用法: /pet use <id>[/yellow]")
+            console.print("[yellow]用法: /pet use <序号|id>[/yellow]")
             return
+        inv = self.pet.inventory
+        if not inv:
+            console.print("[yellow]道具栏是空的[/yellow]")
+            return
+        # 如果输入是数字序号，转换为 item_id
+        try:
+            idx = int(item_id) - 1  # 1-based → 0-based
+            if 0 <= idx < len(inv):
+                item_id = inv[idx]["item_id"]
+            else:
+                console.print(f"[red]无效序号: {item_id}（共 {len(inv)} 种道具）[/red]")
+                return
+        except ValueError:
+            pass  # 不是数字，当作 item_id 直接使用
         try:
             result = self.shop.use(self.pet, item_id)
             self.pet_storage.save(self.pet)
@@ -3749,13 +4017,19 @@ class REPL:
         table.add_column("名称", style="white")
         table.add_column("数量", style="cyan", width=6)
         table.add_column("效果", style="yellow")
-        for i, item in enumerate(inv):
-            name = item.get("name", "?")
-            count = item.get("count", 0)
-            effect = item.get("effect", "")
+
+        # 从商店获取道具定义（name + effect）
+        shop_items = self.shop.list_items()
+        item_map = {si["id"]: si for si in shop_items}
+
+        for i, slot in enumerate(inv):
+            item_data = item_map.get(slot.get("item_id", ""), {})
+            name = item_data.get("name", "?")
+            count = slot.get("count", 0)
+            effect = item_data.get("effect", {})
             # 效果描述
             effect_desc = ""
-            if isinstance(effect, dict):
+            if isinstance(effect, dict) and effect:
                 parts = []
                 for k, v in effect.items():
                     if k == "hunger":
@@ -3767,9 +4041,12 @@ class REPL:
                     elif k == "cleanliness":
                         parts.append(f"清洁+{v}")
                     elif k == "exp_multi":
-                        parts.append(f"经验×{v}")
+                        dur = effect.get("duration_sec", 0) // 3600
+                        parts.append(f"经验×{v}({dur}h)")
                     elif k == "auto_revive":
                         parts.append("凤凰之羽")
+                    elif k == "reset_stats":
+                        parts.append("重置属性")
                     else:
                         parts.append(f"{k}+{v}")
                 effect_desc = "、".join(parts)

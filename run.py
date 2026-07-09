@@ -2,7 +2,7 @@
 
 用法：
     python run.py chat                     # 交互式对话模式（终端 REPL）
-    python run.py web                      # 启动 Streamlit Web 界面
+    python run.py web                      # 启动 Web 后台
     python run.py ingest <文件或目录>      # 入库（自动打标签）
     python run.py list                     # 列出所有文档
     python run.py search <关键词> [--tag T] # BM25 智能搜索（可按标签筛选）
@@ -135,34 +135,43 @@ def cli(ctx) -> None:
         repl_main()
 
 
+@cli.command(name="web", help="启动 Web 后台（内网访问：ima web --host 0.0.0.0）")
+@click.option("--host", "-h", default="127.0.0.1", help="绑定地址（默认 127.0.0.1）")
+@click.option("--port", "-p", default=8501, type=int, help="端口（默认 8501）")
+def cli_web(host: str, port: int) -> None:
+    """启动 Web 后台服务。
+
+    \b
+    示例：
+      ima web                       # 本地访问 http://127.0.0.1:8501
+      ima web --host 0.0.0.0        # 内网其他设备可访问
+      ima web -p 8080               # 指定端口
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]缺少 Web 依赖[/red]")
+        console.print("[dim]运行: pip install fastapi uvicorn python-multipart[/dim]")
+        return
+
+    _ensure_dirs()
+
+    console.print(f"\n[bold green]🚀 IMA Web 后台启动[/bold green]\n")
+    console.print(f"  地址: [cyan]http://{host}:{port}[/cyan]")
+    console.print(f"  内网: [cyan]http://0.0.0.0:{port}[/cyan]" if host == "0.0.0.0" else "")
+    console.print(f"  退出: [dim]Ctrl+C[/dim]\n")
+
+    from web.app import create_app
+    app = create_app()
+    uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
 @cli.command(help="交互式对话模式（终端常驻 REPL，推荐）")
 def chat() -> None:
     """进入交互式 REPL 模式。"""
     from repl import main as repl_main
     _ensure_dirs()
     repl_main()
-
-
-@cli.command(help="启动 Streamlit Web 界面")
-@click.option("--port", "-p", default=8501, type=int, help="端口")
-def web(port: int) -> None:
-    """启动 Streamlit Web。"""
-    import subprocess
-    import os
-    _ensure_dirs()
-    # macOS 沙盒下避免 PermissionError 创建 ~/.streamlit
-    env = os.environ.copy()
-    if "STREAMLIT_HOME" not in env:
-        env["STREAMLIT_HOME"] = "/tmp"
-    cmd = [
-        sys.executable, "-m", "streamlit", "run",
-        "web/app.py",
-        "--server.port", str(port),
-        "--server.headless", "true",
-        "--browser.gatherUsageStats", "false",
-    ]
-    console.print(f"[bold green]启动 Web 界面: http://localhost:{port}[/bold green]")
-    subprocess.run(cmd, cwd=str(Path(__file__).parent.resolve()), env=env)
 
 
 @cli.command(help="入库文件或目录")
@@ -1152,6 +1161,7 @@ def neighbors(name: str) -> None:
 @click.option("--output", "-o", default=None, help="输出路径（默认 storage/graph.html）")
 def export(output: Optional[str]) -> None:
     """导出 HTML 可视化。"""
+    import webbrowser
     from core.graph.store import GraphStore
     from core.graph.visualizer import generate_html
 
@@ -1167,8 +1177,11 @@ def export(output: Optional[str]) -> None:
     console.print(f"\n[green]✓ 已导出知识图谱[/green]")
     console.print(f"  文件: {html_path}")
     console.print(f"  节点: {s['nodes']} · 边: {s['edges']}")
-    console.print(f"\n[dim]浏览器打开查看:[/dim]")
-    console.print(f"  [cyan]open '{html_path}'[/cyan]\n")
+
+    # 自动打开浏览器
+    file_url = html_path.as_uri()
+    webbrowser.open(file_url)
+    console.print(f"  [green]✓ 已在浏览器中打开[/green]\n")
 
 
 @graph.command(help="清空图谱")

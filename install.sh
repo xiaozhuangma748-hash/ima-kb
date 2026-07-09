@@ -357,7 +357,6 @@ echo -e "  ${CYAN}ima analyze 文件.xlsx${NC}     # 数据表分析（自动统
 echo -e "  ${CYAN}ima search 关键词${NC}        # BM25 搜索"
 echo -e "  ${CYAN}ima ask \"问题\"${NC}          # AI 问答"
 echo -e "  ${CYAN}ima graph build${NC}          # 构建知识图谱"
-echo -e "  ${CYAN}ima web${NC}                  # 启动 Web 界面（http://localhost:8501）"
 echo ""
 echo -e "${BOLD}文档：${NC}阅读 HANDOFF.md 了解项目全貌"
 echo ""

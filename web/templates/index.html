@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IMA 知识库 · Web 后台</title>
+<style>
+  /* ===== 设计令牌 · 亮色简约风 ===== */
+  :root {
+    --bg-deep: #f7f8fa;
+    --bg-base: #ffffff;
+    --bg-card: #ffffff;
+    --bg-elevated: #f3f4f6;
+    --border: #e5e7eb;
+    --border-light: #d1d5db;
+    --text-primary: #1f2937;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --accent-orange: #F59E0B;
+    --accent-orange-dim: #FCD34D;
+    --accent-cyan: #06B6D4;
+    --accent-cyan-dim: #67E8F9;
+    --accent-red: #EF4444;
+    --accent-purple: #8B5CF6;
+    --accent-green: #10B981;
+    --shadow-glow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.03);
+    --radius: 10px;
+    --font-display: -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font-display);
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* ===== 整体布局 ===== */
+  .app {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    grid-template-rows: 60px 1fr;
+    grid-template-areas: "logo topbar" "sidebar main";
+    height: 100vh;
+  }
+  .logo-area {
+    grid-area: logo;
+    background: var(--bg-base);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 20px; gap: 12px;
+  }
+  .logo-mark {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--accent-orange), var(--accent-cyan));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; color: #fff; font-size: 13px;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  }
+  .logo-text { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; }
+  .logo-text .sub { font-size: 10px; color: var(--text-muted); font-weight: 400; display: block; letter-spacing: 1px; }
+  .topbar {
+    grid-area: topbar;
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 24px; gap: 16px;
+  }
+  .breadcrumb { font-size: 13px; color: var(--text-secondary); }
+  .breadcrumb .current { color: var(--accent-orange); font-weight: 500; }
+  .topbar-search {
+    margin-left: auto; width: 280px; height: 32px;
+    background: var(--bg-elevated); border: 1px solid transparent;
+    border-radius: 8px; padding: 0 12px;
+    color: var(--text-primary); font-size: 12px; font-family: var(--font-display);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .topbar-search .kbd {
+    margin-left: auto; background: var(--bg-base); padding: 2px 6px;
+    border-radius: 4px; font-size: 10px; color: var(--text-muted);
+    font-family: var(--font-mono); border: 1px solid var(--border);
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green);
+  }
+  .sidebar {
+    grid-area: sidebar;
+    background: var(--bg-base); border-right: 1px solid var(--border);
+    padding: 16px 12px; overflow-y: auto;
+  }
+  .nav-section { margin-bottom: 24px; }
+  .nav-section-title {
+    font-size: 10px; color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 1.5px; padding: 0 12px 8px; font-weight: 600;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px; border-radius: 8px;
+    color: var(--text-secondary); cursor: pointer;
+    font-size: 13px; transition: all 0.15s; margin-bottom: 2px; position: relative;
+  }
+  .nav-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
+  .nav-item.active { background: rgba(245, 158, 11, 0.08); color: var(--accent-orange); font-weight: 500; }
+  .nav-item.active::before {
+    content: ''; position: absolute;
+    left: 0; top: 8px; bottom: 8px; width: 3px;
+    background: var(--accent-orange); border-radius: 2px;
+  }
+  .nav-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .nav-badge {
+    margin-left: auto; background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan);
+    padding: 2px 6px; border-radius: 10px; font-size: 10px; font-weight: 600;
+  }
+  .main { grid-area: main; background: var(--bg-deep); overflow-y: auto; padding: 24px 32px; }
+  .page { display: none; }
+  .page.active { display: block; animation: fadeIn 0.3s; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .page-header { margin-bottom: 24px; display: flex; align-items: center; gap: 16px; }
+  .page-title { font-size: 22px; font-weight: 600; }
+  .page-subtitle { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+  /* ===== 通用组件 ===== */
+  .btn {
+    padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg-base); color: var(--text-primary); font-size: 12px;
+    cursor: pointer; transition: all 0.15s; font-family: var(--font-display);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { background: var(--bg-elevated); border-color: var(--accent-orange); color: var(--accent-orange); }
+  .btn-primary { background: var(--accent-orange); color: #fff; border-color: var(--accent-orange); font-weight: 600; }
+  .btn-primary:hover { background: #d97706; border-color: #d97706; color: #fff; }
+  .btn-ghost { border-color: transparent; background: transparent; }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-card);
+  }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .card-title { font-size: 14px; font-weight: 600; }
+  .tag {
+    display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 11px;
+    background: var(--bg-elevated); color: var(--text-secondary); margin-right: 4px;
+  }
+  .tag-orange { background: rgba(245, 158, 11, 0.1); color: var(--accent-orange); }
+  .tag-cyan { background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan); }
+  .tag-purple { background: rgba(139, 92, 246, 0.1); color: var(--accent-purple); }
+  .tag-red { background: rgba(239, 68, 68, 0.1); color: var(--accent-red); }
+  .input {
+    width: 100%; background: var(--bg-base); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 14px; color: var(--text-primary);
+    font-size: 13px; font-family: var(--font-display); transition: border-color 0.15s;
+  }
+  .input:focus { outline: none; border-color: var(--accent-orange); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1); }
+  /* ===== AI 问答页 · ChatGPT 风格 ===== */
+  .qa-layout {
+    display: flex;
+    height: calc(100vh - 140px);
+    position: relative;
+  }
+  .qa-layout.collapsed-sidebar .qa-sidebar { width: 0; padding: 0; overflow: hidden; }
+  .qa-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    position: relative;
+  }
+  .chat-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .chat-area.empty {
+    justify-content: center;
+    align-items: center;
+  }
+  .chat-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    text-align: center;
+    max-width: 600px;
+    padding-bottom: 80px;
+  }
+  .qa-hero-title {
+    font-size: 32px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+  }
+  .qa-suggestions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    margin-top: 8px;
+  }
+  .qa-suggestion {
+    padding: 14px 18px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-secondary);
+    font-size: 14px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s;
+    box-shadow: var(--shadow-card);
+  }
+  .qa-suggestion:hover {
+    border-color: var(--accent-orange);
+    color: var(--accent-orange);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.08);
+  }
+  .chat-input-wrapper {
+    padding: 16px 24px 28px;
+    flex-shrink: 0;
+    background: var(--bg-deep);
+  }
+  .chat-input {
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: all 0.15s;
+  }
+  .chat-input:focus-within {
+    border-color: var(--accent-orange);
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1), 0 4px 20px rgba(0,0,0,0.05);
+  }
+  .chat-input textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 15px;
+    font-family: var(--font-display);
+    resize: none;
+    min-height: 24px;
+    max-height: 200px;
+    line-height: 1.5;
+    padding: 0 4px;
+  }
+  .chat-input textarea:focus { outline: none; }
+  .chat-input textarea::placeholder { color: var(--text-muted); }
+  .chat-input-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .persona-input-bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .persona-input-bar .persona-chip {
+    padding: 4px 12px;
+    font-size: 12px;
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: var(--font-display);
+    font-weight: 500;
+  }
+  .persona-input-bar .persona-chip:hover {
+    background: rgba(245, 158, 11, 0.08);
+    border-color: var(--accent-orange);
+    color: var(--accent-orange);
+  }
+  .persona-input-bar .persona-chip.active {
+    background: var(--accent-orange);
+    color: #fff;
+    border-color: var(--accent-orange);
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(245, 158, 11, 0.3);
+  }
+  .chat-input-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .chat-input-actions .hint {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .chat-input-actions .send-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent-orange);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: all 0.15s;
+  }
+  .chat-input-actions .send-btn:hover { background: #d97706; }
+  .chat-input-actions .send-btn:disabled { background: var(--text-muted); cursor: not-allowed; }
+  .qa-sidebar {
+    width: 280px;
+    background: var(--bg-base);
+    border-left: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    flex-shrink: 0;
+    transition: width 0.2s, padding 0.2s;
+  }
+  .sidebar-toggle {
+    position: absolute;
+    right: 280px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 60px;
+    border-radius: 8px 0 0 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-right: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 12px;
+    z-index: 10;
+    box-shadow: -2px 0 6px rgba(0,0,0,0.05);
+    transition: right 0.2s;
+  }
+  .sidebar-toggle:hover { color: var(--accent-orange); border-color: var(--accent-orange); }
+  .qa-layout.collapsed-sidebar .sidebar-toggle { right: 0; border-radius: 8px 0 0 8px; }
+  .msg {
+    display: flex;
+    width: 100%;
+    max-width: 800px;
+    padding: 14px 0;
+    margin: 0 auto;
+  }
+  .msg-user { justify-content: flex-end; }
+  .msg-ai { justify-content: flex-start; }
+  .msg-content {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-primary);
+    padding: 12px 16px;
+    border-radius: 12px;
+  }
+  .msg-user .msg-content {
+    background: rgba(6, 182, 212, 0.06);
+    border: 1px solid rgba(6, 182, 212, 0.25);
+    max-width: 75%;
+  }
+  .msg-ai .msg-content {
+    background: transparent;
+    border: none;
+    padding: 0 4px;
+    max-width: 100%;
+    word-break: break-word;
+  }
+  .msg-content .citation {
+    display: inline-block;
+    background: rgba(6, 182, 212, 0.1);
+    color: var(--accent-cyan);
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    margin: 0 2px;
+    cursor: pointer;
+  }
+  .msg-streaming::after { content: '⏺'; color: var(--accent-orange); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .source-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    transition: all 0.15s;
+  }
+  .source-card:hover { border-color: var(--accent-cyan); }
+  .source-card-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-primary); word-break: break-word; line-height: 1.4; }
+  .source-card-snippet {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    border-left: 2px solid var(--accent-cyan);
+    padding-left: 8px;
+    margin: 6px 0;
+    max-height: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 5;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+  }
+  .source-card-meta { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+  .source-card-active { border-color: var(--accent-orange); box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15); }
+  /* ===== 文档入库页 ===== */
+  .ingest-layout { display: grid; grid-template-columns: 1fr 360px; gap: 20px; }
+  .dropzone {
+    border: 2px dashed var(--border-light); border-radius: var(--radius);
+    padding: 48px; text-align: center; background: var(--bg-card);
+    transition: all 0.2s; cursor: pointer;
+  }
+  .dropzone:hover { border-color: var(--accent-orange); background: rgba(245, 158, 11, 0.04); }
+  .dropzone-icon { font-size: 48px; margin-bottom: 16px; }
+  .dropzone-text { font-size: 15px; margin-bottom: 8px; }
+  .dropzone-hint { font-size: 12px; color: var(--text-muted); }
+  .format-pills { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 20px; }
+  .ingest-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .ingest-tab {
+    padding: 10px 16px; color: var(--text-secondary); font-size: 13px;
+    cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .ingest-tab.active { color: var(--accent-orange); border-color: var(--accent-orange); }
+  .upload-list { display: flex; flex-direction: column; gap: 8px; }
+  .upload-item {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; display: flex; align-items: center;
+    gap: 12px; box-shadow: var(--shadow-card);
+  }
+  .file-icon {
+    width: 36px; height: 36px; background: rgba(245, 158, 11, 0.1);
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; color: var(--accent-orange);
+  }
+  .file-info { flex: 1; }
+  .file-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+  .file-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .progress-bar { height: 4px; background: var(--bg-elevated); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent-orange), var(--accent-cyan)); border-radius: 2px; }
+  .file-status { font-size: 11px; padding: 4px 8px; border-radius: 6px; }
+  .status-success { background: rgba(16, 185, 129, 0.1); color: var(--accent-green); }
+  .status-processing { background: rgba(245, 158, 11, 0.1); color: var(--accent-orange); }
+  /* ===== 搜索页 ===== */
+  .search-layout { display: flex; flex-direction: column; gap: 16px; }
+  .search-bar {
+    display: flex; gap: 12px; align-items: center;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 16px; box-shadow: var(--shadow-card);
+    transition: border-color 0.15s;
+  }
+  .search-bar:focus-within { border-color: var(--accent-orange); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1); }
+  .search-input {
+    flex: 1; background: transparent; border: none;
+    color: var(--text-primary); font-size: 15px; font-family: var(--font-display);
+  }
+  .search-input:focus { outline: none; }
+  .search-filters { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .filter-group { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+  .toggle { position: relative; width: 32px; height: 18px; background: var(--border-light); border-radius: 9px; cursor: pointer; transition: 0.2s; }
+  .toggle::after { content: ''; position: absolute; width: 14px; height: 14px; background: #fff; border-radius: 50%; top: 2px; left: 2px; transition: 0.2s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+  .toggle.on { background: var(--accent-orange); }
+  .toggle.on::after { left: 16px; }
+  .search-results { display: flex; flex-direction: column; gap: 12px; }
+  .result-item {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; cursor: pointer;
+    transition: all 0.15s; box-shadow: var(--shadow-card);
+  }
+  .result-item:hover { border-color: var(--accent-orange); transform: translateX(4px); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.1); }
+  .result-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; color: var(--text-primary); }
+  .result-snippet { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin: 8px 0; }
+  .result-snippet mark { background: rgba(245, 158, 11, 0.2); color: var(--accent-orange); padding: 1px 3px; border-radius: 3px; font-weight: 500; }
+  .result-meta { display: flex; gap: 12px; font-size: 11px; color: var(--text-muted); }
+  .score-bar { width: 60px; height: 4px; background: var(--bg-elevated); border-radius: 2px; overflow: hidden; display: inline-block; vertical-align: middle; }
+  .score-fill { height: 100%; background: var(--accent-cyan); }
+  /* ===== 数据分析页 ===== */
+  .analyze-layout { display: flex; flex-direction: column; gap: 20px; }
+  .sheet-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+  .sheet-tab {
+    padding: 8px 16px; font-size: 13px; color: var(--text-secondary);
+    cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .sheet-tab.active { color: var(--accent-orange); border-color: var(--accent-orange); }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .stat-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px; box-shadow: var(--shadow-card);
+  }
+  .stat-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+  .stat-name { font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text-primary); }
+  .stat-type { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-elevated); color: var(--text-muted); }
+  .stat-rows { font-size: 11px; color: var(--text-secondary); line-height: 1.8; font-family: var(--font-mono); }
+  .stat-rows .label { color: var(--text-muted); display: inline-block; width: 60px; }
+  .ascii-chart { margin-top: 10px; font-family: var(--font-mono); font-size: 11px; line-height: 1.4; color: var(--accent-cyan); }
+  .data-table {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-card);
+  }
+  .data-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .data-table th { background: var(--bg-elevated); padding: 10px 14px; text-align: left; font-weight: 600; color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .data-table td { padding: 10px 14px; border-top: 1px solid var(--border); font-family: var(--font-mono); color: var(--text-primary); }
+  .data-table tr:hover td { background: var(--bg-elevated); }
+  /* ===== 仪表盘 ===== */
+  .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .metric-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; position: relative; overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .metric-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent-orange); }
+  .metric-card.cyan::before { background: var(--accent-cyan); }
+  .metric-card.purple::before { background: var(--accent-purple); }
+  .metric-card.green::before { background: var(--accent-green); }
+  .metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .metric-value { font-size: 32px; font-weight: 700; font-family: var(--font-mono); color: var(--text-primary); }
+  .metric-delta { font-size: 11px; margin-top: 4px; color: var(--accent-green); }
+  .dashboard-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .chart-placeholder {
+    height: 200px; background: var(--bg-elevated);
+    border-radius: 8px; display: flex; align-items: flex-end;
+    gap: 8px; padding: 16px;
+  }
+  .chart-bar {
+    flex: 1; background: linear-gradient(180deg, var(--accent-orange), var(--accent-orange-dim));
+    border-radius: 4px 4px 0 0; position: relative;
+  }
+  .chart-bar::after { content: attr(data-label); position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+  .alert-item {
+    padding: 10px 12px; background: var(--bg-elevated);
+    border-radius: 8px; border-left: 3px solid var(--accent-red);
+    margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);
+  }
+  .alert-item.warning { border-color: var(--accent-orange); }
+  .alert-item.info { border-color: var(--accent-cyan); }
+  /* ===== 知识图谱 ===== */
+  .graph-layout { display: grid; grid-template-columns: 1fr 280px; gap: 0; height: calc(100vh - 180px); position: relative; }
+  .graph-canvas {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); position: relative; overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .graph-legend {
+    position: absolute; bottom: 16px; left: 16px;
+    background: var(--bg-base); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; font-size: 11px; box-shadow: var(--shadow-card); z-index: 10;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .graph-sidebar { display: flex; flex-direction: column; gap: 12px; }
+  /* ===== 宠物管理 ===== */
+  .pet-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .pet-display {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 32px; text-align: center; box-shadow: var(--shadow-card);
+  }
+  .pet-ascii {
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.2;
+    color: var(--accent-orange); background: var(--bg-elevated); padding: 20px;
+    border-radius: 8px; margin-bottom: 20px; white-space: pre; text-align: left; display: inline-block;
+  }
+  .pet-name { font-size: 20px; font-weight: 700; margin-bottom: 4px; color: var(--text-primary); }
+  .pet-level { font-size: 12px; color: var(--accent-cyan); font-family: var(--font-mono); margin-bottom: 20px; }
+  .pet-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+  .pet-stat { background: var(--bg-elevated); border-radius: 8px; padding: 12px; }
+  .pet-stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+  .pet-stat-bar { height: 6px; background: var(--bg-base); border-radius: 3px; overflow: hidden; }
+  .pet-stat-fill { height: 100%; border-radius: 3px; }
+  .pet-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+  /* ===== 人格卡片 ===== */
+  .persona-card-style {
+    padding: 16px; background: var(--bg-elevated); border-radius: 8px;
+    border: 1px solid var(--border); cursor: pointer; transition: all 0.15s;
+  }
+  .persona-card-style:hover { border-color: var(--accent-orange); }
+  .persona-card-style.active { border: 2px solid var(--accent-orange); background: rgba(245, 158, 11, 0.04); }
+  /* ===== 滚动条 ===== */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Logo -->
+  <div class="logo-area">
+    <div class="logo-mark">IMA</div>
+    <div class="logo-text">IMA 知识库<span class="sub">WEB BACKEND v1.0</span></div>
+  </div>
+
+  <!-- 顶部导航 -->
+  <div class="topbar">
+    <div class="breadcrumb">知识库 / <span class="current" id="breadcrumb-current">仪表盘</span></div>
+    <div class="topbar-search">
+      <span>🔍</span>
+      <span style="color: var(--text-muted)">搜索文档...</span>
+      <span class="kbd">/</span>
+    </div>
+    <div class="status-dot" title="系统正常"></div>
+  </div>
+
+  <!-- 侧边栏 -->
+  <div class="sidebar">
+    <div class="nav-section">
+      <div class="nav-section-title">核心功能</div>
+      <div class="nav-item" data-page="qa">
+        <span class="nav-icon">💬</span><span>AI 问答</span>
+      </div>
+      <div class="nav-item" data-page="ingest">
+        <span class="nav-icon">📥</span><span>文档入库</span>
+      </div>
+      <div class="nav-item" data-page="search">
+        <span class="nav-icon">🔍</span><span>搜索</span>
+      </div>
+      <div class="nav-item" data-page="analyze">
+        <span class="nav-icon">📊</span><span>数据分析</span>
+      </div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-title">管理</div>
+      <div class="nav-item active" data-page="dashboard">
+        <span class="nav-icon">📈</span><span>仪表盘</span>
+      </div>
+      <div class="nav-item" data-page="graph">
+        <span class="nav-icon">🕸️</span><span>知识图谱</span>
+        <span class="nav-badge">{{ initial_stats.graph_nodes }}</span>
+      </div>
+      <div class="nav-item" data-page="pet">
+        <span class="nav-icon">🐾</span><span>宠物管理</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主内容区 -->
+  <div class="main">
+
+    <!-- 1. AI 问答页 -->
+    <div class="page" id="page-qa">
+      <div class="page-header">
+        <div>
+          <div class="page-title">💬 AI 问答</div>
+          <div class="page-subtitle">基于知识库的 RAG 问答 · 宠物管理员风格 · 带引用溯源</div>
+        </div>
+        <button class="btn btn-ghost" style="margin-left: auto" id="btn-clear-chat">🗑 清空对话</button>
+      </div>
+      <div class="qa-layout" id="qa-layout">
+        <div class="qa-main">
+          <div class="chat-area empty" id="chat-messages">
+            <div class="chat-empty">
+              <div class="qa-hero-title">今天有什么想了解的？</div>
+              <div class="qa-suggestions">
+                <div class="qa-suggestion" onclick="setQuestion('骨灰安置有哪些生态安葬方式？')">骨灰安置有哪些生态安葬方式？</div>
+                <div class="qa-suggestion" onclick="setQuestion('殡葬服务收费标准是什么？')">殡葬服务收费标准是什么？</div>
+                <div class="qa-suggestion" onclick="setQuestion('杭州市殡葬改革最新政策？')">杭州市殡葬改革最新政策？</div>
+              </div>
+            </div>
+          </div>
+          <div class="chat-input-wrapper">
+            <div class="chat-input">
+              <textarea id="chat-textarea" placeholder="输入问题，Ctrl+Enter 发送..." rows="1"></textarea>
+              <div class="chat-input-bar">
+                <div class="persona-input-bar">
+                  <span>人格:</span>
+                  <div class="persona-chip active" data-persona="scholar">scholar 学者</div>
+                  <div class="persona-chip" data-persona="warrior">warrior 战士</div>
+                  <div class="persona-chip" data-persona="artisan">artisan 工匠</div>
+                  <div class="persona-chip" data-persona="auto">auto 自动</div>
+                </div>
+                <div class="chat-input-actions">
+                  <span class="hint">Ctrl+Enter</span>
+                  <button class="send-btn" id="chat-send" title="发送">➤</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sidebar-toggle" id="sidebar-toggle" title="折叠/展开引用来源">◀</div>
+        <div class="qa-sidebar" id="qa-sidebar">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">📚 引用来源</div>
+            </div>
+            <div id="sources-panel">
+              <div style="font-size:12px;color:var(--text-muted);text-align:center;padding:20px">等待 AI 回答...</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 12px">💡 推荐问题</div>
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 2">
+              <div style="cursor: pointer; padding: 4px 0" onclick="setQuestion('骨灰安置有哪些生态安葬方式？')">→ 骨灰安置有哪些生态安葬方式?</div>
+              <div style="cursor: pointer; padding: 4px 0" onclick="setQuestion('殡葬服务收费标准是什么？')">→ 殡葬服务收费标准是什么?</div>
+              <div style="cursor: pointer; padding: 4px 0" onclick="setQuestion('杭州市殡葬改革最新政策？')">→ 杭州市殡葬改革最新政策?</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. 文档入库页 -->
+    <div class="page" id="page-ingest">
+      <div class="page-header">
+        <div>
+          <div class="page-title">📥 文档入库</div>
+          <div class="page-subtitle">拖拽文件 · 自动解析 · 智能标签 · 知识图谱构建</div>
+        </div>
+      </div>
+      <div class="ingest-layout">
+        <div>
+          <div class="ingest-tabs">
+            <div class="ingest-tab active">📁 文件上传</div>
+            <div class="ingest-tab">🔗 URL 入库</div>
+            <div class="ingest-tab">📋 剪贴板</div>
+          </div>
+          <div class="dropzone" id="dropzone">
+            <div class="dropzone-icon">📂</div>
+            <div class="dropzone-text"><strong>拖拽文件到此处</strong> 或点击选择</div>
+            <div class="dropzone-hint">支持批量上传，单文件最大 100MB</div>
+            <div class="format-pills">
+              <span class="tag tag-orange">PDF</span><span class="tag tag-cyan">Word</span>
+              <span class="tag tag-purple">Excel</span><span class="tag tag-red">PPT</span>
+              <span class="tag">MD</span><span class="tag">TXT</span><span class="tag">HTML</span>
+              <span class="tag">图片</span><span class="tag">扫描 PDF</span><span class="tag">.doc</span>
+            </div>
+          </div>
+          <input type="file" id="file-input" multiple hidden accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.md,.txt,.html,.htm,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.py,.js,.json,.csv,.tsv">
+          <div style="margin-top: 24px">
+            <div class="card-title" style="margin-bottom: 12px">上传队列</div>
+            <div class="upload-list" id="upload-queue"></div>
+          </div>
+          <!-- URL 入库面板 -->
+          <div style="margin-top: 16px; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius)">
+            <div style="display:flex;gap:8px">
+              <input class="input" id="input-url" placeholder="输入网页 URL..." style="flex:1">
+              <button class="btn btn-primary" id="btn-url-ingest">入库</button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 12px">📊 入库统计</div>
+            <div style="font-size: 12px; line-height: 2; color: var(--text-secondary)">
+              <div style="display: flex; justify-content: space-between"><span>总文档数</span><span style="color: var(--accent-orange); font-family: var(--font-mono)">{{ initial_stats.documents }}</span></div>
+              <div style="display: flex; justify-content: space-between"><span>总分块数</span><span style="color: var(--accent-cyan); font-family: var(--font-mono)">{{ initial_stats.chunks }}</span></div>
+              <div style="display: flex; justify-content: space-between"><span>自动标签</span><span style="color: var(--accent-purple); font-family: var(--font-mono)">{{ initial_stats.tags_count }}</span></div>
+              <div style="display: flex; justify-content: space-between"><span>图谱节点</span><span style="color: var(--accent-red); font-family: var(--font-mono)">{{ initial_stats.graph_nodes }}</span></div>
+              <div style="display: flex; justify-content: space-between"><span>总 Token</span><span style="color: var(--text-primary); font-family: var(--font-mono)">{{ initial_stats.total_tokens }}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. 搜索页 -->
+    <div class="page" id="page-search">
+      <div class="page-header">
+        <div>
+          <div class="page-title">🔍 搜索</div>
+          <div class="page-subtitle">BM25 + 向量混合检索 · RRF 融合 · LLM 重排序</div>
+        </div>
+      </div>
+      <div class="search-layout">
+        <div class="search-bar">
+          <span style="font-size: 18px">🔍</span>
+          <input class="search-input" id="search-input" placeholder="输入关键词或问题...">
+          <button class="btn btn-primary" id="search-btn">搜索</button>
+        </div>
+        <div class="search-filters">
+          <div class="filter-group"><span>向量检索</span><div class="toggle on"></div></div>
+          <div class="filter-group"><span>LLM 重排序</span><div class="toggle on"></div></div>
+        </div>
+        <div id="result-count" style="font-size: 12px; color: var(--text-muted)">输入关键词开始搜索</div>
+        <div class="search-results" id="search-results">
+          <div style="text-align:center;color:var(--text-muted);padding:40px">输入关键词开始搜索</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 数据分析页 -->
+    <div class="page" id="page-analyze">
+      <div class="page-header">
+        <div>
+          <div class="page-title">📊 数据分析</div>
+          <div class="page-subtitle">Excel 多 sheet 自动统计 · 字符图可视化 · AI 趋势解读</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <input type="file" id="analyze-file" accept=".xlsx,.xls,.csv,.tsv,.json" style="display:none">
+          <button class="btn" onclick="document.getElementById('analyze-file').click()">📁 选择文件</button>
+          <button class="btn btn-primary" id="btn-analyze">🤖 AI 分析</button>
+        </div>
+      </div>
+      <div class="analyze-layout" id="analyze-content">
+        <div class="card" style="text-align:center;padding:60px;color:var(--text-muted)">
+          <div style="font-size:48px;margin-bottom:16px">📊</div>
+          <div>上传 Excel/CSV 文件开始数据分析</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. 仪表盘 -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <div>
+          <div class="page-title">📈 仪表盘</div>
+          <div class="page-subtitle">知识库总览 · 质量告警 · 最近活动</div>
+        </div>
+        <button class="btn" style="margin-left: auto" onclick="loadDashboard()">🔄 刷新</button>
+      </div>
+      <div class="dashboard-grid">
+        <div class="metric-card">
+          <div class="metric-label">文档总数</div>
+          <div class="metric-value" id="dash-documents">{{ initial_stats.documents }}</div>
+        </div>
+        <div class="metric-card cyan">
+          <div class="metric-label">分块总数</div>
+          <div class="metric-value" id="dash-chunks">{{ initial_stats.chunks }}</div>
+        </div>
+        <div class="metric-card purple">
+          <div class="metric-label">标签数量</div>
+          <div class="metric-value" id="dash-tags">{{ initial_stats.tags_count }}</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-label">图谱节点</div>
+          <div class="metric-value" id="dash-graph">{{ initial_stats.graph_nodes }}</div>
+        </div>
+      </div>
+      <div class="dashboard-row">
+        <div class="card">
+          <div class="card-header"><div class="card-title">📊 标签分布 Top 10</div></div>
+          <div class="chart-placeholder" id="tag-chart"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">⚠️ 质量告警</div></div>
+          <div id="alerts-list">
+            {% if not initial_alerts %}
+            <div style="font-size:12px;color:var(--text-muted);text-align:center;padding:20px">一切正常 ✓</div>
+            {% else %}
+            {% for issue, count in initial_alerts.items() %}
+            <div class="alert-item warning">
+              <strong>⚠️ {{ issue }}</strong><br>
+              <span style="color: var(--text-secondary)">{{ count }} 个</span>
+            </div>
+            {% endfor %}
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top: 16px">
+        <div class="card-header">
+          <div class="card-title">🕐 最近入库</div>
+        </div>
+        <div class="data-table">
+          <table>
+            <thead><tr><th>文档名</th><th>格式</th><th>标签</th><th>分块</th><th>入库时间</th></tr></thead>
+            <tbody id="recent-docs"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. 知识图谱 -->
+    <div class="page" id="page-graph">
+      <div class="page-header">
+        <div>
+          <div class="page-title">🕸️ 知识图谱</div>
+          <div class="page-subtitle">{{ initial_stats.graph_nodes }} 节点 · {{ initial_stats.graph_edges }} 边 · LLM 抽取实体关系</div>
+        </div>
+        <div style="margin-left: auto; display: flex; gap: 8px">
+          <button class="btn" id="btn-rebuild-graph">🔄 重建</button>
+          <a href="/api/graph/export" class="btn btn-primary" download>📥 导出 HTML</a>
+        </div>
+      </div>
+      <div class="graph-layout">
+        <div class="graph-canvas" id="graph-canvas">
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted)">
+            点击上方"知识图谱"页面加载...
+          </div>
+          <div class="graph-legend">
+            <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary)">节点类型</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-orange)"></div>document 文档</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-cyan)"></div>region 地区</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-red)"></div>agency 机构</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-purple)"></div>topic 主题</div>
+          </div>
+        </div>
+        <div class="graph-sidebar">
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 12px">📊 图谱统计</div>
+            <div style="font-size: 12px; line-height: 2; color: var(--text-secondary)">
+              <div style="display: flex; justify-content: space-between"><span>总节点数</span><span style="color: var(--accent-orange); font-family: var(--font-mono)" id="graph-node-count">{{ initial_stats.graph_nodes }}</span></div>
+              <div style="display: flex; justify-content: space-between"><span>总边数</span><span style="color: var(--accent-cyan); font-family: var(--font-mono)" id="graph-edge-count">{{ initial_stats.graph_edges }}</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 12px">🔗 邻居节点</div>
+            <div id="graph-neighbors" style="font-size: 12px; color: var(--text-secondary); line-height: 1.8">
+              <span style="color:var(--text-muted)">点击图谱中的节点查看邻居</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. 宠物管理 -->
+    <div class="page" id="page-pet">
+      <div class="page-header">
+        <div>
+          <div class="page-title">🐾 宠物管理</div>
+          <div class="page-subtitle">宠物管理员 · 4 种人格风格 · 升级养成</div>
+        </div>
+      </div>
+      <div id="pet-status">
+        <div class="pet-layout">
+          <div class="pet-display">
+            <div class="pet-ascii" id="pet-ascii">加载中...</div>
+            <div class="pet-name" id="pet-name">--</div>
+            <div class="pet-level" id="pet-level">--</div>
+            <div class="pet-stats">
+              <div class="pet-stat">
+                <div class="pet-stat-label">😊 心情</div>
+                <div class="pet-stat-bar"><div id="pet-mood" class="pet-stat-fill" style="width:0%;background:var(--accent-orange)"></div></div>
+              </div>
+              <div class="pet-stat">
+                <div class="pet-stat-label">🍖 饱食</div>
+                <div class="pet-stat-bar"><div id="pet-hunger" class="pet-stat-fill" style="width:0%;background:var(--accent-cyan)"></div></div>
+              </div>
+              <div class="pet-stat">
+                <div class="pet-stat-label">⚡ 能量</div>
+                <div class="pet-stat-bar"><div id="pet-energy" class="pet-stat-fill" style="width:0%;background:var(--accent-purple)"></div></div>
+              </div>
+              <div class="pet-stat">
+                <div class="pet-stat-label">📚 智力</div>
+                <div class="pet-stat-bar"><div id="pet-intellect" class="pet-stat-fill" style="width:0%;background:var(--accent-green)"></div></div>
+              </div>
+            </div>
+            <div class="pet-actions">
+              <button class="btn pet-interact-btn" data-action="feed">🍖 喂食</button>
+              <button class="btn pet-interact-btn" data-action="play">🎾 玩耍</button>
+              <button class="btn pet-interact-btn" data-action="train">📚 训练</button>
+            </div>
+          </div>
+          <div>
+            <div class="card">
+              <div class="card-title" style="margin-bottom: 16px">🎨 人格风格</div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+                <div class="persona-card-style" data-style="scholar">
+                  <div style="font-size: 24px; margin-bottom: 8px">🎓</div>
+                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-orange)">scholar 学者</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">深度分析·引用密集·表格对比</div>
+                </div>
+                <div class="persona-card-style" data-style="warrior">
+                  <div style="font-size: 24px; margin-bottom: 8px">⚔️</div>
+                  <div style="font-size: 13px; font-weight: 600; color: var(--text-primary)">warrior 战士</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">直接结论·行动建议·简洁</div>
+                </div>
+                <div class="persona-card-style" data-style="artisan">
+                  <div style="font-size: 24px; margin-bottom: 8px">🔧</div>
+                  <div style="font-size: 13px; font-weight: 600; color: var(--text-primary)">artisan 工匠</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">结构化·小标题·可视化</div>
+                </div>
+                <div class="persona-card-style" data-style="auto">
+                  <div style="font-size: 24px; margin-bottom: 8px">🤖</div>
+                  <div style="font-size: 13px; font-weight: 600; color: var(--text-primary)">auto 自动</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">根据问题自动选择</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- marked.js · Markdown 渲染 -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<!-- vis.js CDN -->
+<script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
+<!-- 应用脚本 -->
+<script src="/static/app.js"></script>
+</body>
+</html>

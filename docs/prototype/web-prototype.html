@@ -1,0 +1,2021 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IMA 知识库 · Web 后台原型</title>
+<style>
+  /* ===== 设计令牌 · 亮色简约风 ===== */
+  :root {
+    --bg-deep: #f7f8fa;
+    --bg-base: #ffffff;
+    --bg-card: #ffffff;
+    --bg-elevated: #f3f4f6;
+    --border: #e5e7eb;
+    --border-light: #d1d5db;
+    --text-primary: #1f2937;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --accent-orange: #F59E0B;
+    --accent-orange-dim: #FCD34D;
+    --accent-cyan: #06B6D4;
+    --accent-cyan-dim: #67E8F9;
+    --accent-red: #EF4444;
+    --accent-purple: #8B5CF6;
+    --accent-green: #10B981;
+    --shadow-glow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.03);
+    --radius: 10px;
+    --font-display: -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-display);
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== 整体布局 ===== */
+  .app {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    grid-template-rows: 60px 1fr;
+    grid-template-areas:
+      "logo topbar"
+      "sidebar main";
+    height: 100vh;
+  }
+
+  /* ===== Logo 区 ===== */
+  .logo-area {
+    grid-area: logo;
+    background: var(--bg-base);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 12px;
+  }
+  .logo-mark {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--accent-orange), var(--accent-cyan));
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: #fff;
+    font-size: 13px;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  }
+  .logo-text {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .logo-text .sub {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 400;
+    display: block;
+    letter-spacing: 1px;
+  }
+
+  /* ===== 顶部导航 ===== */
+  .topbar {
+    grid-area: topbar;
+    background: var(--bg-base);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 16px;
+  }
+  .breadcrumb {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .breadcrumb .current {
+    color: var(--accent-orange);
+    font-weight: 500;
+  }
+  .topbar-search {
+    margin-left: auto;
+    width: 280px;
+    height: 32px;
+    background: var(--bg-elevated);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0 12px;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: var(--font-display);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .topbar-search .kbd {
+    margin-left: auto;
+    background: var(--bg-base);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    border: 1px solid var(--border);
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent-green);
+    box-shadow: 0 0 6px var(--accent-green);
+  }
+
+  /* ===== 侧边栏 ===== */
+  .sidebar {
+    grid-area: sidebar;
+    background: var(--bg-base);
+    border-right: 1px solid var(--border);
+    padding: 16px 12px;
+    overflow-y: auto;
+  }
+  .nav-section {
+    margin-bottom: 24px;
+  }
+  .nav-section-title {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 0 12px 8px;
+    font-weight: 600;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+    margin-bottom: 2px;
+    position: relative;
+  }
+  .nav-item:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+  }
+  .nav-item.active {
+    background: rgba(245, 158, 11, 0.08);
+    color: var(--accent-orange);
+    font-weight: 500;
+  }
+  .nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 8px; bottom: 8px;
+    width: 3px;
+    background: var(--accent-orange);
+    border-radius: 2px;
+  }
+  .nav-icon {
+    width: 18px; height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+  .nav-badge {
+    margin-left: auto;
+    background: rgba(6, 182, 212, 0.1);
+    color: var(--accent-cyan);
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  /* ===== 主内容区 ===== */
+  .main {
+    grid-area: main;
+    background: var(--bg-deep);
+    overflow-y: auto;
+    padding: 24px 32px;
+  }
+  .page { display: none; }
+  .page.active { display: block; animation: fadeIn 0.3s; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .page-header {
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .page-title {
+    font-size: 22px;
+    font-weight: 600;
+  }
+  .page-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  /* ===== 通用组件 ===== */
+  .btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: var(--font-display);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn:hover { background: var(--bg-elevated); border-color: var(--accent-orange); color: var(--accent-orange); }
+  .btn-primary {
+    background: var(--accent-orange);
+    color: #fff;
+    border-color: var(--accent-orange);
+    font-weight: 600;
+  }
+  .btn-primary:hover { background: #d97706; border-color: #d97706; color: #fff; }
+  .btn-ghost { border-color: transparent; background: transparent; }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow-card);
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    margin-right: 4px;
+  }
+  .tag-orange { background: rgba(245, 158, 11, 0.1); color: var(--accent-orange); }
+  .tag-cyan { background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan); }
+  .tag-purple { background: rgba(139, 92, 246, 0.1); color: var(--accent-purple); }
+  .tag-red { background: rgba(239, 68, 68, 0.1); color: var(--accent-red); }
+
+  .input {
+    width: 100%;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: var(--font-display);
+    transition: border-color 0.15s;
+  }
+  .input:focus { outline: none; border-color: var(--accent-orange); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1); }
+
+  /* ===== 1. AI 问答页 ===== */
+  .qa-layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 20px;
+    height: calc(100vh - 180px);
+  }
+  .qa-main {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .persona-bar {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-card);
+  }
+  .persona-chip {
+    padding: 6px 14px;
+    border-radius: 16px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .persona-chip:hover { background: var(--bg-elevated); }
+  .persona-chip.active {
+    background: var(--accent-orange);
+    color: #fff;
+    border-color: var(--accent-orange);
+    font-weight: 600;
+  }
+  .chat-area {
+    flex: 1;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-shadow: var(--shadow-card);
+  }
+  .msg {
+    display: flex;
+    gap: 12px;
+  }
+  .msg-avatar {
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .msg-user .msg-avatar { background: rgba(6, 182, 212, 0.1); color: var(--accent-cyan); }
+  .msg-ai .msg-avatar { background: var(--accent-orange); color: #fff; }
+  .msg-content {
+    flex: 1;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-primary);
+  }
+  .msg-content .citation {
+    display: inline-block;
+    background: rgba(6, 182, 212, 0.1);
+    color: var(--accent-cyan);
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    margin: 0 2px;
+  }
+  .msg-streaming::after {
+    content: '⏺';
+    color: var(--accent-orange);
+    animation: blink 1s infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .chat-input {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    box-shadow: var(--shadow-card);
+    transition: border-color 0.15s;
+  }
+  .chat-input:focus-within { border-color: var(--accent-orange); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1); }
+  .chat-input textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: var(--font-display);
+    resize: none;
+    height: 48px;
+  }
+  .chat-input textarea:focus { outline: none; }
+  .chat-input-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .chat-input-bar .hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+  .qa-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .source-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    transition: all 0.15s;
+  }
+  .source-card:hover { border-color: var(--accent-cyan); }
+  .source-card-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--text-primary);
+  }
+  .source-card-snippet {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    border-left: 2px solid var(--accent-cyan);
+    padding-left: 8px;
+    margin: 6px 0;
+  }
+  .source-card-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  /* ===== 2. 文档入库页 ===== */
+  .ingest-layout {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 20px;
+  }
+  .dropzone {
+    border: 2px dashed var(--border-light);
+    border-radius: var(--radius);
+    padding: 48px;
+    text-align: center;
+    background: var(--bg-card);
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .dropzone:hover {
+    border-color: var(--accent-orange);
+    background: rgba(245, 158, 11, 0.04);
+  }
+  .dropzone-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+  .dropzone-text {
+    font-size: 15px;
+    margin-bottom: 8px;
+  }
+  .dropzone-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .format-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+    margin-top: 20px;
+  }
+  .ingest-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ingest-tab {
+    padding: 10px 16px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .ingest-tab.active {
+    color: var(--accent-orange);
+    border-color: var(--accent-orange);
+  }
+  .upload-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .upload-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: var(--shadow-card);
+  }
+  .file-icon {
+    width: 36px; height: 36px;
+    background: rgba(245, 158, 11, 0.1);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent-orange);
+  }
+  .file-info { flex: 1; }
+  .file-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+  .file-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .progress-bar {
+    height: 4px;
+    background: var(--bg-elevated);
+    border-radius: 2px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-orange), var(--accent-cyan));
+    border-radius: 2px;
+  }
+  .file-status {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+  .status-success { background: rgba(16, 185, 129, 0.1); color: var(--accent-green); }
+  .status-processing { background: rgba(245, 158, 11, 0.1); color: var(--accent-orange); }
+
+  /* ===== 3. 搜索页 ===== */
+  .search-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .search-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    box-shadow: var(--shadow-card);
+    transition: border-color 0.15s;
+  }
+  .search-bar:focus-within { border-color: var(--accent-orange); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1); }
+  .search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 15px;
+    font-family: var(--font-display);
+  }
+  .search-input:focus { outline: none; }
+  .search-filters {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .toggle {
+    position: relative;
+    width: 32px; height: 18px;
+    background: var(--border-light);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    background: #fff;
+    border-radius: 50%;
+    top: 2px; left: 2px;
+    transition: 0.2s;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+  .toggle.on { background: var(--accent-orange); }
+  .toggle.on::after { left: 16px; }
+  .search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .result-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+    box-shadow: var(--shadow-card);
+  }
+  .result-item:hover {
+    border-color: var(--accent-orange);
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.1);
+  }
+  .result-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+  }
+  .result-snippet {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin: 8px 0;
+  }
+  .result-snippet mark {
+    background: rgba(245, 158, 11, 0.2);
+    color: var(--accent-orange);
+    padding: 1px 3px;
+    border-radius: 3px;
+    font-weight: 500;
+  }
+  .result-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .score-bar {
+    width: 60px;
+    height: 4px;
+    background: var(--bg-elevated);
+    border-radius: 2px;
+    overflow: hidden;
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .score-fill {
+    height: 100%;
+    background: var(--accent-cyan);
+  }
+
+  /* ===== 4. 数据分析页 ===== */
+  .analyze-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .sheet-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sheet-tab {
+    padding: 8px 16px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .sheet-tab.active {
+    color: var(--accent-orange);
+    border-color: var(--accent-orange);
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    box-shadow: var(--shadow-card);
+  }
+  .stat-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .stat-name {
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+  }
+  .stat-type {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+  }
+  .stat-rows {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+    font-family: var(--font-mono);
+  }
+  .stat-rows .label { color: var(--text-muted); display: inline-block; width: 60px; }
+  .ascii-chart {
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--accent-cyan);
+  }
+  .data-table {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .data-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .data-table th {
+    background: var(--bg-elevated);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .data-table td {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+  }
+  .data-table tr:hover td { background: var(--bg-elevated); }
+
+  /* ===== 5. 仪表盘 ===== */
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .metric-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--accent-orange);
+  }
+  .metric-card.cyan::before { background: var(--accent-cyan); }
+  .metric-card.purple::before { background: var(--accent-purple); }
+  .metric-card.green::before { background: var(--accent-green); }
+  .metric-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .metric-value {
+    font-size: 32px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+  }
+  .metric-delta {
+    font-size: 11px;
+    margin-top: 4px;
+    color: var(--accent-green);
+  }
+  .dashboard-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+  }
+  .chart-placeholder {
+    height: 200px;
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 16px;
+  }
+  .chart-bar {
+    flex: 1;
+    background: linear-gradient(180deg, var(--accent-orange), var(--accent-orange-dim));
+    border-radius: 4px 4px 0 0;
+    position: relative;
+  }
+  .chart-bar::after {
+    content: attr(data-label);
+    position: absolute;
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .alert-item {
+    padding: 10px 12px;
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    border-left: 3px solid var(--accent-red);
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .alert-item.warning { border-color: var(--accent-orange); }
+  .alert-item.info { border-color: var(--accent-cyan); }
+
+  /* ===== 6. 知识图谱 ===== */
+  .graph-layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 16px;
+    height: calc(100vh - 180px);
+  }
+  .graph-canvas {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+  }
+  .graph-bg {
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(circle at 50% 50%, rgba(245, 158, 11, 0.04), transparent 60%),
+      linear-gradient(rgba(229, 231, 235, 0.6) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(229, 231, 235, 0.6) 1px, transparent 1px);
+    background-size: auto, 24px 24px, 24px 24px;
+  }
+  .graph-svg {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  /* SVG 节点样式 */
+  .g-node { cursor: pointer; transition: filter 0.15s; }
+  .g-node:hover { filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.12)); }
+  .g-node-rect { fill: #fff; stroke-width: 2; }
+  .g-node-doc .g-node-rect { stroke: var(--accent-orange); }
+  .g-node-region .g-node-rect { stroke: var(--accent-cyan); }
+  .g-node-agency .g-node-rect { stroke: var(--accent-red); }
+  .g-node-topic .g-node-rect { stroke: var(--accent-purple); }
+  .g-node-doc .g-node-text { fill: var(--accent-orange); }
+  .g-node-region .g-node-text { fill: var(--accent-cyan); }
+  .g-node-agency .g-node-text { fill: var(--accent-red); }
+  .g-node-topic .g-node-text { fill: var(--accent-purple); }
+  .g-node-text {
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+  }
+  .g-node-center .g-node-rect { fill: var(--accent-orange); }
+  .g-node-center .g-node-text { fill: #fff; }
+  /* 连线样式 */
+  .g-edge { stroke: #cbd5e1; stroke-width: 1.5; fill: none; }
+  .g-edge-dashed { stroke-dasharray: 4 3; }
+  .g-edge-label {
+    font-family: var(--font-display);
+    font-size: 10px;
+    fill: var(--text-muted);
+    text-anchor: middle;
+    dominant-baseline: central;
+  }
+  .g-edge-label-bg { fill: var(--bg-card); }
+  .graph-legend {
+    position: absolute;
+    bottom: 16px; left: 16px;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 11px;
+    box-shadow: var(--shadow-card);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0;
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+  }
+  .graph-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* ===== 7. 宠物管理 ===== */
+  .pet-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  .pet-display {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    text-align: center;
+    box-shadow: var(--shadow-card);
+  }
+  .pet-ascii {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.2;
+    color: var(--accent-orange);
+    background: var(--bg-elevated);
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    white-space: pre;
+    text-align: left;
+    display: inline-block;
+  }
+  .pet-name {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    color: var(--text-primary);
+  }
+  .pet-level {
+    font-size: 12px;
+    color: var(--accent-cyan);
+    font-family: var(--font-mono);
+    margin-bottom: 20px;
+  }
+  .pet-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .pet-stat {
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .pet-stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .pet-stat-bar {
+    height: 6px;
+    background: var(--bg-base);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .pet-stat-fill {
+    height: 100%;
+    border-radius: 3px;
+  }
+  .pet-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  /* ===== 滚动条 ===== */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+  /* ===== 人格卡片 · 亮色 ===== */
+  .persona-card-style {
+    padding: 16px;
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .persona-card-style:hover { border-color: var(--accent-orange); }
+  .persona-card-style.active { border: 2px solid var(--accent-orange); background: rgba(245, 158, 11, 0.04); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Logo -->
+  <div class="logo-area">
+    <div class="logo-mark">IMA</div>
+    <div class="logo-text">
+      IMA 知识库
+      <span class="sub">WEB BACKEND v1.0</span>
+    </div>
+  </div>
+
+  <!-- 顶部导航 -->
+  <div class="topbar">
+    <div class="breadcrumb">知识库 / <span class="current" id="breadcrumb-current">AI 问答</span></div>
+    <div class="topbar-search">
+      <span>🔍</span>
+      <span style="color: var(--text-muted)">搜索文档...</span>
+      <span class="kbd">/</span>
+    </div>
+    <div class="status-dot" title="系统正常"></div>
+  </div>
+
+  <!-- 侧边栏 -->
+  <div class="sidebar">
+    <div class="nav-section">
+      <div class="nav-section-title">核心功能</div>
+      <div class="nav-item active" data-page="qa">
+        <span class="nav-icon">💬</span>
+        <span>AI 问答</span>
+      </div>
+      <div class="nav-item" data-page="ingest">
+        <span class="nav-icon">📥</span>
+        <span>文档入库</span>
+      </div>
+      <div class="nav-item" data-page="search">
+        <span class="nav-icon">🔍</span>
+        <span>搜索</span>
+      </div>
+      <div class="nav-item" data-page="analyze">
+        <span class="nav-icon">📊</span>
+        <span>数据分析</span>
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">管理</div>
+      <div class="nav-item" data-page="dashboard">
+        <span class="nav-icon">📈</span>
+        <span>仪表盘</span>
+      </div>
+      <div class="nav-item" data-page="graph">
+        <span class="nav-icon">🕸️</span>
+        <span>知识图谱</span>
+        <span class="nav-badge">98</span>
+      </div>
+      <div class="nav-item" data-page="pet">
+        <span class="nav-icon">🐾</span>
+        <span>宠物管理</span>
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">系统</div>
+      <div class="nav-item">
+        <span class="nav-icon">⚙️</span>
+        <span>设置</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">📖</span>
+        <span>帮助</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主内容区 -->
+  <div class="main">
+
+    <!-- 1. AI 问答页 -->
+    <div class="page active" id="page-qa">
+      <div class="page-header">
+        <div>
+          <div class="page-title">💬 AI 问答</div>
+          <div class="page-subtitle">基于知识库的 RAG 问答 · 宠物管理员风格 · 带引用溯源</div>
+        </div>
+        <button class="btn btn-ghost" style="margin-left: auto">🗑 清空对话</button>
+      </div>
+
+      <div class="qa-layout">
+        <div class="qa-main">
+          <!-- 人格切换 -->
+          <div class="persona-bar">
+            <span style="font-size: 12px; color: var(--text-muted); margin-right: 8px">人格:</span>
+            <div class="persona-chip active">scholar 学者</div>
+            <div class="persona-chip">warrior 战士</div>
+            <div class="persona-chip">artisan 工匠</div>
+            <div class="persona-chip">auto 自动</div>
+          </div>
+
+          <!-- 对话区 -->
+          <div class="chat-area">
+            <div class="msg msg-user">
+              <div class="msg-avatar">我</div>
+              <div class="msg-content">退役军人抚恤金标准有什么新规定?</div>
+            </div>
+            <div class="msg msg-ai">
+              <div class="msg-avatar">PET</div>
+              <div class="msg-content">
+                <strong>【学者风格 · 深度分析】</strong><br><br>
+                根据《退役军人抚恤优待条例》及最新政策文件,退役军人抚恤金标准调整如下:<br><br>
+                <strong>一、抚恤金标准调整</strong><br>
+                • 烈属抚恤金标准提高至每年 33,860 元<span class="citation">[1]</span><br>
+                • 因公牺牲军人遗属抚恤金标准为每年 29,280 元<span class="citation">[2]</span><br>
+                • 病故军人遗属抚恤金标准为每年 27,620 元<span class="citation">[2]</span><br><br>
+                <strong>二、对比分析</strong><br>
+                <table style="border-collapse: collapse; margin: 8px 0; font-size: 12px;">
+                  <tr style="border-bottom: 1px solid var(--border)">
+                    <td style="padding: 6px 12px 6px 0; color: var(--text-muted)">类别</td>
+                    <td style="padding: 6px 12px; color: var(--text-muted)">2024 标准</td>
+                    <td style="padding: 6px 12px; color: var(--text-muted)">2025 标准</td>
+                    <td style="padding: 6px 0; color: var(--text-muted)">涨幅</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 6px 12px 6px 0">烈属</td>
+                    <td style="padding: 6px 12px">30,860</td>
+                    <td style="padding: 6px 12px; color: var(--accent-orange)">33,860</td>
+                    <td style="padding: 6px 0; color: var(--accent-green)">+9.7%</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 6px 12px 6px 0">因公牺牲</td>
+                    <td style="padding: 6px 12px">26,280</td>
+                    <td style="padding: 6px 12px; color: var(--accent-orange)">29,280</td>
+                    <td style="padding: 6px 0; color: var(--accent-green)">+11.4%</td>
+                  </tr>
+                </table>
+                <br>
+                <strong>三、申领流程</strong><br>
+                申请人需携带身份证、退役证、烈士证明书等材料,到户籍所在地县级人民政府退役军人事务部门提出申请<span class="citation">[3]</span>。<br><br>
+                <span style="color: var(--text-muted); font-size: 11px">📎 引用来源:[1] 浙江省退役军人事务厅文件 [2] 民政部通知 [3] 申领指南</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 输入框 -->
+          <div class="chat-input">
+            <textarea placeholder="输入问题,Ctrl+Enter 发送..."></textarea>
+            <div class="chat-input-bar">
+              <span class="hint">Ctrl+Enter 发送 · Shift+Enter 换行</span>
+              <button class="btn btn-primary" style="margin-left: auto">发送 →</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧来源面板 -->
+        <div class="qa-sidebar">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">📚 引用来源 (3)</div>
+            </div>
+            <div class="source-card">
+              <div class="source-card-title">浙江省退役军人抚恤优待办法</div>
+              <div class="source-card-snippet">...烈属抚恤金标准由 30,860 元提高至 33,860 元,自 2025 年 1 月起执行...</div>
+              <div class="source-card-meta">
+                <span>📄 PDF · 2025-03</span>
+                <span>相关度 96%</span>
+              </div>
+            </div>
+            <div class="source-card">
+              <div class="source-card-title">民政部关于调整抚恤金标准的通知</div>
+              <div class="source-card-snippet">...因公牺牲军人遗属抚恤金标准为 29,280 元/年,病故军人遗属...</div>
+              <div class="source-card-meta">
+                <span>📄 PDF · 2024-12</span>
+                <span>相关度 89%</span>
+              </div>
+            </div>
+            <div class="source-card">
+              <div class="source-card-title">退役军人服务办理指南</div>
+              <div class="source-card-snippet">...申请人需到户籍所在地县级退役军人事务部门办理,材料齐全...</div>
+              <div class="source-card-meta">
+                <span>📝 Word · 2025-01</span>
+                <span>相关度 82%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 12px">💡 推荐问题</div>
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 2">
+              <div style="cursor: pointer; padding: 4px 0">→ 骨灰安置有哪些生态安葬方式?</div>
+              <div style="cursor: pointer; padding: 4px 0">→ 殡葬服务收费标准是什么?</div>
+              <div style="cursor: pointer; padding: 4px 0">→ 杭州市殡葬改革最新政策?</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. 文档入库页 -->
+    <div class="page" id="page-ingest">
+      <div class="page-header">
+        <div>
+          <div class="page-title">📥 文档入库</div>
+          <div class="page-subtitle">拖拽文件 · 自动解析 · 智能标签 · 知识图谱构建</div>
+        </div>
+      </div>
+
+      <div class="ingest-layout">
+        <div>
+          <div class="ingest-tabs">
+            <div class="ingest-tab active">📁 文件上传</div>
+            <div class="ingest-tab">🔗 URL 入库</div>
+            <div class="ingest-tab">📋 剪贴板</div>
+          </div>
+
+          <div class="dropzone">
+            <div class="dropzone-icon">📂</div>
+            <div class="dropzone-text"><strong>拖拽文件到此处</strong> 或点击选择</div>
+            <div class="dropzone-hint">支持批量上传,单文件最大 100MB</div>
+            <div class="format-pills">
+              <span class="tag tag-orange">PDF</span>
+              <span class="tag tag-cyan">Word</span>
+              <span class="tag tag-purple">Excel</span>
+              <span class="tag tag-red">PPT</span>
+              <span class="tag">MD</span>
+              <span class="tag">TXT</span>
+              <span class="tag">HTML</span>
+              <span class="tag">图片</span>
+              <span class="tag">扫描 PDF</span>
+              <span class="tag">.doc</span>
+            </div>
+          </div>
+
+          <div style="margin-top: 24px">
+            <div class="card-title" style="margin-bottom: 12px">上传队列 (3)</div>
+            <div class="upload-list">
+              <div class="upload-item">
+                <div class="file-icon">PDF</div>
+                <div class="file-info">
+                  <div class="file-name">浙江省殡葬管理条例.pdf</div>
+                  <div class="file-meta">2.4 MB · 18 页</div>
+                  <div class="progress-bar"><div class="progress-fill" style="width: 100%"></div></div>
+                </div>
+                <div class="file-status status-success">✓ 已入库</div>
+              </div>
+              <div class="upload-item">
+                <div class="file-icon">DOC</div>
+                <div class="file-info">
+                  <div class="file-name">退役军人抚恤优待办法.docx</div>
+                  <div class="file-meta">156 KB · 3,2 个分块</div>
+                  <div class="progress-bar"><div class="progress-fill" style="width: 65%"></div></div>
+                </div>
+                <div class="file-status status-processing">⏳ 生成标签...</div>
+              </div>
+              <div class="upload-item">
+                <div class="file-icon">XLS</div>
+                <div class="file-info">
+                  <div class="file-name">殡葬服务收费标准.xlsx</div>
+                  <div class="file-meta">48 KB · 3 sheets</div>
+                  <div class="progress-bar"><div class="progress-fill" style="width: 30%"></div></div>
+                </div>
+                <div class="file-status status-processing">⏳ 解析中...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 16px">✅ 最近入库结果</div>
+            <div style="border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 12px">
+              <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px">浙江省殡葬管理条例</div>
+              <div style="margin: 8px 0">
+                <span class="tag tag-orange">殡葬改革</span>
+                <span class="tag tag-cyan">浙江省</span>
+                <span class="tag tag-purple">管理条例</span>
+                <span class="tag">生态安葬</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); display: flex; gap: 12px">
+                <span>📄 PDF · 18 页</span>
+                <span>🧩 24 个分块</span>
+                <span>🕸️ 图谱已更新</span>
+              </div>
+            </div>
+            <div style="border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 12px">
+              <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px">杭州市殡葬服务指南</div>
+              <div style="margin: 8px 0">
+                <span class="tag tag-orange">服务指南</span>
+                <span class="tag tag-cyan">杭州市</span>
+                <span class="tag">收费标准</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); display: flex; gap: 12px">
+                <span>📝 Word · 8 页</span>
+                <span>🧩 12 个分块</span>
+              </div>
+            </div>
+            <div>
+              <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px">骨灰安置政策汇编</div>
+              <div style="margin: 8px 0">
+                <span class="tag tag-orange">骨灰安置</span>
+                <span class="tag tag-red">政策汇编</span>
+                <span class="tag">海葬</span>
+                <span class="tag">树葬</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); display: flex; gap: 12px">
+                <span>📄 PDF · 32 页</span>
+                <span>🧩 45 个分块</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <div class="card-title" style="margin-bottom: 12px">📊 入库统计</div>
+            <div style="font-size: 12px; line-height: 2; color: var(--text-secondary)">
+              <div style="display: flex; justify-content: space-between"><span>总文档数</span><span style="color: var(--accent-orange); font-family: var(--font-mono)">33</span></div>
+              <div style="display: flex; justify-content: space-between"><span>总分块数</span><span style="color: var(--accent-cyan); font-family: var(--font-mono)">412</span></div>
+              <div style="display: flex; justify-content: space-between"><span>自动标签</span><span style="color: var(--accent-purple); font-family: var(--font-mono)">67</span></div>
+              <div style="display: flex; justify-content: space-between"><span>图谱节点</span><span style="color: var(--accent-red); font-family: var(--font-mono)">98</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. 搜索页 -->
+    <div class="page" id="page-search">
+      <div class="page-header">
+        <div>
+          <div class="page-title">🔍 搜索</div>
+          <div class="page-subtitle">BM25 + 向量混合检索 · RRF 融合 · LLM 重排序</div>
+        </div>
+      </div>
+
+      <div class="search-layout">
+        <div class="search-bar">
+          <span style="font-size: 18px">🔍</span>
+          <input class="search-input" value="骨灰安置 生态安葬" placeholder="输入关键词或问题...">
+          <button class="btn btn-primary">搜索</button>
+        </div>
+
+        <div class="search-filters">
+          <div class="filter-group">
+            <span>向量检索</span>
+            <div class="toggle on"></div>
+          </div>
+          <div class="filter-group">
+            <span>LLM 重排序</span>
+            <div class="toggle on"></div>
+          </div>
+          <div class="filter-group">
+            <span>标签筛选:</span>
+            <span class="tag tag-orange">殡葬改革 ×</span>
+            <span class="tag tag-cyan">杭州市 ×</span>
+            <span class="tag" style="cursor: pointer">+ 添加</span>
+          </div>
+          <div class="filter-group" style="margin-left: auto">
+            <span>排序:</span>
+            <select style="background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-family: var(--font-display)">
+              <option>相关度</option>
+              <option>时间</option>
+              <option>文档名</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="font-size: 12px; color: var(--text-muted)">找到 <span style="color: var(--accent-orange)">8</span> 个结果 · 用时 0.42 秒</div>
+
+        <div class="search-results">
+          <div class="result-item">
+            <div class="result-title">
+              📄 骨灰安置政策汇编
+              <span class="tag tag-orange">骨灰安置</span>
+              <span class="tag tag-cyan">生态安葬</span>
+            </div>
+            <div class="result-snippet">
+              ...推行<mark>生态安葬</mark>方式,包括海葬、树葬、花葬、草坪葬等。对选择<mark>骨灰</mark>撒散或不保留<mark>骨灰</mark>的,给予奖励补贴...
+            </div>
+            <div class="result-meta">
+              <span>📄 PDF · 32 页</span>
+              <span>🕐 2025-03-15</span>
+              <span>相关度 <span class="score-bar"><span class="score-fill" style="width: 96%"></span></span> 96%</span>
+            </div>
+          </div>
+
+          <div class="result-item">
+            <div class="result-title">
+              📄 浙江省殡葬管理条例
+              <span class="tag tag-orange">殡葬改革</span>
+              <span class="tag tag-cyan">浙江省</span>
+            </div>
+            <div class="result-snippet">
+              ...<mark>骨灰</mark>处理应当尊重死者意愿,鼓励采用<mark>生态安葬</mark>方式。各级人民政府应当<mark>骨灰安置</mark>设施建设纳入城乡规划...
+            </div>
+            <div class="result-meta">
+              <span>📄 PDF · 18 页</span>
+              <span>🕐 2025-02-20</span>
+              <span>相关度 <span class="score-bar"><span class="score-fill" style="width: 89%"></span></span> 89%</span>
+            </div>
+          </div>
+
+          <div class="result-item">
+            <div class="result-title">
+              📝 杭州市殡葬服务指南
+              <span class="tag tag-orange">服务指南</span>
+              <span class="tag tag-cyan">杭州市</span>
+            </div>
+            <div class="result-snippet">
+              ...杭州市提供多种<mark>骨灰安置</mark>方式:骨灰堂寄存、骨灰墓穴安葬、<mark>生态安葬</mark>(海葬/树葬)。其中生态安葬享受政府补贴...
+            </div>
+            <div class="result-meta">
+              <span>📝 Word · 8 页</span>
+              <span>🕐 2025-01-10</span>
+              <span>相关度 <span class="score-bar"><span class="score-fill" style="width: 82%"></span></span> 82%</span>
+            </div>
+          </div>
+
+          <div class="result-item">
+            <div class="result-title">
+              📊 殡葬服务收费标准
+              <span class="tag tag-orange">收费标准</span>
+            </div>
+            <div class="result-snippet">
+              ...<mark>生态安葬</mark>收费标准:海葬(免费,政府补贴 2000 元)、树葬(800 元)、花葬(1200 元)。<mark>骨灰</mark>寄存 50 元/年...
+            </div>
+            <div class="result-meta">
+              <span>📊 Excel · 3 sheets</span>
+              <span>🕐 2024-12-05</span>
+              <span>相关度 <span class="score-bar"><span class="score-fill" style="width: 75%"></span></span> 75%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 数据分析页 -->
+    <div class="page" id="page-analyze">
+      <div class="page-header">
+        <div>
+          <div class="page-title">📊 数据分析</div>
+          <div class="page-subtitle">Excel 多 sheet 自动统计 · 字符图可视化 · AI 趋势解读</div>
+        </div>
+        <button class="btn btn-primary" style="margin-left: auto">🤖 AI 解读</button>
+      </div>
+
+      <div class="analyze-layout">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">殡葬服务收费.xlsx</div>
+            <button class="btn">📤 导出报告</button>
+          </div>
+          <div class="sheet-tabs">
+            <div class="sheet-tab active">Sheet1: 收费标准</div>
+            <div class="sheet-tab">Sheet2: 服务量</div>
+            <div class="sheet-tab">Sheet3: 统计</div>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-name">服务项目</div>
+              <div class="stat-type">文本</div>
+            </div>
+            <div class="stat-rows">
+              <div><span class="label">空值</span>0</div>
+              <div><span class="label">唯一值</span>12</div>
+              <div><span class="label">示例</span>骨灰盒、寿衣...</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-name">收费标准(元)</div>
+              <div class="stat-type">数值</div>
+            </div>
+            <div class="stat-rows">
+              <div><span class="label">最小</span>50</div>
+              <div><span class="label">最大</span>8,800</div>
+              <div><span class="label">均值</span>1,567</div>
+            </div>
+            <div class="ascii-chart">
+              50  ▌<br>
+              800 ████████▌<br>
+              1200████████████▌<br>
+              2000████████████████████▌<br>
+              8800██████████████████████████████████████████████████████████▌
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-name">服务次数</div>
+              <div class="stat-type">数值</div>
+            </div>
+            <div class="stat-rows">
+              <div><span class="label">最小</span>12</div>
+              <div><span class="label">最大</span>458</div>
+              <div><span class="label">均值</span>156</div>
+            </div>
+            <div class="ascii-chart">
+              12  ▌<br>
+              45  ████▌<br>
+              156 ████████████████▌<br>
+              230 ████████████████████████▌<br>
+              458 █████████████████████████████████████████████████▌
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <div class="stat-name">收入(万元)</div>
+              <div class="stat-type">数值</div>
+            </div>
+            <div class="stat-rows">
+              <div><span class="label">总计</span>234.5</div>
+              <div><span class="label">均值</span>19.5</div>
+            </div>
+            <div class="ascii-chart">
+              2.4  ▌<br>
+              15.6 ██████▌<br>
+              36.0 ██████████████▌<br>
+              58.2 ███████████████████████▌<br>
+              78.5 █████████████████████████████████▌
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title" style="margin-bottom: 12px">数据预览(前 5 行)</div>
+          <div class="data-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>服务项目</th>
+                  <th>收费标准(元)</th>
+                  <th>服务次数</th>
+                  <th>收入(万元)</th>
+                  <th>备注</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>骨灰盒</td><td>800</td><td>458</td><td>36.6</td><td>基础款</td></tr>
+                <tr><td>寿衣</td><td>1,200</td><td>230</td><td>27.6</td><td>含配件</td></tr>
+                <tr><td>骨灰寄存</td><td>50/年</td><td>412</td><td>20.6</td><td>长期</td></tr>
+                <tr><td>海葬</td><td>免费</td><td>156</td><td>0</td><td>政府补贴</td></tr>
+                <tr><td>树葬</td><td>800</td><td>89</td><td>7.1</td><td>含纪念碑</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="border-left: 3px solid var(--accent-cyan)">
+          <div class="card-title" style="margin-bottom: 12px; color: var(--accent-cyan)">🤖 AI 解读</div>
+          <div style="font-size: 13px; line-height: 1.8; color: var(--text-secondary)">
+            根据数据分析:<br>
+            <strong style="color: var(--accent-orange)">1. 收入结构</strong>:骨灰盒和寿衣是主要收入来源(占 27%),骨灰寄存虽单价低但量大(412 次)。<br>
+            <strong style="color: var(--accent-orange)">2. 生态安葬趋势</strong>:海葬 156 次(免费+政府补贴),树葬 89 次,生态安葬占比 28%,较去年增长 15%。<br>
+            <strong style="color: var(--accent-orange)">3. 建议</strong>:可加大生态安葬宣传,优化骨灰寄存服务流程。
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. 仪表盘 -->
+    <div class="page" id="page-dashboard">
+      <div class="page-header">
+        <div>
+          <div class="page-title">📈 仪表盘</div>
+          <div class="page-subtitle">知识库总览 · 质量告警 · 最近活动</div>
+        </div>
+        <button class="btn" style="margin-left: auto">🔄 刷新</button>
+      </div>
+
+      <div class="dashboard-grid">
+        <div class="metric-card">
+          <div class="metric-label">文档总数</div>
+          <div class="metric-value">33</div>
+          <div class="metric-delta">↑ 本周 +3</div>
+        </div>
+        <div class="metric-card cyan">
+          <div class="metric-label">分块总数</div>
+          <div class="metric-value">412</div>
+          <div class="metric-delta">↑ 本周 +45</div>
+        </div>
+        <div class="metric-card purple">
+          <div class="metric-label">标签数量</div>
+          <div class="metric-value">67</div>
+          <div class="metric-delta">↑ 本周 +8</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-label">图谱节点</div>
+          <div class="metric-value">98</div>
+          <div class="metric-delta">↑ 本周 +12</div>
+        </div>
+      </div>
+
+      <div class="dashboard-row">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📊 标签分布 Top 10</div>
+          </div>
+          <div class="chart-placeholder">
+            <div class="chart-bar" style="height: 85%" data-label="殡葬改革"></div>
+            <div class="chart-bar" style="height: 70%" data-label="骨灰安置"></div>
+            <div class="chart-bar" style="height: 65%" data-label="浙江省"></div>
+            <div class="chart-bar" style="height: 55%" data-label="抚恤金"></div>
+            <div class="chart-bar" style="height: 50%" data-label="生态安葬"></div>
+            <div class="chart-bar" style="height: 40%" data-label="杭州市"></div>
+            <div class="chart-bar" style="height: 35%" data-label="收费标准"></div>
+            <div class="chart-bar" style="height: 30%" data-label="退役军人"></div>
+            <div class="chart-bar" style="height: 25%" data-label="海葬"></div>
+            <div class="chart-bar" style="height: 20%" data-label="树葬"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">⚠️ 质量告警</div>
+          </div>
+          <div class="alert-item warning">
+            <strong>⚠️ 超长分块</strong><br>
+            <span style="color: var(--text-secondary)">「政策汇编.pdf」第 12 个分块超过 2000 字</span>
+          </div>
+          <div class="alert-item info">
+            <strong>ℹ️ 标签缺失</strong><br>
+            <span style="color: var(--text-secondary)">2 个文档未生成标签,建议运行 <code style="background: var(--bg-elevated); padding: 1px 4px; border-radius: 2px">ima retag</code></span>
+          </div>
+          <div class="alert-item">
+            <strong>❌ 空文档</strong><br>
+            <span style="color: var(--text-secondary)">「扫描件.pdf」OCR 失败,内容为空</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 16px">
+        <div class="card-header">
+          <div class="card-title">🕐 最近入库</div>
+          <button class="btn btn-ghost">查看全部 →</button>
+        </div>
+        <div class="data-table">
+          <table>
+            <thead>
+              <tr><th>文档名</th><th>格式</th><th>标签</th><th>分块</th><th>入库时间</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>浙江省殡葬管理条例</td><td>PDF</td><td><span class="tag tag-orange">殡葬改革</span></td><td>24</td><td>2025-07-07 14:30</td></tr>
+              <tr><td>退役军人抚恤优待办法</td><td>Word</td><td><span class="tag tag-cyan">退役军人</span></td><td>32</td><td>2025-07-07 11:20</td></tr>
+              <tr><td>殡葬服务收费标准</td><td>Excel</td><td><span class="tag tag-purple">收费标准</span></td><td>8</td><td>2025-07-06 16:45</td></tr>
+              <tr><td>骨灰安置政策汇编</td><td>PDF</td><td><span class="tag tag-orange">骨灰安置</span></td><td>45</td><td>2025-07-06 09:15</td></tr>
+              <tr><td>杭州市殡葬服务指南</td><td>Word</td><td><span class="tag tag-cyan">杭州市</span></td><td>12</td><td>2025-07-05 14:00</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. 知识图谱 -->
+    <div class="page" id="page-graph">
+      <div class="page-header">
+        <div>
+          <div class="page-title">🕸️ 知识图谱</div>
+          <div class="page-subtitle">98 节点 · 131 边 · LLM 抽取实体关系</div>
+        </div>
+        <div style="margin-left: auto; display: flex; gap: 8px">
+          <button class="btn">🔄 重建</button>
+          <button class="btn btn-primary">📥 导出 HTML</button>
+        </div>
+      </div>
+
+      <div class="graph-layout">
+        <div class="graph-canvas">
+          <div class="graph-bg"></div>
+          <svg class="graph-svg" viewBox="0 0 800 540" preserveAspectRatio="xMidYMid meet">
+            <!-- 箭头标记定义 -->
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#cbd5e1"/>
+              </marker>
+              <marker id="arrow-dashed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af"/>
+              </marker>
+            </defs>
+
+            <!-- ===== 连线层(先画线,后画节点,让节点覆盖线端) ===== -->
+            <!-- 中心文档(400,270) → 浙江省(200,90): published_in -->
+            <line class="g-edge" x1="400" y1="270" x2="200" y2="90" marker-end="url(#arrow)"/>
+            <rect class="g-edge-label-bg" x="270" y="170" width="70" height="14" rx="3"/>
+            <text class="g-edge-label" x="305" y="177">published_in</text>
+
+            <!-- 中心文档(400,270) → 杭州市(600,90): published_in -->
+            <line class="g-edge" x1="400" y1="270" x2="600" y2="90" marker-end="url(#arrow)"/>
+            <rect class="g-edge-label-bg" x="465" y="170" width="70" height="14" rx="3"/>
+            <text class="g-edge-label" x="500" y="177">published_in</text>
+
+            <!-- 中心文档(400,270) → 浙江省民政厅(100,270): published_by -->
+            <line class="g-edge" x1="400" y1="270" x2="100" y2="270" marker-end="url(#arrow)"/>
+            <rect class="g-edge-label-bg" x="215" y="263" width="70" height="14" rx="3"/>
+            <text class="g-edge-label" x="250" y="270">published_by</text>
+
+            <!-- 中心文档(400,270) → 杭州市民政局(700,270): published_by -->
+            <line class="g-edge" x1="400" y1="270" x2="700" y2="270" marker-end="url(#arrow)"/>
+            <rect class="g-edge-label-bg" x="515" y="263" width="70" height="14" rx="3"/>
+            <text class="g-edge-label" x="550" y="270">published_by</text>
+
+            <!-- 中心文档(400,270) → 殡葬改革(180,450): covers_topic -->
+            <line class="g-edge" x1="400" y1="270" x2="180" y2="450" marker-end="url(#arrow)"/>
+            <rect class="g-edge-label-bg" x="255" y="353" width="70" height="14" rx="3"/>
+            <text class="g-edge-label" x="290" y="360">covers_topic</text>
+
+            <!-- 中心文档(400,270) → 骨灰安置(400,490): covers_topic -->
+            <line class="g-edge" x1="400" y1="270" x2="400" y2="490" marker-end="url(#arrow)"/>
+            <rect class="g-edge-label-bg" x="365" y="373" width="70" height="14" rx="3"/>
+            <text class="g-edge-label" x="400" y="380">covers_topic</text>
+
+            <!-- 中心文档(400,270) → 生态安葬(620,450): covers_topic -->
+            <line class="g-edge" x1="400" y1="270" x2="620" y2="450" marker-end="url(#arrow)"/>
+            <rect class="g-edge-label-bg" x="475" y="353" width="70" height="14" rx="3"/>
+            <text class="g-edge-label" x="510" y="360">covers_topic</text>
+
+            <!-- 浙江省(200,90) → 杭州市(600,90): contains (虚线,横向关系) -->
+            <line class="g-edge g-edge-dashed" x1="200" y1="90" x2="600" y2="90" marker-end="url(#arrow-dashed)"/>
+            <rect class="g-edge-label-bg" x="385" y="83" width="50" height="14" rx="3"/>
+            <text class="g-edge-label" x="410" y="90">contains</text>
+
+            <!-- 殡葬改革(180,450) → 生态安葬(620,450): related_to (虚线) -->
+            <line class="g-edge g-edge-dashed" x1="180" y1="450" x2="620" y2="450" marker-end="url(#arrow-dashed)"/>
+            <rect class="g-edge-label-bg" x="365" y="443" width="60" height="14" rx="3"/>
+            <text class="g-edge-label" x="395" y="450">related_to</text>
+
+            <!-- 骨灰安置(400,490) → 生态安葬(620,450): related_to (虚线) -->
+            <line class="g-edge g-edge-dashed" x1="400" y1="490" x2="620" y2="450" marker-end="url(#arrow-dashed)"/>
+
+            <!-- ===== 节点层 ===== -->
+            <!-- 中心:浙江省殡葬管理条例 (doc, 主节点) -->
+            <g class="g-node g-node-doc g-node-center">
+              <rect class="g-node-rect" x="310" y="252" width="180" height="36" rx="18"/>
+              <text class="g-node-text" x="400" y="270">浙江省殡葬管理条例</text>
+            </g>
+
+            <!-- 左上:浙江省 (region) -->
+            <g class="g-node g-node-region">
+              <rect class="g-node-rect" x="160" y="74" width="80" height="32" rx="16"/>
+              <text class="g-node-text" x="200" y="90">浙江省</text>
+            </g>
+
+            <!-- 右上:杭州市 (region) -->
+            <g class="g-node g-node-region">
+              <rect class="g-node-rect" x="560" y="74" width="80" height="32" rx="16"/>
+              <text class="g-node-text" x="600" y="90">杭州市</text>
+            </g>
+
+            <!-- 左中:浙江省民政厅 (agency) -->
+            <g class="g-node g-node-agency">
+              <rect class="g-node-rect" x="40" y="254" width="120" height="32" rx="16"/>
+              <text class="g-node-text" x="100" y="270">浙江省民政厅</text>
+            </g>
+
+            <!-- 右中:杭州市民政局 (agency) -->
+            <g class="g-node g-node-agency">
+              <rect class="g-node-rect" x="640" y="254" width="120" height="32" rx="16"/>
+              <text class="g-node-text" x="700" y="270">杭州市民政局</text>
+            </g>
+
+            <!-- 左下:殡葬改革 (topic) -->
+            <g class="g-node g-node-topic">
+              <rect class="g-node-rect" x="130" y="434" width="100" height="32" rx="16"/>
+              <text class="g-node-text" x="180" y="450">殡葬改革</text>
+            </g>
+
+            <!-- 中下:骨灰安置 (topic) -->
+            <g class="g-node g-node-topic">
+              <rect class="g-node-rect" x="350" y="474" width="100" height="32" rx="16"/>
+              <text class="g-node-text" x="400" y="490">骨灰安置</text>
+            </g>
+
+            <!-- 右下:生态安葬 (topic) -->
+            <g class="g-node g-node-topic">
+              <rect class="g-node-rect" x="570" y="434" width="100" height="32" rx="16"/>
+              <text class="g-node-text" x="620" y="450">生态安葬</text>
+            </g>
+          </svg>
+
+          <div class="graph-legend">
+            <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary)">节点类型</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-orange)"></div>document 文档</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-cyan)"></div>region 地区</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-red)"></div>agency 机构</div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-purple)"></div>topic 主题</div>
+          </div>
+        </div>
+
+        <div class="graph-sidebar">
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 12px">🔍 节点查询</div>
+            <input class="input" placeholder="输入节点名称...">
+            <div style="margin-top: 12px">
+              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px">点击节点查看邻居</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 12px">📊 图谱统计</div>
+            <div style="font-size: 12px; line-height: 2; color: var(--text-secondary)">
+              <div style="display: flex; justify-content: space-between"><span>文档节点</span><span style="color: var(--accent-orange); font-family: var(--font-mono)">33</span></div>
+              <div style="display: flex; justify-content: space-between"><span>地区节点</span><span style="color: var(--accent-cyan); font-family: var(--font-mono)">12</span></div>
+              <div style="display: flex; justify-content: space-between"><span>机构节点</span><span style="color: var(--accent-red); font-family: var(--font-mono)">18</span></div>
+              <div style="display: flex; justify-content: space-between"><span>主题节点</span><span style="color: var(--accent-purple); font-family: var(--font-mono)">35</span></div>
+              <div style="border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; display: flex; justify-content: space-between"><span>总边数</span><span style="color: var(--text-primary); font-family: var(--font-mono)">131</span></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 12px">🔗 邻居节点</div>
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.8">
+              <div>→ <span style="color: var(--accent-cyan)">浙江省</span> (published_in)</div>
+              <div>→ <span style="color: var(--accent-red)">浙江省民政厅</span> (published_by)</div>
+              <div>→ <span style="color: var(--accent-purple)">殡葬改革</span> (covers_topic)</div>
+              <div>→ <span style="color: var(--accent-purple)">骨灰安置</span> (covers_topic)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. 宠物管理 -->
+    <div class="page" id="page-pet">
+      <div class="page-header">
+        <div>
+          <div class="page-title">🐾 宠物管理</div>
+          <div class="page-subtitle">宠物管理员 · 4 种人格风格 · 升级养成</div>
+        </div>
+      </div>
+
+      <div class="pet-layout">
+        <div class="pet-display">
+          <div class="pet-ascii">  ████████████████
+  ██░░░░░░░░░░░░██
+  ██░░██░░░░░░██░░██
+  ██░░░░████████░░░░██
+  ██░░░░░░░░░░░░░░░░██
+  ████░░░░░░░░░░░░████
+  ██░░████████████░░██
+  ██░░░░░░░░░░░░░░░░██
+  ████░░░░░░░░░░░░████
+    ████░░░░░░░░████
+      ████████████</div>
+          <div class="pet-name">小白</div>
+          <div class="pet-level">Lv.7 · scholar 学者 · 经验 2,340 / 3,000</div>
+
+          <div class="pet-stats">
+            <div class="pet-stat">
+              <div class="pet-stat-label">😊 心情</div>
+              <div class="pet-stat-bar"><div class="pet-stat-fill" style="width: 85%; background: var(--accent-orange)"></div></div>
+            </div>
+            <div class="pet-stat">
+              <div class="pet-stat-label">🍖 饱食</div>
+              <div class="pet-stat-bar"><div class="pet-stat-fill" style="width: 60%; background: var(--accent-cyan)"></div></div>
+            </div>
+            <div class="pet-stat">
+              <div class="pet-stat-label">⚡ 能量</div>
+              <div class="pet-stat-bar"><div class="pet-stat-fill" style="width: 75%; background: var(--accent-purple)"></div></div>
+            </div>
+            <div class="pet-stat">
+              <div class="pet-stat-label">📚 智力</div>
+              <div class="pet-stat-bar"><div class="pet-stat-fill" style="width: 90%; background: var(--accent-green)"></div></div>
+            </div>
+          </div>
+
+          <div class="pet-actions">
+            <button class="btn">🍖 喂食</button>
+            <button class="btn">🎾 玩耍</button>
+            <button class="btn">📚 训练</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-title" style="margin-bottom: 16px">🎨 人格风格</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+              <div class="persona-card-style active">
+                <div style="font-size: 24px; margin-bottom: 8px">🎓</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--accent-orange)">scholar 学者</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">深度分析·引用密集·表格对比</div>
+                <div style="font-size: 10px; color: var(--accent-green); margin-top: 8px">● 当前使用</div>
+              </div>
+              <div class="persona-card-style">
+                <div style="font-size: 24px; margin-bottom: 8px">⚔️</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary)">warrior 战士</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">直接结论·行动建议·简洁</div>
+              </div>
+              <div class="persona-card-style">
+                <div style="font-size: 24px; margin-bottom: 8px">🔧</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary)">artisan 工匠</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">结构化·小标题·可视化</div>
+              </div>
+              <div class="persona-card-style">
+                <div style="font-size: 24px; margin-bottom: 8px">🤖</div>
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-primary)">auto 自动</div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">根据问题自动选择</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top: 16px">
+            <div class="card-title" style="margin-bottom: 12px">📈 成长记录</div>
+            <div style="font-size: 12px; line-height: 1.8; color: var(--text-secondary)">
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border)">
+                <span>累计问答</span><span style="color: var(--accent-orange); font-family: var(--font-mono)">156 次</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border)">
+                <span>累计经验</span><span style="color: var(--accent-cyan); font-family: var(--font-mono)">2,340 EXP</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border)">
+                <span>升级次数</span><span style="color: var(--accent-purple); font-family: var(--font-mono)">6 次</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 4px 0">
+                <span>下次升级</span><span style="color: var(--accent-green); font-family: var(--font-mono)">还需 660 EXP</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // 导航切换
+  const navItems = document.querySelectorAll('.nav-item[data-page]');
+  const pages = document.querySelectorAll('.page');
+  const breadcrumb = document.getElementById('breadcrumb-current');
+  const pageNames = {
+    qa: 'AI 问答',
+    ingest: '文档入库',
+    search: '搜索',
+    analyze: '数据分析',
+    dashboard: '仪表盘',
+    graph: '知识图谱',
+    pet: '宠物管理'
+  };
+
+  navItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const target = item.dataset.page;
+      navItems.forEach(n => n.classList.remove('active'));
+      item.classList.add('active');
+      pages.forEach(p => p.classList.remove('active'));
+      document.getElementById('page-' + target).classList.add('active');
+      breadcrumb.textContent = pageNames[target];
+    });
+  });
+
+  // 人格切换
+  document.querySelectorAll('.persona-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.persona-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
+  });
+
+  // 开关切换
+  document.querySelectorAll('.toggle').forEach(t => {
+    t.addEventListener('click', () => t.classList.toggle('on'));
+  });
+
+  // Tab 切换
+  document.querySelectorAll('.ingest-tab, .sheet-tab').forEach(tab => {
+    tab.addEventListener('click', function() {
+      const siblings = this.parentElement.querySelectorAll('.' + this.classList);
+      siblings.forEach(s => s.classList.remove('active'));
+      this.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

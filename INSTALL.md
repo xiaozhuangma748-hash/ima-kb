@@ -104,6 +104,8 @@ ima
 | `/ingest 路径` | 入库文件（PDF/Word/Excel/PPT/图片...） |
 | `/analyze 文件.xlsx` | **数据表智能分析**（自动统计 + 字符图 + AI 解读） |
 | `/search 关键词` | 搜索（`/s` 是别名） |
+| `/web` | **启动 Web 后台**（后台线程，不阻塞 REPL） |
+| `/web stop` | **停止 Web 后台** |
 | `/se save [名称]` | 保存当前会话 |
 | `/se load <名称>` | 恢复已保存的会话 |
 | `/pet` | 查看宠物状态 |
@@ -116,6 +118,8 @@ ima
 | `/help` | 完整帮助 |
 | `/exit` | 退出 |
 
+> **💡 命令补全**：输入 `/` 自动弹出所有命令 + 中文描述，输入 `/s` 匹配所有 s 开头命令，用 ↑↓ 选择、Tab 确认。
+
 ### 命令行单次执行
 
 ```bash
@@ -127,7 +131,6 @@ ima memory                              # 查看记忆
 ima rebuild --vector                    # 重建索引（含向量）
 ima graph build                         # 构建知识图谱
 ima graph export                        # 导出 HTML 图谱可视化
-ima web                                 # 启动 Web 界面（http://localhost:8501）
 ```
 
 ---
