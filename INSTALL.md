@@ -7,7 +7,7 @@
 ## 🚀 一行命令安装（推荐）
 
 ```bash
-git clone <仓库地址> && cd ima-kb && ./install.sh
+git clone https://github.com/xiaozhuangma748-hash/ima-kb.git && cd ima-kb && ./install.sh
 ```
 
 **就这样。** 脚本会自动完成所有事情：检查 Python → 创建虚拟环境 → 装依赖 → 配置 `ima` 命令 → 验证。
@@ -24,7 +24,7 @@ git clone <仓库地址> && cd ima-kb && ./install.sh
 ### 第 1 步：克隆仓库
 
 ```bash
-git clone <仓库地址>
+git clone https://github.com/xiaozhuangma748-hash/ima-kb.git
 cd ima-kb
 ```
 
