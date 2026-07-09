@@ -34,7 +34,7 @@ from prompt_toolkit import prompt as pt_prompt
 from prompt_toolkit.completion import Completer, Completion, NestedCompleter
 from prompt_toolkit.styles import Style as PtStyle
 
-from config import settings
+from config import settings, PROJECT_ROOT
 from core.storage import Storage
 from core.ingestion.parser import parse, is_supported, SUPPORTED_EXTENSIONS, ParseError
 from core.ingestion.chunker import chunk_document
@@ -74,21 +74,44 @@ ASCII_LOGO_LARGE = """
 ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝╚═╝  ╚═══╝
 """
 
+# 像素风宠物（Claude Code 风格启动页 mascot）
+PIXEL_PET_ASCII = r"""
+       ████████████
+      █            █
+     █  █      █   █
+     █              █
+   ████████████████████
+   █                  █
+    ████████████████
+       █    █
+       █    █
+"""
+
 
 def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"] = None) -> None:
-    """渲染欢迎面板：固定双栏布局 + 主题配色，底部边框对齐。"""
+    """渲染欢迎面板：Claude Code 风格启动页 + 状态双栏。"""
     t = get_theme()  # 当前主题
 
-    # ---- 顶部 Logo 面板 ----
-    logo_str = ASCII_LOGO_LARGE
-    subtitle = Text("✨ 个人知识库 · 智能问答终端 v4.0", style=t.colors["secondary"])
-    logo_text = Text(logo_str, style=t.colors["text_title"])
-    logo_panel = Panel(
-        Align.center(Group(logo_text, Text(""), subtitle)),
-        border_style=t.colors["border_logo"],
-        padding=(0, 2),
+    # ---- 顶部 Splash 面板 ----
+    pet_color = t.colors["primary"]  # 主题主色，Claude 主题为黄色（偏橙）
+    pixel_pet = Text(PIXEL_PET_ASCII, style=f"bold {pet_color}")
+    project_path = str(PROJECT_ROOT.resolve())
+
+    splash_content = Group(
+        Align.right(Text("IMA v4.0", style="dim")),
+        Text(""),
+        Align.center(pixel_pet),
+        Text(""),
+        Align.center(Text("Welcome back!", style=f"bold {t.colors['secondary']}")),
+        Align.center(Text("个人知识库 · 智能问答终端", style="dim")),
+        Align.center(Text(f"📍 {project_path}", style="dim")),
     )
-    console.print(logo_panel)
+    splash_panel = Panel(
+        splash_content,
+        border_style=t.colors["border_logo"],
+        padding=(1, 2),
+    )
+    console.print(splash_panel)
 
     # ---- 左栏：知识库状态 ----
     status_line = "[green]✓ 在线[/green]" if llm_available else "[red]✗ 未配置[/red]"
