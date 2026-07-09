@@ -76,64 +76,118 @@ ASCII_LOGO_LARGE = """
 
 # 像素风宠物（Claude Code 风格启动页 mascot）
 PIXEL_PET_ASCII = r"""
-       ████████████
-      █            █
-     █  █      █   █
-     █              █
-   ████████████████████
-   █                  █
-    ████████████████
-       █    █
-       █    █
+       █████████
+      █         █
+      █ █     █ █
+   ███████████████
+   █             █
+    ███████████
+       █   █
+       █   █
 """
+
+# ============================================================
+# 活动记录（用于启动页 Recent activity）
+# ============================================================
+
+_ACTIVITY_PATH = PROJECT_ROOT / "storage" / "activity.json"
+
+_ICON_MAP: dict[str, str] = {
+    "qa":       "💬",
+    "ingest":   "📥",
+    "search":   "🔍",
+    "analyze":  "📊",
+    "read":     "📖",
+    "compare":  "⚖",
+    "pic":      "🎨",
+    "draw":     "🖼",
+    "daily":    "📅",
+    "graph":    "🕸",
+    "summarize":"📝",
+}
+
+_NAME_MAP = {
+    "qa":       ("问答", "️"),
+    "ask":      ("问答", "️"),
+    "ingest":   ("入库", ""),
+    "search":   ("搜索", ""),
+    "analyze":  ("分析", ""),
+    "read":     ("阅读", ""),
+    "compare":  ("对比", ""),
+    "draw":     ("配图", ""),
+    "pic":      ("生图", ""),
+    "daily":    ("卡片", ""),
+    "graph":    ("图谱", ""),
+    "summarize":("摘要", ""),
+}
+
+
+def _load_activities() -> list[dict]:
+    """读取活动记录。"""
+    try:
+        if _ACTIVITY_PATH.exists():
+            import json
+            return json.loads(_ACTIVITY_PATH.read_text("utf-8"))
+    except Exception:
+        pass
+    return []
+
+
+def _record_activity(act_type: str, desc: str) -> None:
+    """记录一条活动（最多保留 20 条）。"""
+    from datetime import datetime
+    import json
+    entries = _load_activities()
+    entries.insert(0, {
+        "type": act_type,
+        "desc": desc,
+        "time": datetime.now().strftime("%m-%d %H:%M"),
+    })
+    if len(entries) > 20:
+        entries = entries[:20]
+    try:
+        _ACTIVITY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _ACTIVITY_PATH.write_text(json.dumps(entries, ensure_ascii=False, indent=2), "utf-8")
+    except Exception:
+        pass
 
 
 def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"] = None) -> None:
-    """渲染欢迎面板：Claude Code 风格启动页 + 状态双栏。"""
-    t = get_theme()  # 当前主题
+    """渲染 Claude Code 风格启动页：单一大面板，左窄右宽，顶部标题线。"""
+    t = get_theme()
 
-    # ---- 顶部 Splash 面板 ----
-    pet_color = t.colors["primary"]  # 主题主色，Claude 主题为黄色（偏橙）
+    pet_color = t.colors["primary"]
     pixel_pet = Text(PIXEL_PET_ASCII, style=f"bold {pet_color}")
     project_path = str(PROJECT_ROOT.resolve())
+    status_text = "✓ 在线" if llm_available else "✗ 未配置"
+    status_color = "green" if llm_available else "red"
 
-    splash_content = Group(
-        Align.right(Text("IMA v4.0", style="dim")),
+    # ---- 左栏：Welcome back! + 像素宠物 + 底部信息 ----
+    if pet:
+        branch_label = {"scholar": "学者", "warrior": "战士", "artisan": "工匠"}.get(pet.branch, "未分系")
+        color = {"scholar": "cyan", "warrior": "red", "artisan": "yellow"}.get(pet.branch, "white")
+        avatar = {"scholar": "🦉", "warrior": "🐺", "artisan": "🦡"}.get(pet.branch, "🐣")
+        pet_info = Text.from_markup(
+            f"[{color}]{avatar}[/{color}] [bold magenta]{pet.name}[/bold magenta] [dim]Lv{pet.level} {branch_label}[/dim]"
+        )
+    else:
+        pet_info = Text.from_markup("🐣 [bold magenta]虚拟宠物[/bold magenta] [dim]/pet adopt 领养[/dim]")
+
+    left_content = Group(
+        Align.center(Text("Welcome back!", style=f"bold {t.colors['secondary']}")),
         Text(""),
         Align.center(pixel_pet),
         Text(""),
-        Align.center(Text("Welcome back!", style=f"bold {t.colors['secondary']}")),
-        Align.center(Text("个人知识库 · 智能问答终端", style="dim")),
-        Align.center(Text(f"📍 {project_path}", style="dim")),
-    )
-    splash_panel = Panel(
-        splash_content,
-        border_style=t.colors["border_logo"],
-        padding=(1, 2),
-    )
-    console.print(splash_panel)
-
-    # ---- 左栏：知识库状态 ----
-    status_line = "[green]✓ 在线[/green]" if llm_available else "[red]✗ 未配置[/red]"
-    pet_line1, pet_line2 = _render_pet_compact(pet) if pet else _render_pet_empty_compact()
-    left_content = Group(
-        pet_line1,
-        pet_line2,
-        Text("─" * 30, style="dim"),
-        Text("📊 知识库状态", style=f"bold {t.colors['secondary']}"),
+        Align.center(pet_info),
         Text(""),
-        Text.from_markup(f"  文档总数   [{t.colors['secondary']}]{stats['documents']}[/{t.colors['secondary']}]"),
-        Text.from_markup(f"  分块总数   [{t.colors['secondary']}]{stats['chunks']}[/{t.colors['secondary']}]"),
-        Text.from_markup(f"  总 Tokens  [{t.colors['secondary']}]{stats['total_tokens']:,}[/{t.colors['secondary']}]"),
-        Text.from_markup(f"  原文件大小 [{t.colors['secondary']}]{stats['total_size_mb']} MB[/{t.colors['secondary']}]"),
         Text(""),
-        Text.from_markup(f"  LLM 状态   {status_line}"),
-        Text.from_markup(f"  模型       [dim]{settings.llm_model}[/dim]"),
-        Text(""),
-        Text.from_markup(f"  当前主题   [{t.colors['primary']}]{t.label}[/{t.colors['primary']}] [dim](/theme 切换)[/dim]"),
+        Align.center(Text.from_markup(f"[dim]{settings.llm_model}[/dim] · [{status_color}]{status_text}[/{status_color}]")),
+        Align.center(Text(project_path, style="dim")),
     )
 
-    # ---- 右栏：使用提示 ----
+    # ---- 右栏：Tips for getting started + Recent activity ----
+    recent_entries = _load_activities()
+
     tips_lines = [
         Text("  直接输入问题    AI 问答（多轮对话）", style="white"),
         Text("  输入 /          弹出命令列表", style="white"),
@@ -146,55 +200,59 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
         Text("  /theme          切换主题", style="white"),
         Text("  /exit           退出", style="white"),
     ]
+
+    activity_lines: list = []
+    if recent_entries:
+        from datetime import datetime
+        today = datetime.now().strftime("%m-%d")
+        for e in recent_entries[:5]:
+            e_time = e.get("time", "")
+            time_str = e_time.split(" ", 1)[-1] if e_time.startswith(today) and " " in e_time else e_time
+            e_type = e.get("type", "操作")
+            e_desc = e.get("desc", "")
+            icon = _ICON_MAP.get(e_type, "📌")
+            label = _NAME_MAP.get(e_type, (e_type, ""))[0]
+            line = Text(f"  {icon} {label}  ", style="white")
+            line.append(e_desc[:28], style="dim")
+            line.append(f"  {time_str}", style="dim")
+            activity_lines.append(line)
+    else:
+        activity_lines.append(Text("  [dim]No recent activity[/dim]"))
+
+    sep_line = Text("─" * 54, style="dim")
+
     right_content = Group(
-        Text("🎯 快速开始", style=f"bold {t.colors['primary']}"),
+        Text("Tips for getting started", style=f"bold {t.colors['primary']}"),
         Text(""),
         *tips_lines,
+        Text(""),
+        sep_line,
+        Text(""),
+        Text("Recent activity", style=f"bold {t.colors['primary']}"),
+        Text(""),
+        *activity_lines,
     )
 
-    # ---- 先测量左侧面板在半宽下的高度，让两边底部对齐 ----
-    target_width = max(30, (console.width - 1) // 2)
-    measure_console = Console(
-        force_terminal=True,
-        width=target_width,
-        height=console.height,
-        color_system=console.color_system,
-    )
-    tmp_left_panel = Panel(
-        left_content,
+    # ---- 单一大面板：左窄右宽 ----
+    grid = Table(show_header=False, show_edge=False, padding=(0, 2), expand=True, box=None)
+    grid.add_column(width=32, justify="center")
+    grid.add_column(width=1)
+    grid.add_column(ratio=2)
+
+    sep_vertical = Text("│\n" * 24, style="dim")
+
+    grid.add_row(left_content, sep_vertical, right_content)
+
+    title_text = Text.from_markup(f"── [bold {t.colors['primary']}]IMA v4.0[/bold {t.colors['primary']}] ──")
+
+    welcome_panel = Panel(
+        grid,
+        title=title_text,
+        title_align="left",
         border_style=t.colors["border_welcome"],
-        title=f"[bold {t.colors['secondary']}]Welcome[/bold {t.colors['secondary']}]",
-        title_align="left",
         padding=(1, 2),
     )
-    with measure_console.capture() as capture:
-        measure_console.print(tmp_left_panel)
-    panel_height = len(capture.get().splitlines())
-
-    # ---- 使用相同高度构建两个面板 ----
-    left_panel = Panel(
-        left_content,
-        border_style=t.colors["border_welcome"],
-        title=f"[bold {t.colors['secondary']}]Welcome[/bold {t.colors['secondary']}]",
-        title_align="left",
-        padding=(1, 2),
-        height=panel_height,
-    )
-    right_panel = Panel(
-        right_content,
-        border_style=t.colors["border_tips"],
-        title=f"[bold {t.colors['primary']}]Tips for getting started[/bold {t.colors['primary']}]",
-        title_align="left",
-        padding=(1, 2),
-        height=panel_height,
-    )
-
-    # ---- 固定左右分栏 ----
-    grid = Table.grid(expand=True, padding=(0, 1))
-    grid.add_column(ratio=1)
-    grid.add_column(ratio=1)
-    grid.add_row(left_panel, right_panel)
-    console.print(grid)
+    console.print(welcome_panel)
     console.print()
 
 
@@ -561,9 +619,19 @@ def _read_input() -> str:
     - 用方向键 ↑↓ 选择，Tab/Enter 确认
     - Ctrl+D / Ctrl+C 退出
     """
+    import shutil
+    width = shutil.get_terminal_size((80, 24)).columns
+    left = "/help for shortcuts"
+    right = "Ctrl+C to exit"
+    middle = width - len(left) - len(right)
+    if middle < 1:
+        middle = 1
+    console.print(f"[dim]{left}{' ' * middle}{right}[/dim]")
+    console.print()
+
     try:
         text = pt_prompt(
-            [("class:prompt", "\n> ")],
+            [("class:prompt", "> ")],
             completer=_build_nested_completer(),
             complete_while_typing=True,
             style=_INPUT_STYLE,
@@ -1355,6 +1423,7 @@ class REPL:
 
         tag_hint = f" [dim]· 标签筛选: {tag_filter}[/dim]" if tag_filter else ""
         console.print(f"\n[bold]找到 {len(results)} 条相关结果[/bold] [dim](BM25)[/dim]{tag_hint}\n")
+        _record_activity("search", keyword[:40])
         for i, r in enumerate(results, 1):
             preview = r.content[:200].replace("\n", " ")
             console.print(
@@ -1394,6 +1463,8 @@ class REPL:
                 # 宠物经验埋点：ingest 行为
                 self._pet_gain_exp(30, "ingest")
         console.print(f"\n[bold]完成[/bold] · 成功 {success} / 共 {len(files)}\n")
+        if success > 0:
+            _record_activity("ingest", f"{success}个文件")
 
     def _cmd_note(self, arg: str) -> None:
         """文本直入库：/note 一段文字。"""
@@ -1568,6 +1639,7 @@ class REPL:
             az.render(result)
             # 保存到当前分析状态（供追问用）
             self.current_analysis = (az, result)
+            _record_activity("analyze", path.name[:40])
             console.print(
                 "[dim]提示：现在可以直接追问，如「按月份汇总」「哪个最多」「缺失值情况」[/dim]\n"
             )
@@ -2332,6 +2404,7 @@ class REPL:
             url = gen.doc_to_image(doc.title, content, style=style)
             console.print(f"\n[green]✓ 配图已生成[/green] [dim]({url})[/dim]")
             console.print("[dim]在浏览器中打开图片 URL 查看[/dim]")
+            _record_activity("draw", doc.title[:40])
             # 尝试打开浏览器
             import webbrowser
             webbrowser.open(url)
@@ -2382,6 +2455,7 @@ class REPL:
         try:
             url = gen.daily_card(topics, date_str)
             console.print(f"\n[green]✓ 知识卡片已生成[/green] [dim]({url})[/dim]")
+            _record_activity("daily", date_str)
             import webbrowser
             webbrowser.open(url)
         except ImageError as e:
@@ -2407,6 +2481,7 @@ class REPL:
             url = gen.text_to_image(arg.strip())
             console.print(f"\n[green]✓ 图像已生成[/green] [dim]({url})[/dim]")
             console.print("[dim]正在打开浏览器...[/dim]")
+            _record_activity("pic", arg.strip()[:40])
             import webbrowser
             webbrowser.open(url)
         except ImageError as e:
@@ -2625,6 +2700,7 @@ class REPL:
         console.print(f"\n[bold cyan]📖 进入阅读模式[/bold cyan]")
         console.print(f"  文档: [bold]{state.doc_title}[/bold]")
         console.print(f"  共 {state.total_chunks} 段\n")
+        _record_activity("read", state.doc_title[:40])
         self._render_read_chunk()
         console.print("[dim]命令: n=下一段 p=上一段 数字=跳段 i=重新解读 q=退出[/dim]")
         # 宠物经验埋点：read 行为
@@ -2717,6 +2793,7 @@ class REPL:
             ))
             # 宠物经验埋点：compare 行为
             self._pet_gain_exp(10, "compare")
+            _record_activity("compare", f"{a[:15]} vs {b[:15]}")
         except FileNotFoundError as e:
             console.print(f"[red]{e}[/red]")
         except Exception as e:
@@ -3544,6 +3621,7 @@ class REPL:
             f"\n[bold]完成[/bold] · 抽取 {success}/{len(target_docs)} · "
             f"图谱 {s['nodes']} 节点 / {s['edges']} 边\n"
         )
+        _record_activity("graph", f"{s['nodes']}节点/{s['edges']}边")
         # 宠物经验埋点：graph_build 行为
         if success > 0:
             self._pet_gain_exp(30, "graph_build")
@@ -3612,6 +3690,7 @@ class REPL:
         """清空图谱：/graph clear"""
         gs.clear()
         console.print("[green]✓ 已清空知识图谱[/green]")
+        _record_activity("graph", "清空")
 
     def _graph_delete_node(self, gs, name: str) -> None:
         """删除图谱节点：/graph delete <节点名>"""
@@ -3688,6 +3767,7 @@ class REPL:
                     except Exception:
                         pass
                 self._record_workflow("qa")
+                _record_activity("qa", user_input[:40])
                 # 恢复能量
                 if self.pet is not None:
                     self.pet.energy = min(100, self.pet.energy + 2)
@@ -3797,6 +3877,7 @@ class REPL:
         if self.pet:
             self.pet.energy = min(100, self.pet.energy + 2)
             self.pet_storage.save(self.pet)
+        _record_activity("qa", user_input[:40])
 
     # ---- 管理员回答渲染 + 工作流 ----
     # ---- 管理员回答渲染 + 工作流 ----
@@ -3877,7 +3958,20 @@ class REPL:
             # 推荐下一步（基于历史模式）
             suggestion = self.workflow_tracker.suggest_next(cmd)
             if suggestion:
-                console.print(f"[dim]💡 接下来可以试试: {suggestion}[/dim]")
+                friendly = {
+                    "qa": "输入问题进行 AI 问答",
+                    "search": "/search 搜索文档",
+                    "ingest": "/ingest 入库新文件",
+                    "analyze": "/analyze 数据分析",
+                    "read": "/read 智能阅读",
+                    "compare": "/compare 智能对比",
+                    "graph": "/graph 知识图谱",
+                    "summarize": "/summarize 生成摘要",
+                    "daily": "/daily 生成知识卡片",
+                    "draw": "/draw 配图",
+                }.get(suggestion, f"/{suggestion}")
+                console.print(f"[dim]💡 接下来可以试试: {friendly}[/dim]")
+                console.print()
         except Exception:
             # 工作流记录失败不影响主流程
             pass

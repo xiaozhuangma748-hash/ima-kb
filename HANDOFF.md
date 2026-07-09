@@ -41,7 +41,7 @@
 - ✅ **OCR 补齐**（Tesseract + pytesseract，4 扫描 PDF + 4 PNG 入库）
 - ✅ **自动标签**（LLM 生成，27 文档共 67 个标签，可按标签筛选）
 - ✅ **REPL 命令自动补全**（prompt_toolkit，输入 `/` 弹出命令列表 + 中文描述 + 子命令中文描述）
-- ✅ **Claude Code 风格 CLI**（固定双栏欢迎面板 + ASCII Logo + 橙色提示符 + 流式 `⏺` 标记）
+- ✅ **Claude Code 风格 CLI**（左窄右宽欢迎面板 + 竖线分隔 + 顶部标题线 + 底部快捷键提示 + 橙色提示符 + 流式 `⏺` 标记）
 - ✅ **AI 回答 Markdown 渲染**（`rich.Markdown` 渲染，**加粗**、列表、代码块等正确显示）
 - ✅ **知识图谱**（LLM 抽取实体关系，networkx 存储，vis.js 可视化）
 - ✅ **Web 后台**（7 个页面完整实现：AI 问答 / 文档入库 / 搜索 / 数据分析 / 仪表盘 / 知识图谱 / 宠物管理，FastAPI 后端 + 单页 HTML+JS 前端）
@@ -218,7 +218,7 @@ ima-kb/
   - `ima graph clear`：清空图谱
 
 ### `repl.py` — IMA REPL（v4.0 · Claude Code 风格）
-- **欢迎面板**：固定双栏布局（左侧 Welcome / 右侧 Tips），底部边框严格对齐，不再自适应缩放
+- **欢迎面板**：左窄右宽布局（左 32 列：mascot+宠物信息+状态 / 右：Tips+Recent activity），中间 `│` dim 竖线分隔，顶部标题线 `── IMA v4.0 ──`，输入框前 dim 提示 `/help for shortcuts` / `Ctrl+C to exit`
 - **命令补全**：自定义 `CommandCompleter`（继承 `Completer`）取代旧 `NestedCompleter`
   - 输入 `/` 弹出所有命令 + 中文描述
   - 输入 `/s` 自动匹配 search/session/show/stats/sync 等 s 开头命令
@@ -445,7 +445,7 @@ ima web
 | 1 | **修复子命令补全消失** | `repl.py` | 输入空格后 `parts` 丢失尾部空格导致找不到子命令，增加 `trailing` 检测 |
 | 2 | **子命令中文描述** | `repl.py` | 新增 `_SUB_MENU_DESC` 字典（tuple path → 中文描述），补全菜单显示中文解释 |
 | 3 | **修复 Markdown 渲染** | `repl.py` | `_render_answer` 改用 `rich.Markdown(result.text)`，**粗体**、列表、标题正确显示 |
-| 4 | **启动页固定布局** | `repl.py` | 移除自适应宽度逻辑，改用 `Table.grid(ratio=1)` 实现固定双栏布局 |
+| 4 | **启动页重构** | `repl.py` | 左窄右宽布局（左 32 列 / 右自适应），中间 `│` dim 竖线分隔，顶部标题线，底部快捷键提示行，像素宠物缩小 |
 | 5 | **底部边框对齐** | `repl.py` | 用 `Console.capture()` 动态测量左侧面板高度，统一设置两个面板 `height` |
 | 6 | **移除死代码** | `repl.py` | 删除 `_pick_logo`、`ASCII_LOGO_SMALL`、`ASCII_LOGO_MINI` |
 | 7 | **修复主题切换丢宠物** | `repl.py` | `_cmd_theme` 补上 `pet=self.pet` 参数 |
