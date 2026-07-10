@@ -37,16 +37,28 @@ web/
 ├── routes/
 │   ├── __init__.py
 │   ├── qa.py               # /api/qa/stream SSE 流式问答
-│   ├── ingest.py           # /api/ingest 文件上传/URL/剪贴板
+│   ├── ingest.py           # /api/ingest 文件上传/URL（剪贴板端点未实现）
 │   ├── search.py           # /api/search 混合检索
-│   ├── analyze.py          # /api/analyze 数据分析
+│   ├── analyze.py          # /api/analyze 数据分析 + /api/analyze/export 导出
 │   ├── stats.py            # /api/stats 仪表盘
 │   ├── graph.py            # /api/graph 知识图谱
 │   └── pet.py              # /api/pet 宠物管理
 ├── templates/
 │   └── index.html          # 单页 HTML（复用原型图 CSS + 新增 JS）
 └── static/
-    └── app.js              # 前端交互 JS
+    ├── app.js              # 重定向入口（仅 `import './js/app.js'`）
+    └── js/                 # 11 个 ES Module
+        ├── app.js          # 入口聚合（DOMContentLoaded 时初始化各模块）
+        ├── nav.js          # 页面切换 + 人格/开关控件
+        ├── qa.js           # SSE 流式问答 + 引用面板 + 侧边栏折叠
+        ├── ingest.js       # 文件拖拽 + URL 入库 + Tab 切换
+        ├── search.js       # 顶栏搜索 + 搜索页 + 关键词高亮
+        ├── analyze.js      # Excel 上传 + 统计渲染 + AI 解读
+        ├── dashboard.js    # 仪表盘数据加载
+        ├── graph.js        # vis.js Network + 邻居查询
+        ├── pet.js          # 宠物状态展示 + 交互按钮
+        ├── state.js        # 全局状态（abortController/chatHistory/graphNetwork/activeSourceCard）
+        └── utils.js        # 公共工具（escapeHtml/formatSize/showError）
 ```
 
 ---
@@ -63,15 +75,16 @@ GET /           → 返回 index.html（Jinja2 渲染）
 ### 4.2 AI 问答
 
 ```
-GET /api/qa/stream
-  Query: q (string, required), persona (string, "auto"|"scholar"|"warrior"|"artisan", default "auto")
+POST /api/qa/stream
+  Body: JSON {question: string (required), history: array, persona: string ("auto"|"scholar"|"warrior"|"artisan", default "auto")}
   Response: text/event-stream
 
-  SSE event 类型:
-    token    → {text: "..."}             逐字输出
-    citation → {marker: "[1]", title: "...", snippet: "...", score: 0.96}
-    done     → {}                        结束标记
-    error    → {message: "..."}          错误信息
+  SSE 事件格式: data-only（无 event: 行），每条 `data: {JSON}\n\n`，JSON 内 type 字段区分类型:
+    stage  → {type: "stage", stage: "检索"|"生成", count: int}    检索阶段进度提示
+    token  → {type: "token", text: "..."}                         逐字输出
+    done   → {type: "done", answer: "...", citations: [{marker, title, paragraph_num, doc_id}],
+              sources: [{doc_id, doc_title, score}], pet_events: [...]}   完整载荷结束标记
+    error  → {type: "error", message: "..."}                      错误信息
 ```
 
 ### 4.3 文档入库
@@ -87,22 +100,23 @@ POST /api/ingest/url
   Body: JSON {url: string}
   Response: {status, doc_id, title, tags, chunks}
 
-POST /api/ingest/clip
+POST /api/ingest/clip   (注：未实现，前端 UI 已就位但无后端端点)
   Body: multipart/form-data, content (text or image)
-  Response: {status, doc_id, title}  (复用 core/ingestion/quick.py)
+  Response: {status, doc_id, title}  (规划中复用 core/ingestion/quick.py)
 ```
 
 ### 4.4 搜索
 
 ```
 GET /api/search
-  Query: q (string), tags[] (array, optional), vector (bool, default true), rerank (bool, default true),
+  Query: q (string), tags (逗号分隔字符串, optional), use_vector (bool, default true), use_rerank (bool, default true),
          sort (string, "score"|"date"|"name"), limit (int, default 10)
   Response: {
-    results: [{doc_title, snippet, highlights[], score, tags[], file_type, created_at, doc_id}, ...],
+    results: [{doc_id, doc_title, snippet, content, score, tags[], file_type, created_at}, ...],
     total: int,
     time_ms: float
   }
+  注: 无 highlights[] 字段，关键词高亮由前端 search.js 正则实现（<mark> 标签包裹）
 ```
 
 ### 4.5 数据分析
@@ -114,14 +128,15 @@ POST /api/analyze
   Response: {
     filename, sheets[],
     current_sheet: {
-      columns: [{name, dtype, null_count, unique_count, min, max, mean, top_values[], ascii_chart?}, ...],
+      columns: [{name, dtype, null_count, unique_count, min, max, mean, top_values[]}, ...],
       preview_rows: [...],
       ai_insight?: string    (仅 ai_insight=true 时)
     }
   }
+  注: 无 ascii_chart 字段（未实现）
 
 GET /api/analyze/export
-  Query: same as POST analyze params (cached session)
+  Query: key (string, required — POST analyze 返回的缓存 key)
   Response: application/octet-stream (Markdown 报告下载)
 ```
 
@@ -130,13 +145,14 @@ GET /api/analyze/export
 ```
 GET /api/stats
   Response: {
-    documents: int, chunks: int, tags: int, graph_nodes: int,
+    documents: int, chunks: int, total_tokens: int, total_size_mb: float,
+    tags_count: int, graph_nodes: int, graph_edges: int,
     by_type: {pdf: int, docx: int, ...},
     top_tags: [{name, count}, ...],
     alerts: [{severity, message, doc_id?}, ...],
-    recent_docs: [{title, file_type, tags, chunks, created_at}, ...],
+    recent_docs: [{title, file_type, tags, chunk_count, created_at, doc_id}, ...],
     health_score: int
-  }
+}
 ```
 
 ### 4.7 知识图谱
@@ -144,12 +160,21 @@ GET /api/stats
 ```
 GET /api/graph/data
   Response: {
-    elements: {nodes: [{id, label, type, doc_count, degree}], edges: [{source, target, label}]},
+    elements: {
+      nodes: [{data: {id, label, type, color, doc_count, degree}}],   # cytoscape 格式
+      edges: [{data: {id, source, target, relation, label}}]
+    },
     stats: {nodes, edges, by_type}
   }
 
-GET /api/graph/neighbors/{node_id}
-  Response: {node: {...}, neighbors: [{node, type, relation_label}, ...]}
+GET /api/graph/neighbors/{name}    # name 为节点名称（支持模糊搜索）
+  Response: {
+    found: true,
+    node: {label, type, doc_count, degree},
+    neighbors: [{node, type, relation_label}, ...]
+  }
+  若未精确匹配:
+  Response: {found: false, matches: [{label, ...}], hint: string}
 
 POST /api/graph/build
   Body: JSON {force: bool}
@@ -163,10 +188,11 @@ GET /api/graph/export
 
 ```
 GET /api/pet/status
-  Response: {name, level, xp, xp_next, style, mood, hunger, energy, cleanliness, intellect}
+  Response: {found: bool, name, level, exp, exp_needed, branch, style, hunger, mood, energy, cleanliness, ascii_art, message}
+  注: 不返回 intellect 字段（前端 pet.js 仍引用 data.intellect，存在 bug）
 
 POST /api/pet/interact
-  Body: JSON {action: "feed"|"play"|"train"}
+  Body: JSON {action: "feed"|"play"|"train"|"sleep"|"wash"}
   Response: {pet: {...}, message: string}
 
 POST /api/pet/style
@@ -175,7 +201,7 @@ POST /api/pet/style
 
 POST /api/pet/adopt
   Body: JSON {name: string}
-  Response: {pet: {...}, ascii_art: string}
+  Response: {pet: {...}, ascii_art: string, message: string}
 ```
 
 ---
@@ -200,19 +226,21 @@ def cli_web(host: str, port: int):
 
 ## 6. 前端 JS 模块
 
-新增 `static/app.js`，约 200 行：
+`static/app.js` 仅作重定向入口（`import './js/app.js'`），实际逻辑拆分到 `static/js/` 下 11 个 ES Module:
 
 ```
 模块划分:
-├── Navigation       页面切换 + 面包屑
-├── QAController     SSE 流式接收 + 消息气泡渲染 + 引用面板更新
-├── IngestController  文件拖拽/选择 + FormData 上传 + 进度列表
-├── SearchController  API 搜索 + 结果渲染 + 标签筛选
-├── AnalyzeController 文件上传 + Sheet 切换 + AI 解读
-├── Dashboard         fetch stats 填充指标卡
-├── GraphController   vis.js Network 初始化 + 邻居查询
-├── PetController     状态展示 + 交互按钮
-└── Toggle            开关组件
+├── app.js           入口聚合（DOMContentLoaded 时初始化各模块，默认加载仪表盘）
+├── nav.js           页面切换 + 人格/开关控件 + 切换 QA 页时取消 SSE
+├── qa.js            POST SSE 流式接收 + 消息气泡渲染 + 引用面板动态填充 + 侧边栏折叠 + 多轮历史管理
+├── ingest.js        文件拖拽/选择 + FormData 上传 + URL 入库 + Tab 切换
+├── search.js        顶栏搜索 + 搜索页 + 关键词正则高亮 + "/" 快捷键
+├── analyze.js       文件上传 + 统计渲染 + AI 解读（未接入导出）
+├── dashboard.js     fetch stats 填充指标卡 + 标签分布柱状图
+├── graph.js         vis.js Network 初始化 + 点击节点邻居查询 + 重建图谱
+├── pet.js           状态展示 + 交互按钮（仅 feed/play/train 3 个）+ 人格切换
+├── state.js         全局状态（abortController: SSE 取消 / chatHistory: 多轮对话历史 / graphNetwork / activeSourceCard: 引用高亮）
+└── utils.js         公共工具（escapeHtml / formatSize / showError）
 ```
 
 ---

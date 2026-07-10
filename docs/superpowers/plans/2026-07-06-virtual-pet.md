@@ -28,11 +28,11 @@ core/pet/
 ├── pet.py               # Pet dataclass + 升级/分系/衰减逻辑
 ├── storage.py           # PetStorage（JSON 读写）
 ├── art.py               # ArtLibrary（ASCII 加载器）
-├── arts/                # ASCII 艺术文本文件
-│   ├── none_1.txt ... none_5.txt
-│   ├── scholar_6.txt ... scholar_10.txt
-│   ├── warrior_6.txt ... warrior_10.txt
-│   └── artisan_6.txt ... artisan_10.txt
+├── arts/                # ASCII 艺术文本文件（共 35 个）
+│   ├── none_1.txt ... none_5.txt         # 通用阶段 Lv1-5
+│   ├── scholar_1.txt ... scholar_10.txt  # 学者系 Lv1-10
+│   ├── warrior_1.txt ... warrior_10.txt  # 战士系 Lv1-10
+│   └── artisan_1.txt ... artisan_10.txt  # 工匠系 Lv1-10
 ├── interact.py          # 5 个互动命令处理
 ├── tasks.py             # 每日任务系统
 └── shop.py              # 道具商店
@@ -189,9 +189,7 @@ class Pet:
     active_effects: list = field(default_factory=list)
 
     def exp_needed(self) -> int:
-        """当前等级升到下一级所需经验。"""
-        if self.level >= MAX_LEVEL:
-            return 0
+        """当前等级升到下一级所需经验（纯公式，MAX_LEVEL 由 exp_remaining/gain_exp 守卫）。"""
         return math.floor(100 * (self.level ** 1.5))
 
     def exp_remaining(self) -> int:
@@ -332,20 +330,21 @@ Expected: FAIL with `AttributeError: 'Pet' object has no attribute 'gain_exp'`
         actual_amount = amount
         if self.mood < 30:
             actual_amount = int(actual_amount * 0.7)
-        # 经验加成倍率
-        actual_amount = int(actual_amount * self.exp_multi)
+        # 3. 清理过期限时效果，再计算实际经验加成倍率
+        self.clean_expired_effects()
+        actual_amount = int(actual_amount * self.get_active_exp_multi())
 
-        # 3. 累加经验
+        # 4. 累加经验
         self.exp += actual_amount
 
-        # 4. 检查升级（可能连升多级）
+        # 5. 检查升级（可能连升多级）
         while self.level < MAX_LEVEL and self.exp >= self.exp_needed():
             self.exp -= self.exp_needed()
             self.level += 1
             events["leveled_up"] = True
             events["new_level"] = self.level
 
-            # 5. Lv5 触发分系
+            # 6. Lv5 触发分系
             if self.level == 5 and self.branch is None:
                 self.branch = self._determine_branch()
                 events["branched"] = True
@@ -521,10 +520,10 @@ git commit -m "feat(pet): add JSON persistence with corruption backup"
 
 **Files:**
 - Create: `core/pet/art.py`
-- Create: `core/pet/arts/none_1.txt` (5 个通用阶段占位符)
-- Create: `core/pet/arts/scholar_6.txt` ... `scholar_10.txt` (5 个学者系)
-- Create: `core/pet/arts/warrior_6.txt` ... `warrior_10.txt` (5 个战士系)
-- Create: `core/pet/arts/artisan_6.txt` ... `artisan_10.txt` (5 个工匠系)
+- Create: `core/pet/arts/none_1.txt` ... `none_5.txt` (5 个通用阶段)
+- Create: `core/pet/arts/scholar_1.txt` ... `scholar_10.txt` (10 个学者系)
+- Create: `core/pet/arts/warrior_1.txt` ... `warrior_10.txt` (10 个战士系)
+- Create: `core/pet/arts/artisan_1.txt` ... `artisan_10.txt` (10 个工匠系)
 - Create: `tests/pet/test_art.py`
 
 **Interfaces:**
@@ -556,7 +555,7 @@ def test_get_missing_file_returns_fallback():
     lib = ArtLibrary()
     # Lv99 不存在，应该返回占位符
     art = lib.get("scholar", 99)
-    assert "Lv99" in art or "?" in art
+    assert "Lv99" in art
 
 
 def test_get_small_variant():
@@ -595,9 +594,9 @@ Expected: FAIL
   [幼崽]
 ```
 
-依此类推，为 20 个形态创建占位符（none_1 到 none_5，scholar_6 到 scholar_10，warrior_6 到 warrior_10，artisan_6 到 artisan_10）。
+依此类推，为 35 个形态创建占位符（none_1 到 none_5，scholar_1 到 scholar_10，warrior_1 到 warrior_10，artisan_1 到 artisan_10）。
 
-每个文件也创建 `_small` 后缀的缩略版（只保留前 6 行）。
+小尺寸变体由代码动态截断大尺寸前 6 行（`ArtLibrary.get(small=True)`），无需单独创建 `_small` 文件。
 
 - [ ] **Step 4: 实现 ArtLibrary**
 
@@ -645,17 +644,29 @@ class ArtLibrary:
                     return "\n".join(lines)
 
             # 都没有，返回占位符
-            return self._fallback(branch, level)
+            return self._fallback(branch, level, small)
 
         return path.read_text(encoding="utf-8")
 
-    def _fallback(self, branch: Optional[str], level: int) -> str:
-        """占位符。"""
+    def _fallback(self, branch: Optional[str], level: int, small: bool = False) -> str:
+        """占位符。small=True 时返回更短的版本。
+
+        采用 block-style 像素风格，避免 ??? 占位。
+        """
         branch_label = branch or "未分系"
+        if small:
+            return f"""
+  ▄▄▄
+ ▄●●▄
+ ▀██▀
+[{branch_label} Lv{level}]
+"""
         return f"""
-   ???
-  ( ? )
-   |||
+   ▄▄▄▄
+  ▄●  ●▄
+  █▄██▄█
+   ▀██▀
+    ▐  ▌
  [{branch_label} Lv{level}]
 """
 ```
@@ -669,7 +680,7 @@ Expected: 4 passed
 
 ```bash
 git add core/pet/art.py core/pet/arts/ tests/pet/test_art.py
-git commit -m "feat(pet): add ASCII art library with 20 placeholder forms"
+git commit -m "feat(pet): add ASCII art library with 35 placeholder forms"
 ```
 
 ---
@@ -1944,15 +1955,15 @@ git commit -m "feat(pet): add 9 behavior tracking points for exp gain"
 
 ---
 
-## Task 11: 创建 ASCII 艺术文件（20 个 + 缩略版）
+## Task 11: 创建 ASCII 艺术文件（35 个）
 
 **Files:**
 - Create: `core/pet/arts/none_1.txt` 到 `none_5.txt`（5 个通用阶段）
-- Create: `core/pet/arts/scholar_6.txt` 到 `scholar_10.txt`（5 个学者系）
-- Create: `core/pet/arts/warrior_6.txt` 到 `warrior_10.txt`（5 个战士系）
-- Create: `core/pet/arts/artisan_6.txt` 到 `artisan_10.txt`（5 个工匠系）
+- Create: `core/pet/arts/scholar_1.txt` 到 `scholar_10.txt`（10 个学者系）
+- Create: `core/pet/arts/warrior_1.txt` 到 `warrior_10.txt`（10 个战士系）
+- Create: `core/pet/arts/artisan_1.txt` 到 `artisan_10.txt`（10 个工匠系）
 
-**说明**：此任务不需要写代码，只需要创建 20 个 ASCII 艺术文本文件。
+**说明**：此任务不需要写代码，只需要创建 35 个 ASCII 艺术文本文件。小尺寸变体由代码动态截断。
 
 **尺寸规范（统一风格）**：
 - 每个文件 8-12 行（含标签行）
@@ -2019,7 +2030,7 @@ git commit -m "feat(pet): add 9 behavior tracking points for exp gain"
       [Lv5 进化中...]
 ```
 
-- [ ] **Step 2: 创建学者系 5 个文件（猫头鹰主题，青色）**
+- [ ] **Step 2: 创建学者系 10 个文件（猫头鹰主题，青色）**
 
 `core/pet/arts/scholar_6.txt`（小鸮）：
 ```
@@ -2030,9 +2041,9 @@ git commit -m "feat(pet): add 9 behavior tracking points for exp gain"
      [学者·小鸮 Lv6]
 ```
 
-`scholar_7.txt`、`scholar_8.txt`、`scholar_9.txt`、`scholar_10.txt`：依次加大尺寸 + 增加细节（书卷、眼镜、法袍等元素）。
+`scholar_1.txt` 到 `scholar_5.txt`（Lv1-5 通用阶段可复用 none 系或留空）、`scholar_7.txt` 到 `scholar_10.txt`：依次加大尺寸 + 增加细节（书卷、眼镜、法袍等元素）。
 
-- [ ] **Step 3: 创建战士系 5 个文件（狼主题，红色）**
+- [ ] **Step 3: 创建战士系 10 个文件（狼主题，红色）**
 
 `warrior_6.txt`（幼狼）：
 ```
@@ -2044,9 +2055,9 @@ git commit -m "feat(pet): add 9 behavior tracking points for exp gain"
      [战士·幼狼 Lv6]
 ```
 
-依此类推到 `warrior_10.txt`（神狼，加火焰、利爪等元素）。
+依此类推到 `warrior_10.txt`（神狼，加火焰、利爪等元素）。`warrior_1.txt` 到 `warrior_5.txt` 同理。
 
-- [ ] **Step 4: 创建工匠系 5 个文件（獾主题，黄色）**
+- [ ] **Step 4: 创建工匠系 10 个文件（獾主题，黄色）**
 
 `artisan_6.txt`（小獾）：
 ```
@@ -2058,13 +2069,13 @@ git commit -m "feat(pet): add 9 behavior tracking points for exp gain"
      [工匠·小獾 Lv6]
 ```
 
-依此类推到 `artisan_10.txt`（神匠獾，加工具、护目镜等元素）。
+依此类推到 `artisan_10.txt`（神匠獾，加工具、护目镜等元素）。`artisan_1.txt` 到 `artisan_5.txt` 同理。
 
 - [ ] **Step 5: 提交**
 
 ```bash
 git add core/pet/arts/
-git commit -m "feat(pet): add 20 ASCII art forms (5 generic + 15 branched)"
+git commit -m "feat(pet): add 35 ASCII art forms (5 generic + 30 branched)"
 ```
 
 ---
@@ -2185,7 +2196,7 @@ git commit -m "test(pet): add integration tests for full lifecycle"
 完成所有任务后，对照设计文档检查：
 
 - [ ] `core/pet/` 模块完整（pet/storage/art/interact/tasks/shop 6 个文件）
-- [ ] 20 个 ASCII 艺术文件已创建
+- [ ] 35 个 ASCII 艺术文件已创建
 - [ ] REPL 启动页显示宠物子区块
 - [ ] `/pet` 子命令可用（11 个子命令）
 - [ ] 9 处埋点触发经验获取

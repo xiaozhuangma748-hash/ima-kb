@@ -219,15 +219,21 @@ core/memory/
 
 ### 4.3 用户偏好（profile.py）
 
-- **自动学习**：每次问答后，LLM 异步提取主题/地区/格式偏好
+- **自动学习**：每次问答后，用 jieba 分词从 query 中提取主题（取前 2 个有意义词拼接），同步更新偏好
 - **格式判定**：分析用户提问中的"表格"、"列表"等关键词 + 历史选择
-- **地区识别**：从提问中抽取地名实体（杭州、拱墅区等）
+- **地区识别**：从提问中匹配已知地区关键词（杭州、拱墅区等）
 - **`preferred_style`**：默认 `"auto"`（跟随宠物分系），用户可通过 `/pet style` 显式覆盖为 `scholar/warrior/artisan`
-- **接口**：
+- **接口**（共 10 个方法）：
   - `get_profile() -> Profile`
-  - `update_from_query(query: str, answer: str, feedback: Optional[str]) -> None`
+  - `update_from_query(query: str, answer: str) -> None`（无 feedback 参数）
   - `update_format_preference(format: str) -> None`
   - `update_style_preference(style: str) -> None`（`/pet style` 调用）
+  - `add_topic(topic: str) -> bool`（手动添加主题，包含关系去重）
+  - `remove_topic(topic: str) -> bool`（删除主题）
+  - `clear_topics() -> int`（清空主题）
+  - `add_region(region: str) -> bool`（手动添加关注地区）
+  - `remove_region(region: str) -> bool`（删除关注地区）
+  - `clear_regions() -> int`（清空关注地区）
 
 ### 4.4 工作流模式（workflow.py）
 
@@ -390,6 +396,14 @@ core/persona/
 ### 6.1 编排层核心接口
 
 ```python
+# 经验值表（行为类型 → 经验值）
+EXP_TABLE = {
+    "qa": 10, "ingest": 30, "analyze": 15, "agent": 15,
+    "report": 20, "read": 10, "compare": 10, "smart": 8,
+    "graph_build": 30,
+}
+
+
 class PetAdministrator:
     """宠物知识库管理员：编排检索 + 记忆 + 人格 + LLM。"""
 
@@ -398,19 +412,45 @@ class PetAdministrator:
         pet: Pet,
         storage: Storage,
         memory_store: MemoryStore,
-        art_library: ArtLibrary,
-    ) -> None: ...
+        hybrid_retriever: HybridRetriever,
+        reranker: Reranker,
+        llm: LLMClient,
+    ) -> None:
+        # 内部初始化 ProfileManager / TaskManager / WorkflowTracker
 
-    def ask(self, query: str, style_override: Optional[str] = None) -> AnswerResult:
-        """主入口：用户提问 → 带引用的回答。"""
-        # 1. 加载记忆
-        # 2. 混合检索
-        # 3. LLM 重排
-        # 4. 组装 system prompt（人格 + 记忆 + 检索资料）
-        # 5. LLM 生成
-        # 6. 提取引用
-        # 7. 异步更新记忆
-        # 8. 宠物获得经验
+    def ask(self, query: str, style_override: Optional[str] = None,
+            history: Optional[List[Dict]] = None,
+            summary: Optional[str] = None) -> AnswerResult:
+        """主入口：用户提问 → 带引用的回答。
+
+        Args:
+            query: 用户问题
+            style_override: 临时覆盖人格风格
+            history: 多轮对话历史（[{role, content}, ...]），最多取最近 10 条
+            summary: 早期对话的摘要（压缩长期记忆）
+        """
+        # 1. 加载记忆（profile + active_tasks）
+        # 2. 混合检索（top_k=15）
+        # 3. LLM 重排（top_n=5）
+        # 4. 确定风格（style_override > profile.preferred_style > pet.branch > "neutral"）
+        # 5. 组装 system prompt（人格 + 记忆 + 检索资料，sources_dict 含 snippet 字段）
+        # 6. LLM 生成（带多轮历史 + 早期摘要，失败时用 get_llm_degrade_message() 降级）
+        # 7. 提取引用
+        # 8. 更新记忆（静默，失败不影响回答）
+        # 9. 宠物获得经验（EXP_TABLE["qa"] = 10）
+
+    def ask_stream(self, query: str, style_override: Optional[str] = None,
+                   history: Optional[List[Dict]] = None,
+                   summary: Optional[str] = None):
+        """流式问答生成器。yield 事件 dict:
+        - {"type": "stage", "stage": "检索", "count": N}
+        - {"type": "stage", "stage": "重排", "count": N}
+        - {"type": "token", "text": "..."}  — LLM 逐 token
+        - {"type": "done", "result": AnswerResult}  — 最终结果
+
+        步骤 1-5 与 ask() 完全一致；步骤 6 改用 chat_stream()；
+        步骤 7-9（引用提取 / 记忆更新 / 宠物经验）在流式结束后执行。
+        """
 ```
 
 ### 6.2 AnswerResult 数据结构
@@ -418,11 +458,11 @@ class PetAdministrator:
 ```python
 @dataclass
 class AnswerResult:
-    text: str                          # LLM 回答文本
-    citations: List[Citation]          # 引用列表（来自 core/retrieval/citation.py）
-    sources: List[RerankResult]        # 完整溯源信息（来自 core/retrieval/rerank.py）
-    pet_events: dict                   # 宠物事件（升级/分系等）
-    related_tasks: List[Task] = None   # 相关未完成任务（来自 core/memory/tasks.py，可选）
+    text: str                                      # LLM 回答文本
+    citations: List[Citation] = field(default_factory=list)    # 引用列表
+    sources: List[RerankResult] = field(default_factory=list)  # 完整溯源信息
+    pet_events: dict = field(default_factory=dict)             # 宠物事件（升级/分系等）
+    related_tasks: Optional[List] = None           # 相关未完成任务（可选）
 ```
 
 ### 6.3 REPL 集成改动
@@ -489,7 +529,7 @@ def _post_command_hook(self, cmd: str) -> None:
 |-------|---------|
 | 向量索引未构建 | 自动用纯 BM25，提示"向量索引未构建，运行 `ima rebuild --vector`" |
 | LLM 重排失败 | 保留 hybrid 顺序，记日志 |
-| LLM 生成失败 | 返回检索到的原文片段 + 提示"LLM 不可用，已展示原文" |
+| LLM 生成失败 | 返回检索到的原文片段 + 统一降级文案（`get_llm_degrade_message(error, has_sources, source_count)`） |
 | 记忆文件损坏 | 备份后重置为空记忆，提示用户 |
 | 宠物未领养 | 降级为原有 RAGChain，无人格无记忆 |
 
@@ -528,7 +568,7 @@ def _post_command_hook(self, cmd: str) -> None:
 | 向量索引缺失 | 纯 BM25 | "向量索引未构建，仅用 BM25。运行 `ima rebuild --vector` 启用混合检索" |
 | 向量模型加载失败 | 纯 BM25 | "向量模型加载失败（{原因}），已降级为 BM25" |
 | LLM 重排失败 | 保留 hybrid 顺序 | "⚠ 重排序失败，结果未优化" |
-| LLM 生成失败 | 返回原文片段 | "⚠ LLM 不可用，已展示检索原文" |
+| LLM 生成失败 | 返回原文片段 | `get_llm_degrade_message()` 统一文案（含错误类型、排查建议、source 数量） |
 | 记忆更新失败 | 跳过更新 | 日志记录，不打扰用户 |
 | 单次检索超时（>10s） | 截断结果 | "⚠ 检索超时，结果可能不完整" |
 
@@ -645,7 +685,9 @@ def test_memory_persistence_across_sessions(tmp_path):
         pet=PetStorage(storage_path=tmp_path).load(),
         storage=admin.storage,
         memory_store=MemoryStore(storage_path=tmp_path),
-        art_library=admin.art,
+        hybrid_retriever=admin.hybrid,
+        reranker=admin.reranker,
+        llm=admin.llm,
     )
     profile = admin2.memory.get_profile()
     assert "杭州" in profile.focus_regions

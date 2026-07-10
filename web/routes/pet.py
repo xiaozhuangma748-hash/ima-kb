@@ -19,6 +19,17 @@ def _get_pet():
     return PetStorage().load()
 
 
+def _get_preferred_style() -> str:
+    """从 ProfileManager 读取当前风格偏好，失败回退 'auto'。"""
+    try:
+        from core.memory.profile import ProfileManager
+        from core.memory.store import MemoryStore
+        mgr = ProfileManager(MemoryStore())
+        return mgr.get_profile().preferred_style
+    except Exception:
+        return "auto"
+
+
 def _pet_to_dict(pet) -> dict:
     """安全的 Pet → dict 转换，兼容所有属性名。"""
     return {
@@ -27,7 +38,7 @@ def _pet_to_dict(pet) -> dict:
         "exp": pet.exp,
         "exp_needed": pet.exp_needed() if hasattr(pet, "exp_needed") else 100,
         "branch": getattr(pet, "branch", None),
-        "style": getattr(pet, "branch", None) or "auto",  # branch 映射为 style
+        "style": _get_preferred_style(),
         "hunger": getattr(pet, "hunger", 60),
         "mood": getattr(pet, "mood", 80),
         "energy": getattr(pet, "energy", 75),
@@ -112,22 +123,23 @@ async def pet_style(body: PetStyleBody):
     if pet is None:
         raise HTTPException(status_code=404, detail="尚未领养宠物")
 
-    valid_styles = {"scholar", "warrior", "artisan", "auto", "neutral"}
+    valid_styles = {"scholar", "warrior", "artisan", "auto"}
     if body.style not in valid_styles:
         raise HTTPException(status_code=400, detail=f"无效风格: {body.style}，可选: {', '.join(sorted(valid_styles))}")
 
     try:
-        from core.pet.storage import PetStorage
+        from core.memory.profile import ProfileManager
+        from core.memory.store import MemoryStore
 
-        # branch 是 Pet 类上的属性
-        style_value = None if body.style == "auto" else body.style
-        pet.branch = style_value
-        PetStorage().save(pet)
+        mgr = ProfileManager(MemoryStore())
+        mgr.update_style_preference(body.style)
 
         return {
             "pet": _pet_to_dict(pet),
             "message": f"风格已切换为: {body.style}",
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"切换失败: {e}")
 

@@ -72,7 +72,7 @@ export function doSearch() {
   fetch(`/api/search?q=${encodeURIComponent(q)}&limit=10&use_vector=${useVector}&use_rerank=${useRerank}`)
     .then(r => r.json())
     .then(data => {
-      resultCount.textContent = `找到 ${data.total} 个结果 · 用时 ${data.time_ms} 秒`;
+      resultCount.textContent = `找到 ${data.total} 个结果 · 用时 ${(data.time_ms / 1000).toFixed(2)} 秒`;
       resultsContainer.innerHTML = '';
 
       if (!data.results?.length) {

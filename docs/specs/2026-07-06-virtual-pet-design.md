@@ -34,28 +34,12 @@
 core/pet/
 ├── __init__.py
 ├── pet.py          # Pet 类：状态、属性、升级逻辑、分系判定
-├── art.py          # ASCII 艺术库（30 形态加载器）
-├── arts/           # ASCII 艺术文本文件（每形态一个 .txt）
-│   ├── none_1.txt      # Lv1 蛋
-│   ├── none_2.txt      # Lv2 幼崽
-│   ├── none_3.txt      # Lv3 小兽
-│   ├── none_4.txt      # Lv4 亚成
-│   ├── none_5.txt      # Lv5 分系动画
-│   ├── scholar_6.txt   # 学者系 Lv6 小鸮
-│   ├── scholar_7.txt   # 学者系 Lv7 学者鸮
-│   ├── scholar_8.txt   # 学者系 Lv8 智者鸮
-│   ├── scholar_9.txt   # 学者系 Lv9 贤者鸮
-│   ├── scholar_10.txt  # 学者系 Lv10 时空鸮
-│   ├── warrior_6.txt   # 战士系 Lv6 幼狼
-│   ├── warrior_7.txt   # 战士系 Lv7 战狼
-│   ├── warrior_8.txt   # 战士系 Lv8 银狼
-│   ├── warrior_9.txt   # 战士系 Lv9 苍狼
-│   ├── warrior_10.txt  # 战士系 Lv10 神狼
-│   ├── artisan_6.txt   # 工匠系 Lv6 小獾
-│   ├── artisan_7.txt   # 工匠系 Lv7 匠獾
-│   ├── artisan_8.txt   # 工匠系 Lv8 巧匠獾
-│   ├── artisan_9.txt   # 工匠系 Lv9 大师獾
-│   └── artisan_10.txt  # 工匠系 Lv10 神匠獾
+├── art.py          # ASCII 艺术库（35 形态加载器）
+├── arts/           # ASCII 艺术文本文件（每形态一个 .txt，共 35 个）
+│   ├── none_1.txt ... none_5.txt         # 通用阶段 Lv1-5
+│   ├── scholar_1.txt ... scholar_10.txt  # 学者系 Lv1-10
+│   ├── warrior_1.txt ... warrior_10.txt  # 战士系 Lv1-10
+│   └── artisan_1.txt ... artisan_10.txt  # 工匠系 Lv1-10
 ├── tasks.py        # 每日任务系统（任务池、刷新、完成判定）
 ├── shop.py         # 道具商店（道具列表、购买、使用）
 ├── interact.py     # 互动命令处理（feed/play/train/wash/sleep）
@@ -71,8 +55,8 @@ config.py           # 加 pet 相关配置（衰减速率等）
 
 | 方法 | 经验 | 行为类型 |
 |---|---|---|
-| `_cmd_ingest`（每入库 1 个文件） | +50 | ingest |
-| `_handle_chat`（每次问答） | +5 | qa |
+| `_cmd_ingest`（每入库 1 个文件） | +30 | ingest |
+| `_handle_chat`（每次问答） | +10 | qa |
 | `_cmd_analyze` | +15 | analyze |
 | `_cmd_report` | +20 | report |
 | `_cmd_agent` | +15 | agent |
@@ -121,10 +105,28 @@ class Pet:
     # 每日任务
     daily_tasks: list = field(default_factory=list)
     daily_reset_at: str = ""
+    # 任务历史（7 天不重复用）：[{"date": "2026-07-05", "task_ids": [...]}]
+    task_history: list = field(default_factory=list)
 
     # 限时道具效果
     active_effects: list = field(default_factory=list)  # [{"effect": "exp_multi", "value": 2.0, "expires_at": "..."}]
 ```
+
+### Pet 类方法
+
+| 方法 | 说明 |
+|---|---|
+| `exp_needed()` | 当前等级升到下一级所需经验（纯公式 `floor(100 * level^1.5)`，无 MAX_LEVEL 守卫） |
+| `exp_remaining()` | 距离升级还差多少经验（Lv10 时返回 0） |
+| `gain_exp(amount, action_type)` | 获取经验，可能触发升级和分系，返回事件 dict |
+| `_determine_branch()` | 根据 stats 判定分系，平局时 random.choice 随机选择 |
+| `apply_decay()` | 应用离线衰减，返回衰减信息 dict |
+| `clean_expired_effects()` | 清理 active_effects 中已过期的限时效果，返回清理数量 |
+| `get_active_exp_multi()` | 获取当前生效的经验加成倍率（综合 exp_multi 和 active_effects） |
+| `has_auto_revive()` | 是否持有未触发的凤凰之羽效果 |
+| `consume_auto_revive()` | 消耗一个凤凰之羽效果（hunger=0 时免扣经验） |
+| `reset_stats()` | 重置行为统计（stats），不影响等级/经验/属性 |
+| `clear_active_effects()` | 清空所有限时效果，返回清除数量 |
 
 ### 升级阈值
 
@@ -133,14 +135,14 @@ class Pet:
 | 等级 | 升级所需经验 | 累计经验 |
 |---|---|---|
 | 1→2 | 100 | 100 |
-| 2→3 | 283 | 383 |
-| 3→4 | 520 | 903 |
-| 4→5 | 800 | 1703 |
-| 5→6 | 1342 | 3045 |
-| 6→7 | 1643 | 4688 |
-| 7→8 | 1974 | 6662 |
-| 8→9 | 2333 | 8995 |
-| 9→10 | 2720 | 11715 |
+| 2→3 | 282 | 382 |
+| 3→4 | 519 | 901 |
+| 4→5 | 800 | 1701 |
+| 5→6 | 1118 | 2819 |
+| 6→7 | 1469 | 4288 |
+| 7→8 | 1852 | 6140 |
+| 8→9 | 2262 | 8402 |
+| 9→10 | 2700 | 11102 |
 
 ### 分系判定（Lv5 时触发）
 
@@ -156,10 +158,14 @@ scholar_score = sum(stats[k] for k in SCHOLAR_KEYS)
 warrior_score = sum(stats[k] for k in WARRIOR_KEYS)
 artisan_score = sum(stats[k] for k in ARTISAN_KEYS)
 
-branch = max([("scholar", scholar_score), ("warrior", warrior_score), ("artisan", artisan_score)], key=lambda x: x[1])[0]
+scores = [("scholar", scholar_score), ("warrior", warrior_score), ("artisan", artisan_score)]
+max_score = max(s for _, s in scores)
+# 平局时随机选一个（避免永远 scholar）
+winners = [name for name, s in scores if s == max_score]
+branch = random.choice(winners) if len(winners) > 1 else winners[0]
 ```
 
-若并列取首个（按 scholar > warrior > artisan 优先级），并提示用户「检测到你偏向 XXX 系，已为你进化为 XXX」。
+若并列则随机选择（避免永远偏向 scholar），并提示用户「检测到你偏向 XXX 系，已为你进化为 XXX」。
 
 ---
 
@@ -167,21 +173,21 @@ branch = max([("scholar", scholar_score), ("warrior", warrior_score), ("artisan"
 
 | 属性 | 范围 | 衰减速率 | 影响 |
 |---|---|---|---|
-| hunger | 0-100 | -2/小时 | 0 时每小时扣 10 经验 |
-| mood | 0-100 | -1/小时 | <30 时经验获取 -30% |
+| hunger | 0-100 | -1.5/小时 | 0 时每小时扣 10 经验 |
+| mood | 0-100 | -0.5/小时 | <30 时经验获取 -30% |
 | energy | 0-100 | 不自动衰减 | 互动消耗，问答 +2/次 |
-| cleanliness | 0-100 | -0.5/小时 | <30 时心情衰减速率 ×2 |
+| cleanliness | 0-100 | -0.3/小时 | <30 时心情衰减速率 ×2 |
 | exp_multi | 1.0 | 道具限时 | 经验获取倍率 |
 
 ### 离线衰减
 
 启动时计算 `last_decay` 到现在的时间差，一次性扣减属性：
 - 总衰减封顶 -50（防止长期不玩归零）
-- 若离线 >7 天，提示「小X很想你～」并自动恢复 hunger 至 50
+- 若离线 >7 天，提示「小X很想你～」（注：自动恢复 hunger 至 50 的功能尚未实现，当前仅提示）
 
 ### 能量恢复
 
-- 每次问答 +2 energy（封顶 100）
+- 每次问答 +2 energy（封顶 100）（注：此功能尚未实现，当前 energy 仅通过 `/pet sleep` 恢复）
 - `/pet sleep` 一次 +50 energy，1 小时冷却
 
 ---
@@ -198,6 +204,9 @@ branch = max([("scholar", scholar_score), ("warrior", warrior_score), ("artisan"
 | `/pet wash` | 清洁 | -5 energy | +50 cleanliness, +5 mood |
 | `/pet sleep` | 睡觉（恢复能量） | 0（1 小时冷却） | +50 energy, +10 mood |
 | `/pet name <新名>` | 改名 | 0 | 无 |
+| `/pet style <风格>` | 切换人格风格（scholar/warrior/artisan/auto） | 0 | 临时覆盖分系风格 |
+| `/pet reset` | 重置行为统计（stats） | 0 | 清空 stats 字典（不影响等级/经验/属性） |
+| `/pet bag` | 查看道具栏 | 0 | 无 |
 | `/pet tasks` | 查看每日任务进度 | 0 | 无 |
 | `/pet shop` | 浏览道具商店 | 0 | 无 |
 | `/pet buy <id>` | 购买道具 | 扣经验 | 道具入栏 |
@@ -252,10 +261,10 @@ branch = max([("scholar", scholar_score), ("warrior", warrior_score), ("artisan"
 | ball | 玩具球 | 80 | +40 mood |
 | soap | 洗浴套装 | 60 | +50 cleanliness |
 | energy_drink | 能量饮料 | 100 | +50 energy |
-| exp_potion | 经验药水 | 200 | 1 小时内 exp_multi=2.0 |
+| exp_potion | 经验药水 | 150 | 2 小时内 exp_multi=2.0 |
 | super_food | 顶级饲料 | 150 | +50 hunger +20 mood |
 | phoenix_down | 凤凰之羽 | 500 | hunger=0 时自动消耗，防止扣经验 1 次 |
-| rename_card | 重置卡 | 100 | 重置当前等级的属性到 80（防衰减保险） |
+| rename_card | 重置卡 | 100 | 将低于 80 的属性恢复到 80（保留高于 80 的属性） |
 
 ### 购买流程
 
@@ -275,7 +284,7 @@ branch = max([("scholar", scholar_score), ("warrior", warrior_score), ("artisan"
 
 ## 7. ASCII 艺术规格
 
-### 形态列表（共 30 个）
+### 形态列表（共 35 个文件）
 
 | 等级 | 通用阶段 | 学者系 | 战士系 | 工匠系 |
 |---|---|---|---|---|
@@ -295,7 +304,7 @@ branch = max([("scholar", scholar_score), ("warrior", warrior_score), ("artisan"
 - 路径：`core/pet/arts/{branch}_{level}.txt`（branch 为 `none` 时表示通用阶段）
 - 尺寸：
   - **大尺寸**（详情页 `/pet` 用）：约 15 行 × 30 列
-  - **小尺寸**（启动页用）：约 6 行 × 20 列（同形态缩略版）
+  - **小尺寸**（启动页用）：约 6 行 × 20 列（`_small` 变体由代码动态截断大尺寸前 6 行，无需单独创建文件）
 - 配色（用 rich 渲染）：
   - 通用阶段：白色
   - 学者系：青色（cyan）
@@ -318,8 +327,33 @@ class ArtLibrary:
         suffix = "_small" if small else ""
         path = ARTS_DIR / f"{branch_key}_{level}{suffix}.txt"
         if not path.exists():
-            return self._fallback(branch, level)  # 占位符
+            # 尝试加载大尺寸再截断
+            if small:
+                full_path = ARTS_DIR / f"{branch_key}_{level}.txt"
+                if full_path.exists():
+                    lines = full_path.read_text(encoding="utf-8").split("\n")[:6]
+                    return "\n".join(lines)
+            return self._fallback(branch, level, small)  # 占位符
         return path.read_text(encoding="utf-8")
+
+    def _fallback(self, branch: Optional[str], level: int, small: bool = False) -> str:
+        """占位符。采用 block-style 像素风格，避免 ??? 占位。"""
+        branch_label = branch or "未分系"
+        if small:
+            return f"""
+  ▄▄▄
+ ▄●●▄
+ ▀██▀
+[{branch_label} Lv{level}]
+"""
+        return f"""
+   ▄▄▄▄
+  ▄●  ●▄
+  █▄██▄█
+   ▀██▀
+    ▐  ▌
+ [{branch_label} Lv{level}]
+"""
 ```
 
 ---
@@ -387,13 +421,13 @@ elif cmd == "/pet":
 
 ```python
 # 在 _cmd_ingest 成功后
-self.pet.gain_exp(50, "ingest")
+self.pet.gain_exp(30, "ingest")
 
 # 在 _cmd_agent 成功后
 self.pet.gain_exp(15, "agent")
 
 # 在 _handle_chat 成功后
-self.pet.gain_exp(5, "qa")
+self.pet.gain_exp(10, "qa")
 ```
 
 `gain_exp` 内部流程：
@@ -455,7 +489,7 @@ self.pet.gain_exp(5, "qa")
 
 - [ ] 启动 REPL，看到宠物子区块
 - [ ] `/pet adopt 小白` → 创建宠物
-- [ ] `/ingest` 一文件 → 经验 +50
+- [ ] `/ingest` 一文件 → 经验 +30
 - [ ] `/pet` → 看到详情面板
 - [ ] `/pet feed` → hunger 增加
 - [ ] 连续问答 5 次 → 每日任务完成
@@ -485,7 +519,7 @@ self.pet.gain_exp(5, "qa")
 ### 阶段 3：集成（2 天）
 9. `repl.py` 启动页加宠物子区块
 10. 行为埋点（10 处）
-11. ASCII 艺术（30 个 + 30 个缩略版）
+11. ASCII 艺术（35 个文件，小尺寸由代码动态截断）
 12. 离线衰减计算
 
 ### 阶段 4：打磨（1 天）
@@ -513,8 +547,8 @@ self.pet.gain_exp(5, "qa")
 ## 附录 A：经验值平衡性分析
 
 假设用户日常使用 IMA 的频率：
-- 每天入库 2 文档（+100）
-- 每天问 10 个问题（+50）
+- 每天入库 2 文档（+60）
+- 每天问 10 个问题（+100）
 - 每周用 1 次 analyze（+15）
 - 每周用 1 次 agent（+15）
 
@@ -523,14 +557,14 @@ self.pet.gain_exp(5, "qa")
 | 等级 | 升级所需 | 累计 | 按日均 165 估算 |
 |---|---|---|---|
 | 1→2 | 100 | 100 | 0.6 天 |
-| 2→3 | 283 | 383 | 2.3 天 |
-| 3→4 | 520 | 903 | 5.5 天 |
-| 4→5 | 800 | 1703 | 10.3 天 |
-| 5→6 | 1342 | 3045 | 18.5 天 |
-| 6→7 | 1643 | 4688 | 28.4 天 |
-| 7→8 | 1974 | 6662 | 40.4 天 |
-| 8→9 | 2333 | 8995 | 54.5 天 |
-| 9→10 | 2720 | 11715 | 71.0 天 |
+| 2→3 | 282 | 382 | 2.3 天 |
+| 3→4 | 519 | 901 | 5.5 天 |
+| 4→5 | 800 | 1701 | 10.3 天 |
+| 5→6 | 1118 | 2819 | 17.1 天 |
+| 6→7 | 1469 | 4288 | 26.0 天 |
+| 7→8 | 1852 | 6140 | 37.2 天 |
+| 8→9 | 2262 | 8402 | 50.9 天 |
+| 9→10 | 2700 | 11102 | 67.3 天 |
 
 **结论**：
 - Lv5（分系）约 10 天达成，节奏合适
@@ -543,8 +577,8 @@ self.pet.gain_exp(5, "qa")
 
 | 文件 | 方法 | 经验 | 触发条件 |
 |---|---|---|---|
-| `repl.py` | `_handle_chat` | +5 | LLM 回答成功后 |
-| `repl.py` | `_cmd_ingest` | +50 × n | 每入库 1 个文件 |
+| `repl.py` | `_handle_chat` | +10 | LLM 回答成功后 |
+| `repl.py` | `_cmd_ingest` | +30 × n | 每入库 1 个文件 |
 | `repl.py` | `_cmd_analyze` | +15 | 分析成功后 |
 | `repl.py` | `_cmd_report` | +20 | 报告生成成功后 |
 | `repl.py` | `_cmd_read` | +10 | 进入阅读模式后 |

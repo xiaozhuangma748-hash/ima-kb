@@ -14,7 +14,6 @@ export function loadPet() {
       document.getElementById('pet-mood').style.width = data.mood + '%';
       document.getElementById('pet-hunger').style.width = data.hunger + '%';
       document.getElementById('pet-energy').style.width = data.energy + '%';
-      document.getElementById('pet-intellect').style.width = data.intellect + '%';
 
       if (data.ascii_art) {
         const asciiEl = document.getElementById('pet-ascii');

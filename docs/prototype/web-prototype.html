@@ -1047,6 +1047,7 @@
   .persona-card-style.active { border: 2px solid var(--accent-orange); background: rgba(245, 158, 11, 0.04); }
 </style>
 </head>
+<!-- 注意：本原型仅作视觉布局参考，实际页面以 web/templates/index.html 为准。原型与实际实现存在多处差异，详见 docs/superpowers/specs/2026-07-08-web-backend-design.md -->
 <body>
 <div class="app">
   <!-- Logo -->
@@ -1070,6 +1071,7 @@
   </div>
 
   <!-- 侧边栏 -->
+  <!-- 差异：原型默认激活 AI 问答页，实际 index.html 默认激活"仪表盘"页（page-dashboard 与 nav-item[data-page="dashboard"] 同时带 active） -->
   <div class="sidebar">
     <div class="nav-section">
       <div class="nav-section-title">核心功能</div>
@@ -1125,6 +1127,8 @@
   <div class="main">
 
     <!-- 1. AI 问答页 -->
+    <!-- 差异（布局）：原型为"顶部 persona-bar + 预填充对话 + 固定引用卡片 + 推荐问题卡片"。
+         实际 index.html 为 ChatGPT 风格：空状态 hero（qa-hero-title "今天有什么想了解的？"）+ 3 个建议问题气泡（qa-suggestions）+ persona chips 移入输入框底部（persona-input-bar）+ 圆形发送按钮（send-btn）+ 侧边栏折叠按钮（sidebar-toggle）+ 引用面板（sources-panel）动态由 SSE done 事件填充。原型中的"推荐问题卡片"在实际页面不存在。 -->
     <div class="page active" id="page-qa">
       <div class="page-header">
         <div>
@@ -1242,6 +1246,7 @@
         </div>
       </div>
     </div>
+    <!-- /AI 问答页 · 布局差异见上方注释 -->
 
     <!-- 2. 文档入库页 -->
     <div class="page" id="page-ingest">
@@ -1386,6 +1391,7 @@
         </div>
 
         <div class="search-filters">
+          <!-- 差异：原型有"标签筛选"+ "排序下拉"。实际 index.html 仅有两个 toggle（向量检索 / LLM 重排序），无标签筛选 UI、无排序下拉。后端 /api/search 已支持 tags/sort/limit 参数但前端未接入。 -->
           <div class="filter-group">
             <span>向量检索</span>
             <div class="toggle on"></div>
@@ -1410,6 +1416,7 @@
           </div>
         </div>
 
+        <!-- 差异（无需改原型）：原型静态文本"用时 0.42 秒"是对的（0.42 是秒）。但实际代码 search.js 有 bug：time_ms 是毫秒，却显示为"用时 ${data.time_ms} 秒"（单位错位）。 -->
         <div style="font-size: 12px; color: var(--text-muted)">找到 <span style="color: var(--accent-orange)">8</span> 个结果 · 用时 0.42 秒</div>
 
         <div class="search-results">
@@ -1480,6 +1487,7 @@
     </div>
 
     <!-- 4. 数据分析页 -->
+    <!-- 差异：原型顶部有"🤖 AI 解读"按钮、卡片头部有"📤 导出报告"按钮。实际 index.html 改为顶部"📁 选择文件"+ "🤖 AI 分析"两个按钮（btn-analyze-file / btn-analyze），无导出按钮。后端 /api/analyze/export 已实现但前端未接入。 -->
     <div class="page" id="page-analyze">
       <div class="page-header">
         <div>
@@ -1503,6 +1511,7 @@
         </div>
 
         <div class="stats-grid">
+          <!-- 差异：原型数值列带 ascii-chart（ASCII 柱状图）。实际后端 /api/analyze 响应无 ascii_chart 字段（未实现），前端 analyze.js 也不渲染 ASCII 图。 -->
           <div class="stat-card">
             <div class="stat-header">
               <div class="stat-name">服务项目</div>
@@ -1616,6 +1625,7 @@
       </div>
 
       <div class="dashboard-grid">
+        <!-- 差异：原型每个 metric-card 带 metric-delta（"↑ 本周 +N"）。实际 index.html 无 delta 显示，dashboard.js 仅填充 documents/chunks/tags_count/graph_nodes 数值。 -->
         <div class="metric-card">
           <div class="metric-label">文档总数</div>
           <div class="metric-value">33</div>
@@ -1713,6 +1723,7 @@
 
       <div class="graph-layout">
         <div class="graph-canvas">
+          <!-- 差异：原型用静态 SVG 手绘节点和连线。实际 index.html 用 vis.js Network（CDN 引入）动态渲染：graph.js 调用 /api/graph/data 获取 cytoscape 格式数据，转换为 vis.DataSet 后初始化 Network，支持拖拽/物理引擎/点击节点查邻居。 -->
           <div class="graph-bg"></div>
           <svg class="graph-svg" viewBox="0 0 800 540" preserveAspectRatio="xMidYMid meet">
             <!-- 箭头标记定义 -->
@@ -1834,6 +1845,7 @@
         </div>
 
         <div class="graph-sidebar">
+          <!-- 差异：原型有"节点查询输入框"和"图谱统计卡片（按类型细分）"。实际 index.html 无查询输入框（改为点击图谱节点触发 /api/graph/neighbors/{name}），统计仅显示总节点数和总边数（graph-node-count / graph-edge-count），无按类型细分。 -->
           <div class="card">
             <div class="card-title" style="margin-bottom: 12px">🔍 节点查询</div>
             <input class="input" placeholder="输入节点名称...">
@@ -1889,6 +1901,7 @@
     ████░░░░░░░░████
       ████████████</div>
           <div class="pet-name">小白</div>
+          <!-- 差异：原型显示"Lv.7 · scholar 学者 · 经验 2,340 / 3,000"。实际 index.html 由 pet.js 渲染为 `Lv.${data.level} · ${data.style} 风格`，不显示经验值。 -->
           <div class="pet-level">Lv.7 · scholar 学者 · 经验 2,340 / 3,000</div>
 
           <div class="pet-stats">
@@ -1946,6 +1959,7 @@
           </div>
 
           <div class="card" style="margin-top: 16px">
+            <!-- 差异：原型有"📈 成长记录"卡片（累计问答/累计经验/升级次数/下次升级）。实际 index.html 未实现此卡片。 -->
             <div class="card-title" style="margin-bottom: 12px">📈 成长记录</div>
             <div style="font-size: 12px; line-height: 1.8; color: var(--text-secondary)">
               <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border)">
@@ -1970,6 +1984,7 @@
 </div>
 
 <script>
+  // 差异：原型使用内联 <script>（约 50 行，3 个简单交互）。实际 index.html 改为 <script type="module" src="/static/app.js">，逻辑已模块化拆分到 web/static/js/ 下 11 个 ES Module（app/nav/qa/ingest/search/analyze/dashboard/graph/pet/state/utils），共约 800+ 行。详见 docs/superpowers/specs/2026-07-08-web-backend-design.md 第 6 节。
   // 导航切换
   const navItems = document.querySelectorAll('.nav-item[data-page]');
   const pages = document.querySelectorAll('.page');

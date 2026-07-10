@@ -109,8 +109,8 @@ IMA Web 后台
 | 流式输出 | P0 | 首字 < 2s,逐字显示,带 ⏺ 标记 |
 | 引用编号 | P0 | 回答末尾显示 [1][2],点击跳转来源 |
 | 来源卡片 | P0 | 显示文档标题 + 命中片段 + 相关度 |
-| 人格切换 | P1 | 顶部 4 个标签(scholar/warrior/artisan/auto) |
-| 多轮历史 | P0 | 保留当前会话全部历史,可清空 |
+| 人格切换 | P1 | 输入框底部 4 个人格标签（ChatGPT 风格）(scholar/warrior/artisan/auto) |
+| 多轮历史 | P0 | 保留最近 10 轮（20 条消息），超出截断；可清空 |
 | 清空对话 | P0 | 二次确认后清空 |
 | 输入示例 | P2 | 空状态显示 3 个示例问题可点击 |
 
@@ -121,7 +121,7 @@ IMA Web 后台
 | 拖拽上传区 | P0 | 支持多文件,显示文件名+大小+格式图标 |
 | 格式支持 | P0 | PDF/Word/Excel/PPT/MD/TXT/HTML/图片(11 种) |
 | URL 入库 | P1 | 输入 URL,trafilatura 抓取正文 |
-| 剪贴板入库 | P2 | 粘贴文本/截图,自动 OCR |
+| 剪贴板入库 | P2 | 粘贴文本/截图,自动 OCR（注：前端 UI 已就位，后端 `/api/ingest/clip` 端点和前端事件绑定未实现） |
 | 上传进度 | P0 | 每个文件独立进度条:解析→分块→标签→入库 |
 | 自动标签 | P0 | 入库后显示 LLM 生成的 3-5 个标签 |
 | 失败重试 | P1 | 单文件失败可重试,不影响其他文件 |
@@ -133,10 +133,10 @@ IMA Web 后台
 |---|---|---|
 | 搜索框 | P0 | 支持中文分词,Enter 触发 |
 | 检索模式 | P1 | 开关:启用向量检索 / 启用 LLM 重排序 |
-| 标签筛选 | P0 | 多选下拉,选中的标签 AND 关系 |
+| 标签筛选 | P0 | 多选下拉,选中的标签 AND 关系（注：后端 `/api/search` 已支持 `tags` 参数，前端 UI 未实现） |
 | 结果列表 | P0 | 文档标题 + 命中片段(高亮) + 标签 + 相关度分数 |
-| 排序 | P1 | 按相关度/按时间/按文档名 |
-| 分页 | P2 | 每页 10 条,加载更多 |
+| 排序 | P1 | 按相关度/按时间/按文档名（注：后端已支持 `sort` 参数，前端 UI 未实现） |
+| 分页 | P2 | 每页 10 条,加载更多（注：后端已支持 `limit` 参数，前端 UI 未实现） |
 | 空状态 | P0 | 无结果时提示"未找到,试试其他关键词" |
 
 #### 3.2.4 数据分析页(P0)
@@ -146,10 +146,10 @@ IMA Web 后台
 | Excel 上传 | P0 | 支持 .xlsx/.xls,多 sheet |
 | Sheet 切换 | P0 | 顶部标签页切换 |
 | 自动统计 | P0 | 每列:类型/空值数/唯一值/最小/最大/均值 |
-| 字符图 | P0 | 数值列显示 ASCII 柱状图 |
+| 字符图 | P0 | 数值列显示 ASCII 柱状图（注：未实现） |
 | 数据预览 | P0 | 前 10 行表格 |
 | AI 解读 | P1 | 按钮"AI 分析",LLM 生成趋势解读 |
-| 导出 | P2 | 导出 Markdown 报告 |
+| 导出 | P2 | 导出 Markdown 报告（注：后端已实现 `/api/analyze/export?key=`，前端未接入） |
 
 #### 3.2.5 仪表盘(P1)
 
@@ -159,7 +159,7 @@ IMA Web 后台
 | 标签分布 | P1 | 柱状图 Top 10 |
 | 最近入库 | P1 | 列表显示最近 5 个文档 |
 | 质量告警 | P1 | 空文档/超长块/低质量内容警告 |
-| 存储用量 | P2 | uploads/cache/chroma/models 占用 |
+| 存储用量 | P2 | uploads/cache/chroma/models 占用（注：实际仅返回 `total_size_mb` 总量，无 uploads/cache/chroma/models 细分） |
 
 #### 3.2.6 知识图谱(P1)
 
@@ -176,9 +176,9 @@ IMA Web 后台
 | 需求 | 优先级 | 验收标准 |
 |---|---|---|
 | 宠物状态 | P2 | 显示等级/经验/心情/饱食/能量 |
-| 喂食/玩耍/训练 | P2 | 3 个按钮,点击后状态变化 |
+| 喂食/玩耍/训练 | P2 | 3 个按钮,点击后状态变化（注：后端支持 5 种 feed/play/train/sleep/wash，前端仅暴露 3 个） |
 | 风格切换 | P2 | 4 种人格风格切换 |
-| 像素艺术 | P2 | ASCII 艺术转图片显示 |
+| 像素艺术 | P2 | ASCII 艺术文本显示 |
 
 ---
 
@@ -231,7 +231,7 @@ IMA Web 后台
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 前端框架 | 单页 HTML + JS | `web/templates/index.html` + `web/static/app.js`，侧边栏切换 7 页面 |
+| 前端框架 | 单页 HTML + ES Module JS | `web/templates/index.html` + `web/static/js/` 下 11 个 ES Module（app/nav/qa/ingest/search/analyze/dashboard/graph/pet/state/utils），`web/static/app.js` 仅作重定向入口（`import './js/app.js'`），侧边栏切换 7 页面 |
 | 图表 | 原生 JS + vis.js(CDN) | 搜索结果/数据分析/知识图谱 |
 | 后端 | FastAPI + uvicorn | 7 个路由模块，复用 core/ |
 | 通信 | SSE (Server-Sent Events) | AI 问答流式输出 |
