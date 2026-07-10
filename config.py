@@ -31,7 +31,7 @@ class Settings:
     agnes_base_url: str = field(
         default_factory=lambda: _get_env("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1")
     )
-    llm_model: str = field(default_factory=lambda: _get_env("LLM_MODEL", "agnes-2.0-flash"))
+    llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL_OVERRIDE") or _get_env("LLM_MODEL", "agnes-2.0-flash"))
 
     # ---- 图像生成 (Agnes Image) ----
     image_model: str = field(default_factory=lambda: _get_env("IMAGE_MODEL", "agnes-image-2.1-flash"))
@@ -94,6 +94,17 @@ class Settings:
     def has_llm(self) -> bool:
         """是否配置了 LLM Key。"""
         return bool(self.agnes_api_key and not self.agnes_api_key.startswith("sk-xxx"))
+
+    def is_configured(self) -> bool:
+        """检查是否已完成首次配置（.env 存在且 AGNES_API_KEY 非占位值）。"""
+        env_path = PROJECT_ROOT / ".env"
+        if not env_path.exists():
+            return False
+        key = os.environ.get("AGNES_API_KEY", "")
+        # 占位值检查：空、"sk-xxx"、"your-api-key" 等
+        if not key or key in ("sk-xxx", "your-api-key", "YOUR_API_KEY"):
+            return False
+        return True
 
 
 # 全局配置单例

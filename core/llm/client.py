@@ -41,6 +41,8 @@ class LLMClient:
             timeout=60.0,  # 单次请求超时 60 秒（默认太短）
         )
         self._model = settings.llm_model
+        # 最近一次调用的 token 使用量（由 chat/chat_stream 写入）
+        self.last_usage: Optional[dict] = None
 
     def chat(
         self,
@@ -69,6 +71,17 @@ class LLMClient:
                     temperature=temperature,
                     max_tokens=max_tokens or settings.llm_max_tokens,
                 )
+                # 存储 token 使用量（OpenAI SDK: resp.usage 属性）
+                try:
+                    usage = getattr(resp, "usage", None)
+                    if usage:
+                        self.last_usage = {
+                            "input": getattr(usage, "prompt_tokens", 0),
+                            "output": getattr(usage, "completion_tokens", 0),
+                            "total": getattr(usage, "total_tokens", 0),
+                        }
+                except Exception:
+                    self.last_usage = None
                 return resp.choices[0].message.content or ""
             except Exception as e:
                 last_err = e
@@ -111,10 +124,21 @@ class LLMClient:
                 temperature=temperature,
                 max_tokens=max_tokens or settings.llm_max_tokens,
                 stream=True,
+                stream_options={"include_usage": True},
             )
             for chunk in stream:
-                # 部分流式 chunk 的 choices 为空（仅含 usage/role 元信息），跳过
+                # 流式最后一帧 choices 为空，可能携带 usage，提取后跳过
                 if not chunk.choices:
+                    usage = getattr(chunk, "usage", None)
+                    if usage:
+                        try:
+                            self.last_usage = {
+                                "input": getattr(usage, "prompt_tokens", 0),
+                                "output": getattr(usage, "completion_tokens", 0),
+                                "total": getattr(usage, "total_tokens", 0),
+                            }
+                        except Exception:
+                            pass
                     continue
                 delta = chunk.choices[0].delta
                 content = getattr(delta, "content", None)

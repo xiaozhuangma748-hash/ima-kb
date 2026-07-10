@@ -20,12 +20,14 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Optional
 
 import click
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.table import Table
 
 from config import settings
@@ -121,16 +123,130 @@ def _ingest_one(storage: Storage, file_path: Path, verbose: bool = False, auto_t
 # CLI 命令
 # ============================================================
 
+def _run_headless(question: str, output: str = "text") -> None:
+    """Headless 模式：从命令行参数或 stdin 读取问题，输出回答后退出。
+
+    用法：
+        ima -p "你的问题"          # 直接问答
+        echo "问题" | ima          # stdin 管道模式
+        ima -p "问题" -o json      # JSON 格式输出
+    """
+    import json as json_module
+    from core.pet.administrator import PetAdministrator
+    from core.memory.store import MemoryStore
+    from core.retrieval.hybrid import HybridRetriever
+    from core.retrieval.vector import VectorIndex
+    from core.retrieval.rerank import Reranker
+    from core.pet.storage import PetStorage
+    from core.llm.client import get_llm
+
+    storage = Storage()
+    pet_storage = PetStorage()
+    pet = pet_storage.load()
+    if not pet:
+        click.echo("请先运行 'ima' 并使用 /pet adopt 领养宠物")
+        return
+
+    memory = MemoryStore()
+    try:
+        vector_index = VectorIndex()
+    except Exception:
+        vector_index = None
+    hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index)
+    llm = get_llm()
+    reranker = Reranker(llm)
+
+    admin = PetAdministrator(
+        pet=pet, storage=storage, memory_store=memory,
+        hybrid_retriever=hybrid, reranker=reranker, llm=llm,
+    )
+    result = admin.ask(question)
+
+    if output == "json":
+        # JSON 输出（便于管道/脚本消费）
+        output_data = {
+            "answer": result.text,
+            "citations": [
+                {
+                    "marker": c.marker,
+                    "title": c.title,
+                    "paragraph_num": c.paragraph_num,
+                    "doc_id": c.doc_id,
+                }
+                for c in result.citations
+            ],
+            "sources": [
+                {
+                    "doc_id": s.doc_id,
+                    "doc_title": s.doc_title,
+                    "score": getattr(s, "score", 0),
+                }
+                for s in result.sources
+            ],
+        }
+        click.echo(json_module.dumps(output_data, ensure_ascii=False, indent=2))
+    else:
+        # 文本输出（Markdown 渲染）
+        console.print(Markdown(result.text))
+        if result.citations:
+            console.print("\n[bold cyan]引用溯源[/bold cyan]")
+            for c in result.citations:
+                console.print(
+                    f"  [bold]{c.marker}[/bold] [cyan]{c.title}[/cyan] "
+                    f"[dim]§{c.paragraph_num}[/dim]"
+                )
+
+
 @click.group(help="个人知识库 CLI · 输入 --help 查看所有命令", invoke_without_command=True)
+@click.option("-p", "--print", "print_query", default=None, metavar="QUERY",
+              help="非交互模式：直接输出回答后退出")
+@click.option("--output", "-o", type=click.Choice(["text", "json"]), default="text",
+              help="输出格式：text（默认）或 json")
+@click.option("--debug", is_flag=True, default=False, help="开启诊断模式：输出检索/LLM 诊断信息")
+@click.option("-c", "--continue", "continue_session", is_flag=True, default=False,
+              help="续接最近一次保存的会话")
+@click.option("--model", "-m", default=None, help="临时覆盖 LLM 模型")
 @click.pass_context
-def cli(ctx) -> None:
+def cli(ctx, print_query, output, debug, continue_session, model) -> None:
     """主命令组。不带子命令时默认进入 REPL 交互模式。"""
     _ensure_dirs()
     # 屏蔽 macOS LibreSSL 警告（urllib3 v2 兼容性）
     import warnings
     warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
-    # 不带子命令时默认进入 REPL
+
+    # 临时覆盖 LLM 模型
+    if model:
+        os.environ["LLM_MODEL_OVERRIDE"] = model
+
+    # 设置环境变量供 REPL 读取
+    if debug:
+        os.environ["IMA_DEBUG"] = "1"
+    if continue_session:
+        os.environ["IMA_CONTINUE"] = "1"
+
+    # 不带子命令时
     if ctx.invoked_subcommand is None:
+        # Headless 模式 1: ima -p "问题"
+        if print_query is not None:
+            _run_headless(print_query, output)
+            return
+        # Headless 模式 2: stdin 管道 (echo "问题" | ima)
+        if not sys.stdin.isatty():
+            stdin_text = sys.stdin.read().strip()
+            if stdin_text:
+                _run_headless(stdin_text, output)
+                return
+        # 首次运行检测（仅交互模式）
+        if not settings.is_configured():
+            console.print("[yellow]首次使用，建议运行初始化引导[/yellow]")
+            choice = click.prompt(
+                "是否现在配置？(Y/n)", default="Y", show_default=False
+            )
+            if choice.lower() != "n":
+                from core.setup.wizard import run_wizard
+                run_wizard()
+                return
+        # 默认进入 REPL 交互模式
         from repl import main as repl_main
         repl_main()
 
@@ -156,7 +272,7 @@ def cli_web(host: str, port: int) -> None:
 
     _ensure_dirs()
 
-    console.print(f"\n[bold green]🚀 IMA Web 后台启动[/bold green]\n")
+    console.print(f"\n[bold green]IMA Web 后台启动[/bold green]\n")
     console.print(f"  地址: [cyan]http://{host}:{port}[/cyan]")
     console.print(f"  内网: [cyan]http://0.0.0.0:{port}[/cyan]" if host == "0.0.0.0" else "")
     console.print(f"  退出: [dim]Ctrl+C[/dim]\n")
@@ -164,6 +280,14 @@ def cli_web(host: str, port: int) -> None:
     from web.app import create_app
     app = create_app()
     uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+@cli.command(name="init", help="首次运行引导或重新配置")
+def cli_init() -> None:
+    """首次运行引导：配置 LLM、领养宠物、选择人格、入库文档。"""
+    _ensure_dirs()
+    from core.setup.wizard import run_wizard
+    run_wizard()
 
 
 @cli.command(help="交互式对话模式（终端常驻 REPL，推荐）")
@@ -200,13 +324,26 @@ def ingest(path: str, verbose: bool) -> None:
 
     console.print(f"\n[bold]开始入库[/bold] · 共 {len(files)} 个文件\n")
 
-    success, fail, skip = 0, 0, 0
-    for f in files:
-        result = _ingest_one(storage, f, verbose=verbose)
-        if result is True:
-            success += 1
-        else:
-            skip += 1
+    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TaskProgressColumn
+
+    success, skip = 0, 0
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task("入库中", total=len(files))
+        for f in files:
+            progress.update(task_id, description=f"入库: {f.name}")
+            result = _ingest_one(storage, f, verbose=verbose)
+            if result is True:
+                success += 1
+            else:
+                skip += 1
+            progress.advance(task_id)
+        progress.update(task_id, description=f"完成: {success} 成功, {skip} 跳过")
 
     console.print(
         f"\n[bold]完成[/bold] · 成功 {success} / 跳过 {skip} / 共 {len(files)}\n"
@@ -245,7 +382,7 @@ def cli_clip() -> None:
         console.print("[dim]支持：截图（Cmd+Shift+4）、复制文字、复制 URL[/dim]")
         sys.exit(1)
 
-    type_label = {"image": "📷 截图", "text": "📝 文本", "url": "🔗 网页"}.get(content_type, "内容")
+    type_label = {"image": "截图", "text": "文本", "url": "网页"}.get(content_type, "内容")
     console.print(f"[dim]检测到: {type_label}[/dim]")
 
     parsed = parse(file_path)
@@ -349,7 +486,7 @@ def search(query: str, limit: int, tag: Optional[str], raw: bool, plain: bool) -
         return
 
     # BM25 检索（如有 tag 筛选，扩大候选数后过滤）
-    fetch_k = limit * 5 if tag else limit
+    fetch_k = limit * 3
     results = storage.bm25_search(query, top_k=fetch_k)
 
     if tag:
@@ -361,12 +498,14 @@ def search(query: str, limit: int, tag: Optional[str], raw: bool, plain: bool) -
                 console.print(f"[yellow]未找到与 '{query}' 相关且带标签 '{tag}' 的内容[/yellow]")
                 console.print(f"[dim]带此标签的文档共 {len(tagged_docs)} 个[/dim]")
             return
+        total_found = len(results)
         results = results[:limit]
     else:
         if not results:
             if not plain:
                 console.print(f"[yellow]未找到与 '{query}' 相关的内容[/yellow]")
             return
+        total_found = len(results)
         results = results[:limit]
 
     if plain:
@@ -379,8 +518,21 @@ def search(query: str, limit: int, tag: Optional[str], raw: bool, plain: bool) -
 
     tag_hint = f" [dim]· 标签筛选: {tag}[/dim]" if tag else ""
     console.print(f"\n[bold]找到 {len(results)} 条相关结果[/bold] [dim](BM25 检索)[/dim]{tag_hint}\n")
+    import re as _re
     for i, r in enumerate(results, 1):
         preview = r.content[:200].replace("\n", " ")
+        # 先转义 Rich markup 字符，避免原文本中的 [ 干扰渲染
+        preview = preview.replace("[", "\\[").replace("[/]", "")
+        # 高亮关键词
+        try:
+            pattern = _re.escape(query)
+            preview = _re.sub(
+                f"({pattern})",
+                r"[bold yellow on black]\1[/]",
+                preview,
+            )
+        except Exception:
+            pass
         console.print(
             f"[cyan]{i}.[/cyan] "
             f"[green]({r.score:.2f})[/green] "
@@ -388,14 +540,21 @@ def search(query: str, limit: int, tag: Optional[str], raw: bool, plain: bool) -
             f"   {preview}{'...' if len(r.content) > 200 else ''}\n"
         )
 
+    # 分页提示
+    if total_found > limit:
+        console.print(f"[dim]还有 {total_found - limit} 条,用 --limit {total_found} 查看更多[/dim]\n")
+
 
 @cli.command(name="ask", help="CLI 一次性问答（基于宠物管理员 + 记忆 + 混合检索）")
 @click.argument("question")
-def cli_ask(question: str) -> None:
+@click.option("--model", "-m", default=None, help="临时覆盖 LLM 模型")
+def cli_ask(question: str, model: str = None) -> None:
     """CLI 一次性问答（不进 REPL）。
 
     使用 PetAdministrator 编排：混合检索 + LLM 重排 + 记忆 + 人格。
     """
+    if model:
+        os.environ["LLM_MODEL_OVERRIDE"] = model
     from core.pet.administrator import PetAdministrator
     from core.memory.store import MemoryStore
     from core.retrieval.hybrid import HybridRetriever
@@ -412,7 +571,10 @@ def cli_ask(question: str) -> None:
         return
 
     memory = MemoryStore()
-    vector_index = VectorIndex()
+    try:
+        vector_index = VectorIndex()
+    except Exception:
+        vector_index = None
     hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index)
     llm = get_llm()
     reranker = Reranker(llm)
@@ -422,11 +584,11 @@ def cli_ask(question: str) -> None:
         hybrid_retriever=hybrid, reranker=reranker, llm=llm,
     )
     result = admin.ask(question)
-    click.echo(result.text)
+    console.print(Markdown(result.text))
     if result.citations:
-        click.echo("\n引用溯源:")
+        console.print("\n[bold cyan]引用溯源[/bold cyan]")
         for c in result.citations:
-            click.echo(f"  {c.marker} {c.title} §{c.paragraph_num}")
+            console.print(f"  [bold]{c.marker}[/bold] [cyan]{c.title}[/cyan] [dim]§{c.paragraph_num}[/dim]")
 
 
 @cli.command(name="rebuild", help="重建索引（BM25 + 可选向量）")
@@ -452,10 +614,10 @@ def cli_rebuild(vector: bool) -> None:
                 v_count = storage.rebuild_vector_index(vector_index)
                 console.print(f"[green]✓ 向量索引已重建[/green]  [dim]({v_count} 块)[/dim]")
             else:
-                console.print("[yellow]⚠ 向量索引不可用（依赖未安装或模型加载失败）[/yellow]")
+                console.print("[yellow]! 向量索引不可用（依赖未安装或模型加载失败）[/yellow]")
                 console.print("[dim]用 'bash install.sh --vector' 安装向量依赖[/dim]")
         except ImportError:
-            console.print("[yellow]⚠ 向量依赖未安装，请用 'bash install.sh --vector' 安装[/yellow]")
+            console.print("[yellow]! 向量依赖未安装，请用 'bash install.sh --vector' 安装[/yellow]")
 
 
 @cli.command(name="memory", help="查看或管理记忆（格式/风格/主题/地区/任务）")
@@ -735,7 +897,7 @@ def report(doc_id: str, output: Optional[str]) -> None:
     from pathlib import Path as _Path
     out_path = _Path(output) if output else None
 
-    console.print(f"\n[bold]📋 生成报告...[/bold] [dim]ID: {doc_id}[/dim]")
+    console.print(f"\n[bold]生成报告...[/bold] [dim]ID: {doc_id}[/dim]")
     try:
         path = rg.generate(doc_id, output_path=out_path)
         console.print(f"\n[green]✓ 报告已生成[/green] → [cyan]{path}[/cyan]")
@@ -795,7 +957,7 @@ def analyze(path: str, sheet: Optional[str], list_sheets: bool) -> None:
         console.print("[dim]请在 .env 中设置 AGNES_API_KEY[/dim]")
         return
 
-    console.print(f"\n[bold]📊 分析中[/bold] [dim]{target.name}[/dim]...")
+    console.print(f"\n[bold]分析中[/bold] [dim]{target.name}[/dim]...")
     try:
         result = az.analyze(target, sheet_name=sheet)
         az.render(result)
@@ -863,7 +1025,7 @@ def stats() -> None:
     storage = Storage()
     s = storage.stats()
 
-    console.print("\n[bold]📊 知识库统计[/bold]\n")
+    console.print("\n[bold]知识库统计[/bold]\n")
     console.print(f"  文档总数:   [cyan]{s['documents']}[/cyan]")
     console.print(f"  分块总数:   [cyan]{s['chunks']}[/cyan]")
     console.print(f"  总 Tokens:  [cyan]{s['total_tokens']:,}[/cyan]")
@@ -1077,7 +1239,7 @@ def stats(type: Optional[str], limit: int) -> None:
         console.print("[dim]提示: 运行 ima graph build 构建图谱[/dim]")
         return
 
-    console.print("\n[bold]📊 知识图谱统计[/bold]\n")
+    console.print("\n[bold]知识图谱统计[/bold]\n")
     console.print(f"  节点总数:  [cyan]{s['nodes']}[/cyan]")
     console.print(f"  边总数:    [cyan]{s['edges']}[/cyan]")
 
@@ -1265,13 +1427,13 @@ def cli_health() -> None:
 
     report = checker.generate_report(all_results)
 
-    console.print(f"\n[bold]📊 知识库健康报告[/bold]\n")
+    console.print(f"\n[bold]知识库健康报告[/bold]\n")
     console.print(f"  文档总数: {len(docs)}")
     console.print(f"  Chunk 总数: {report.total_chunks}")
     console.print(f"  ✓ 正常: {report.normal} ({report.normal_pct}%)")
-    console.print(f"  ⚠ 低质量: {report.low_quality}")
+    console.print(f"  ! 低质量: {report.low_quality}")
     if report.ocr_poor:
-        console.print(f"  ⚠ OCR 乱码: {report.ocr_poor}")
+        console.print(f"  ! OCR 乱码: {report.ocr_poor}")
     console.print(f"\n  [bold]健康分: {report.health_score}/100[/bold]")
 
     if report.issues_detail:
@@ -1310,6 +1472,130 @@ def cli_dedup(dry_run: bool) -> None:
 
     if not dry_run:
         console.print(f"\n  [dim]提示: 使用 --dry-run 只查看不操作（当前版本仅报告）[/dim]")
+
+
+@cli.command(name="doctor", help="环境健康检查")
+def cli_doctor() -> None:
+    """检查运行环境健康状态。"""
+    import sys as _sys
+    import importlib
+    import os
+    from pathlib import Path
+    from config import settings, PROJECT_ROOT
+
+    console = Console()
+    console.print("\n[bold]IMA 环境健康检查[/bold]\n")
+
+    results = []  # (status, name, detail)  status: PASS/WARN/FAIL
+
+    # 1. Python 版本
+    py_ok = _sys.version_info >= (3, 9)
+    py_ver = f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}"
+    results.append(("PASS" if py_ok else "FAIL", "Python 版本",
+                    f"{py_ver}" + ("" if py_ok else " (需要 >= 3.9)")))
+
+    # 2. 必须依赖
+    required_deps = ["rich", "click", "jieba", "httpx"]
+    for dep in required_deps:
+        try:
+            importlib.import_module(dep)
+            results.append(("PASS", f"依赖: {dep}", "已安装"))
+        except ImportError:
+            results.append(("FAIL", f"依赖: {dep}", "未安装 (pip install " + dep + ")"))
+
+    # 3. 可选依赖
+    optional_deps = ["chromadb", "sentence_transformers"]
+    for dep in optional_deps:
+        try:
+            importlib.import_module(dep)
+            results.append(("PASS", f"可选依赖: {dep}", "已安装"))
+        except ImportError:
+            results.append(("WARN", f"可选依赖: {dep}", "未安装 (向量检索不可用)"))
+
+    # 4. .env 配置
+    api_key = getattr(settings, "api_key", None) or os.environ.get("LLM_API_KEY")
+    api_base = getattr(settings, "api_base", None) or os.environ.get("LLM_API_BASE")
+    model = getattr(settings, "llm_model", None) or os.environ.get("LLM_MODEL")
+    results.append(("PASS" if api_key else "FAIL", "配置: API_KEY", "已设置" if api_key else "未设置"))
+    results.append(("PASS" if api_base else "WARN", "配置: API_BASE", api_base or "未设置 (用默认)"))
+    results.append(("PASS" if model else "WARN", "配置: MODEL", model or "未设置 (用默认)"))
+
+    # 5. LLM API 可达性
+    if api_key and api_base:
+        try:
+            import httpx
+            url = api_base.rstrip("/") + "/models"
+            if not url.startswith("http"):
+                url = "https://" + url
+            resp = httpx.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
+            ok = resp.status_code in (200, 401, 403)
+            results.append(("PASS" if ok else "WARN", "LLM API 可达性",
+                            f"HTTP {resp.status_code}" + (" (需要认证)" if resp.status_code in (401, 403) else "")))
+        except Exception as e:
+            results.append(("WARN", "LLM API 可达性", f"连接失败: {e}"))
+    else:
+        results.append(("SKIP", "LLM API 可达性", "跳过 (未配置)"))
+
+    # 6. storage 目录可写
+    storage_dir = PROJECT_ROOT / "storage"
+    try:
+        storage_dir.mkdir(exist_ok=True)
+        test_file = storage_dir / ".write_test"
+        test_file.write_text("ok")
+        test_file.unlink()
+        results.append(("PASS", "storage 目录", "可写"))
+    except Exception as e:
+        results.append(("FAIL", "storage 目录", f"不可写: {e}"))
+
+    # 7. 向量模型
+    model_dir = storage_dir / "models"
+    safetensors = model_dir / "model.safetensors"
+    if safetensors.exists():
+        size_mb = safetensors.stat().st_size / (1024 * 1024)
+        results.append(("PASS", "向量模型", f"已下载 ({size_mb:.1f} MB)"))
+    else:
+        results.append(("WARN", "向量模型", "未下载 (向量检索不可用)"))
+
+    # 8. BM25 索引
+    bm25_dir = storage_dir / "bm25"
+    if bm25_dir.exists() and any(bm25_dir.iterdir()):
+        results.append(("PASS", "BM25 索引", "存在"))
+    else:
+        results.append(("WARN", "BM25 索引", "不存在 (运行 ima ingest 入库)"))
+
+    # 9. 文档数量
+    try:
+        from core.storage import Storage
+        st = Storage()
+        stats = st.stats()
+        doc_count = stats.get("total_docs", 0)
+        results.append(("PASS" if doc_count > 0 else "WARN", "文档数量", f"{doc_count} 篇"))
+    except Exception as e:
+        results.append(("WARN", "文档数量", f"读取失败: {e}"))
+
+    # 输出结果
+    for status, name, detail in results:
+        if status == "PASS":
+            console.print(f"  [green]PASS[/green]  {name}: {detail}")
+        elif status == "WARN":
+            console.print(f"  [yellow]WARN[/yellow]  {name}: {detail}")
+        elif status == "FAIL":
+            console.print(f"  [red]FAIL[/red]  {name}: {detail}")
+        else:
+            console.print(f"  [dim]SKIP[/dim]  {name}: {detail}")
+
+    # 总结
+    fails = sum(1 for s, _, _ in results if s == "FAIL")
+    warns = sum(1 for s, _, _ in results if s == "WARN")
+    console.print()
+    if fails:
+        console.print(f"[red]{fails} 项失败[/red]", end="")
+    else:
+        console.print(f"[green]全部通过[/green]", end="")
+    if warns:
+        console.print(f"  [yellow]{warns} 项警告[/yellow]")
+    else:
+        console.print()
 
 
 if __name__ == "__main__":

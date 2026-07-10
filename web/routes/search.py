@@ -1,6 +1,6 @@
 """搜索 — 混合检索 API。
 
-GET /api/search?q=...&tags=...&vector=1&rerank=1&sort=score&limit=10
+GET /api/search?q=...&tags=...&use_vector=true&use_rerank=true&sort=score&limit=10
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ router = APIRouter(tags=["search"])
 async def search(
     q: str = Query(..., description="搜索关键词"),
     tags: Optional[str] = Query(None, description="逗号分隔标签"),
-    vector: bool = Query(True, description="启用向量检索"),
-    rerank: bool = Query(True, description="启用 LLM 重排序"),
+    use_vector: bool = Query(True, description="启用向量检索"),
+    use_rerank: bool = Query(True, description="启用 LLM 重排序"),
     sort: str = Query("score", description="排序: score|date|name"),
     limit: int = Query(10, description="返回条数"),
 ):
@@ -31,7 +31,7 @@ async def search(
 
     results = []
     try:
-        if vector:
+        if use_vector:
             from core.retrieval.hybrid import HybridRetriever
             from core.retrieval.vector import VectorIndex
             vector_index = VectorIndex()
@@ -43,7 +43,7 @@ async def search(
         raw_results = storage.bm25_search(q, top_k=limit * 2)
 
     # LLM 重排序
-    if rerank and len(raw_results) > limit and settings.has_llm():
+    if use_rerank and len(raw_results) > limit and settings.has_llm():
         try:
             from core.retrieval.rerank import Reranker
             from core.llm.client import get_llm

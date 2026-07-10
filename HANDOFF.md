@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-09（Web 前端 7 页面完整实现确认 + 文档同步修正）
+> 最后更新：2026-07-10（REPL 模块化拆分 + 启动页 Claude Code v2.1 风格重构 + 前端 JS 模块化）
 
 ---
 
@@ -31,7 +31,7 @@
 
 ### 实测可用功能
 
-- ✅ 多格式入库（PDF/Word/Excel/PPT/MD/TXT/HTML/代码/**图片/扫描 PDF/.doc**，共 11 种）
+- ✅ 多格式入库（PDF/Word/Excel/PPT/MD/TXT/HTML/代码/**图片/扫描 PDF/.doc**，共 40+ 种，含 20+ 种代码语言）
 - ✅ 内容去重（SHA256 hash）
 - ✅ BM25 中文分词搜索（jieba）
 - ✅ RAG 问答带引用编号
@@ -41,7 +41,7 @@
 - ✅ **OCR 补齐**（Tesseract + pytesseract，4 扫描 PDF + 4 PNG 入库）
 - ✅ **自动标签**（LLM 生成，27 文档共 67 个标签，可按标签筛选）
 - ✅ **REPL 命令自动补全**（prompt_toolkit，输入 `/` 弹出命令列表 + 中文描述 + 子命令中文描述）
-- ✅ **Claude Code 风格 CLI**（左窄右宽欢迎面板 + 竖线分隔 + 顶部标题线 + 底部快捷键提示 + 橙色提示符 + 流式 `⏺` 标记）
+- ✅ **Claude Code 风格 CLI**（左右分栏欢迎面板，参照 Claude Code v2.1：左区 Welcome back! + 像素机器人 + 模型信息，右区 Tips + Recent activity，竖线分隔 + 顶部标题线 + 橙色提示符 + 流式 `⏺` 标记）
 - ✅ **AI 回答 Markdown 渲染**（`rich.Markdown` 渲染，**加粗**、列表、代码块等正确显示）
 - ✅ **知识图谱**（LLM 抽取实体关系，networkx 存储，vis.js 可视化）
 - ✅ **Web 后台**（7 个页面完整实现：AI 问答 / 文档入库 / 搜索 / 数据分析 / 仪表盘 / 知识图谱 / 宠物管理，FastAPI 后端 + 单页 HTML+JS 前端）
@@ -51,7 +51,7 @@
 - ✅ **记忆系统**（用户偏好 + 跨会话任务 + jieba 主题提取 + 非重叠 2-gram 工作流识别）
 - ✅ **增量同步**（`ima sync`，文件 mtime/hash 追踪，仅处理变更）
 - ✅ **质量检查**（`ima health`，检测空文档/超长块/低质量内容）
-- ✅ **近似去重**（`ima dedup`，MinHash + LSH，相似度阈值可调）
+- ✅ **近似去重**（`ima dedup`，SimHash 64 位指纹 + 汉明距离 ≤3 判重）
 - ✅ **数据分析**（`/analyze` 命令，Excel 多 sheet 自动统计 + 字符图 + AI 解读）
 - ✅ **报告生成**（`/report` 命令，Markdown 报告自动生成）
 - ✅ **子命令菜单**（8 个主命令 `/memory /pet /graph /sync /session /tag /dedup /health` 用 `radiolist_dialog` 弹出选择菜单）
@@ -95,12 +95,12 @@ ima-kb/
 ├── .env.example                  # 模板（Agnes 配置）
 ├── .gitignore
 ├── config.py                     # 配置中心（Settings 单例）
-├── run.py                        # CLI 入口（21 个顶层命令 + graph 5 子命令，无子命令时进入 REPL）
-├── repl.py                       # 交互式 REPL（IMA v4.0 · Claude Code 风格 + 30+ 子命令）
+├── run.py                        # CLI 入口（22 个顶层命令 + graph 5 子命令，无子命令时进入 REPL）
+├── repl.py                       # 交互式 REPL（IMA v4.0 · Claude Code 风格 + 40+ 子命令）
 │
 ├── core/
 │   ├── ingestion/
-│   │   ├── parser.py             # 多格式解析（11 种）+ OCR 降级 + .doc textutil
+│   │   ├── parser.py             # 多格式解析（40+ 种，含 20+ 代码语言）+ OCR 降级 + .doc textutil
 │   │   ├── chunker.py            # 智能分块（按段落+重叠+句子边界）
 │   │   └── quick.py              # 快速入库（/note /clip /url）
 │   ├── llm/
@@ -143,7 +143,7 @@ ima-kb/
 │   ├── sync/                     # P5 新增：同步与质量
 │   │   ├── tracker.py            # 增量同步（mtime/hash 追踪）
 │   │   ├── checker.py            # 质量检查（空文档/超长块）
-│   │   └── dedup.py              # 近似去重（MinHash + LSH）
+│   │   └── dedup.py              # SimHash 近似去重（64 位指纹 + 汉明距离）
 │   ├── analyze/                  # P5 新增：数据分析
 │   │   └── analyzer.py           # Excel 多 sheet 统计 + 字符图
 │   ├── report/                   # P5 新增：报告生成
@@ -209,7 +209,7 @@ ima-kb/
 
 ### `run.py` — CLI 入口
 - `cli` group（**注意**：之前的 bug 是 chat 命令放在 cli 定义之前导致 NameError，已修复，新增命令要放在 `cli` 之后）
-- **顶层命令**（21个）：`web` `chat` `ingest` `note` `clip` `url` `list` `search` `ask` `show` `stats` `retag` `delete` `rebuild` `memory` `watch` `report` `analyze` `sync` `health` `dedup`
+- **顶层命令**（22个）：`web` `chat` `ingest` `note` `clip` `url` `list` `search` `ask` `show` `stats` `retag` `delete` `rebuild` `memory` `watch` `report` `analyze` `sync` `health` `dedup` `graph`
 - **`graph` 子命令组**（5 个）：
   - `ima graph build [--force] [-d ID] [-n N]`：调 LLM 抽取实体关系构建图谱
   - `ima graph stats [-t TYPE]`：图谱统计 + 节点列表
@@ -234,7 +234,7 @@ ima-kb/
 - **已移除**：自适应 Logo 切换（`_pick_logo`、`ASCII_LOGO_SMALL`、`ASCII_LOGO_MINI`）
 
 ### `core/ingestion/parser.py` — 多格式解析
-- **支持 11 种格式**：PDF/Word(.docx/.doc)/Excel/PPT/MD/TXT/HTML/代码/.png/.jpg/.tif/.bmp/.webp
+- **支持 40+ 种格式**：PDF/Word(.docx/.doc)/Excel/PPT/MD/TXT/HTML/代码(20+ 种语言)/图片(.png/.jpg/.jpeg/.tif/.tiff/.bmp/.webp)
 - **OCR 降级**：检测 PDF 无文本层（<50 字符）自动走 Tesseract
 - **`.doc` 解析**：调用 macOS `textutil` 转 txt
 - **OCR 不可用时**：返回 `meta={"ocr_unavailable": "true"}`，上游友好提示
@@ -331,7 +331,7 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 
 | 任务 | 实现方式 | 文件 |
 |---|---|---|
-| **OCR 补齐** | Tesseract + pytesseract，支持 7 种图片格式 + 扫描 PDF 自动 OCR | `core/ingestion/parser.py` |
+| **OCR 补齐** | Tesseract + pytesseract，支持 6 种图片格式 + 扫描 PDF 自动 OCR | `core/ingestion/parser.py` |
 | **自动标签** | LLM 生成 3-5 个主题标签，入库时自动调用 | `core/classify/tagger.py` |
 | **分发安装** | `pyproject.toml` 定义入口点 + `install.sh` 一键安装 | 根目录 |
 | **Claude Code 风格 CLI** | ASCII Logo + 分栏面板 + 橙色提示符 + `⏺` 流式标记 + 命令补全 | `repl.py` |
@@ -339,7 +339,7 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 
 ### 数据规模变化
 - 文档：15 → **27**（OCR 补齐 10 + .doc 2）
-- 支持格式：8 → **11**（加图片/扫描 PDF/.doc）
+- 支持格式：8 → **40+ 种**（加图片/扫描 PDF/.doc/20+ 种代码语言）
 - 标签：0 → **67 个**（覆盖 27 文档）
 - 知识图谱：**98 节点 / 131 边**（24/27 文档成功抽取）
 - 跳过文件：8 → **0**
@@ -371,7 +371,7 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 6. **prompt_toolkit 中文宽度**：补全菜单已用 wcwidth 处理中文对齐，若仍有偏移可升级 prompt_toolkit
 7. **`def list()` 命名陷阱**：曾用 `list()` 作函数名覆盖内置 `list()`，已改名为 `list_docs` 并用 `@cli.command(name="list")` 修复
 8. **pyproject.toml py-modules**：因 `run.py` 在根目录不在包内，必须显式声明 `py-modules = ["run", "repl", "config"]`，否则 `pip install -e .` 后 `ima` 找不到 `run` 模块
-9. **`.streamlit/config.toml` 残留**：Streamlit 方案已移除，此文件无实际用途，可删除
+9. ~~**`.streamlit/config.toml` 残留~~：✅ 已删除（2026-07-09）
 10. **版本号不一致**：`pyproject.toml` 版本为 `3.1.0`，但 `repl.py` 自称 `v4.0`，建议同步
 
 ---
@@ -432,7 +432,7 @@ ima web
 
 ---
 
-**项目状态**：P1-P5 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），323+ 测试通过，可用于日常使用。后续优化方向见上方「后续待办」章节（5 项剩余，无高优先级待办）。
+**项目状态**：P1-P5 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），323 个测试（319 通过 / 4 失败为已知老问题），可用于日常使用。后续优化方向见上方「后续待办」章节（5 项剩余，无高优先级待办）。
 
 ---
 
@@ -638,4 +638,3 @@ IMAGE_RESPONSE_FORMAT=url
 ### 四、测试
 
 - **319 个测试通过**，4 个失败为已有的 `test_subcommand_menu.py` 问题（与本次改动无关）
-- 生图模块端到端测试需在联网环境下验证（沙箱 DNS 受限）

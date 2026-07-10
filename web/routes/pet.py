@@ -42,9 +42,20 @@ async def pet_status():
     if pet is None:
         return {"found": False, "message": "尚未领养宠物，请先领养"}
 
+    ascii_art = ""
+    try:
+        from core.pet.art import ArtLibrary
+        lib = ArtLibrary()
+        branch = getattr(pet, "branch", None)
+        level = getattr(pet, "level", 1)
+        ascii_art = lib.get(branch=branch, level=level)
+    except Exception:
+        pass
+
     return {
         "found": True,
         **_pet_to_dict(pet),
+        "ascii_art": ascii_art,
         "message": "OK",
     }
 

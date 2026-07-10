@@ -538,7 +538,7 @@
   .chart-placeholder {
     height: 200px; background: var(--bg-elevated);
     border-radius: 8px; display: flex; align-items: flex-end;
-    gap: 8px; padding: 16px;
+    gap: 8px; padding: 16px 16px 24px; overflow: visible;
   }
   .chart-bar {
     flex: 1; background: linear-gradient(180deg, var(--accent-orange), var(--accent-orange-dim));
@@ -565,7 +565,7 @@
     border-radius: 8px; padding: 12px; font-size: 11px; box-shadow: var(--shadow-card); z-index: 10;
   }
   .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
-  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
   .graph-sidebar { display: flex; flex-direction: column; gap: 12px; }
   /* ===== 宠物管理 ===== */
   .pet-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -584,7 +584,7 @@
   .pet-stat { background: var(--bg-elevated); border-radius: 8px; padding: 12px; }
   .pet-stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
   .pet-stat-bar { height: 6px; background: var(--bg-base); border-radius: 3px; overflow: hidden; }
-  .pet-stat-fill { height: 100%; border-radius: 3px; }
+  .pet-stat-fill { height: 100%; border-radius: 3px; transition: width 0.3s ease; }
   .pet-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
   /* ===== 人格卡片 ===== */
   .persona-card-style {
@@ -598,6 +598,51 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  /* ===== 工具类 · 从内联样式抽取 ===== */
+  .topbar-search input { background: transparent; border: none; outline: none; color: var(--text-muted); flex: 1; font-size: 13px; }
+  .ml-auto { margin-left: auto; }
+  .mb-12 { margin-bottom: 12px; }
+  .mb-16 { margin-bottom: 16px; }
+  .mt-8 { margin-top: 8px; }
+  .mt-16 { margin-top: 16px; }
+  .mt-24 { margin-top: 24px; }
+  .text-orange { color: var(--accent-orange); }
+  .text-secondary { color: var(--text-secondary); }
+  .text-muted { color: var(--text-muted); }
+  .flex-1 { flex: 1; }
+  .flex-gap-8 { display: flex; gap: 8px; }
+  .placeholder-text { font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px; }
+  .suggestions-list { font-size: 12px; color: var(--text-secondary); line-height: 2; }
+  .suggestion-item { cursor: pointer; padding: 4px 0; }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; }
+  .metric-inline { color: var(--accent-orange); font-family: var(--font-mono); }
+  .metric-inline-cyan { color: var(--accent-cyan); font-family: var(--font-mono); }
+  .metric-inline-purple { color: var(--accent-purple); font-family: var(--font-mono); }
+  .metric-inline-red { color: var(--accent-red); font-family: var(--font-mono); }
+  .metric-inline-primary { color: var(--text-primary); font-family: var(--font-mono); }
+  .ingest-form-container { margin-top: 16px; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+  .clipboard-textarea { width: 100%; min-height: 200px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; color: var(--text); font-size: 13px; resize: vertical; }
+  .search-icon { font-size: 18px; }
+  .result-count-text { font-size: 12px; color: var(--text-muted); }
+  .empty-state { text-align: center; color: var(--text-muted); padding: 40px; }
+  .header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .empty-card { text-align: center; padding: 60px; color: var(--text-muted); }
+  .empty-icon { font-size: 48px; margin-bottom: 16px; }
+  .graph-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); }
+  .legend-title { font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+  .legend-dot-orange { background: var(--accent-orange); }
+  .legend-dot-teal { background: var(--accent-cyan); }
+  .legend-dot-red { background: var(--accent-red); }
+  .legend-dot-purple { background: var(--accent-purple); }
+  .neighbors-panel { font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
+  .persona-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .persona-card-icon { font-size: 24px; margin-bottom: 8px; }
+  .persona-card-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .persona-card-desc { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .fill-orange { background: var(--accent-orange); }
+  .fill-teal { background: var(--accent-cyan); }
+  .fill-purple { background: var(--accent-purple); }
+  .fill-green { background: var(--accent-green); }
 </style>
 </head>
 <body>
@@ -611,9 +656,9 @@
   <!-- 顶部导航 -->
   <div class="topbar">
     <div class="breadcrumb">知识库 / <span class="current" id="breadcrumb-current">仪表盘</span></div>
-    <div class="topbar-search">
+    <div class="topbar-search" id="topbar-search">
       <span>🔍</span>
-      <span style="color: var(--text-muted)">搜索文档...</span>
+      <input type="text" id="topbar-search-input" placeholder="搜索文档...">
       <span class="kbd">/</span>
     </div>
     <div class="status-dot" title="系统正常"></div>
@@ -661,7 +706,7 @@
           <div class="page-title">💬 AI 问答</div>
           <div class="page-subtitle">基于知识库的 RAG 问答 · 宠物管理员风格 · 带引用溯源</div>
         </div>
-        <button class="btn btn-ghost" style="margin-left: auto" id="btn-clear-chat">🗑 清空对话</button>
+        <button class="btn btn-ghost ml-auto" id="btn-clear-chat">🗑 清空对话</button>
       </div>
       <div class="qa-layout" id="qa-layout">
         <div class="qa-main">
@@ -701,15 +746,15 @@
               <div class="card-title">📚 引用来源</div>
             </div>
             <div id="sources-panel">
-              <div style="font-size:12px;color:var(--text-muted);text-align:center;padding:20px">等待 AI 回答...</div>
+              <div class="placeholder-text">等待 AI 回答...</div>
             </div>
           </div>
           <div class="card">
-            <div class="card-title" style="margin-bottom: 12px">💡 推荐问题</div>
-            <div style="font-size: 12px; color: var(--text-secondary); line-height: 2">
-              <div style="cursor: pointer; padding: 4px 0" onclick="setQuestion('骨灰安置有哪些生态安葬方式？')">→ 骨灰安置有哪些生态安葬方式?</div>
-              <div style="cursor: pointer; padding: 4px 0" onclick="setQuestion('殡葬服务收费标准是什么？')">→ 殡葬服务收费标准是什么?</div>
-              <div style="cursor: pointer; padding: 4px 0" onclick="setQuestion('杭州市殡葬改革最新政策？')">→ 杭州市殡葬改革最新政策?</div>
+            <div class="card-title mb-12">💡 推荐问题</div>
+            <div class="suggestions-list">
+              <div class="suggestion-item" onclick="setQuestion('骨灰安置有哪些生态安葬方式？')">→ 骨灰安置有哪些生态安葬方式?</div>
+              <div class="suggestion-item" onclick="setQuestion('殡葬服务收费标准是什么？')">→ 殡葬服务收费标准是什么?</div>
+              <div class="suggestion-item" onclick="setQuestion('杭州市殡葬改革最新政策？')">→ 杭州市殡葬改革最新政策?</div>
             </div>
           </div>
         </div>
@@ -731,39 +776,48 @@
             <div class="ingest-tab">🔗 URL 入库</div>
             <div class="ingest-tab">📋 剪贴板</div>
           </div>
-          <div class="dropzone" id="dropzone">
-            <div class="dropzone-icon">📂</div>
-            <div class="dropzone-text"><strong>拖拽文件到此处</strong> 或点击选择</div>
-            <div class="dropzone-hint">支持批量上传，单文件最大 100MB</div>
-            <div class="format-pills">
-              <span class="tag tag-orange">PDF</span><span class="tag tag-cyan">Word</span>
-              <span class="tag tag-purple">Excel</span><span class="tag tag-red">PPT</span>
-              <span class="tag">MD</span><span class="tag">TXT</span><span class="tag">HTML</span>
-              <span class="tag">图片</span><span class="tag">扫描 PDF</span><span class="tag">.doc</span>
+          <div id="panel-file" class="ingest-panel">
+            <div class="dropzone" id="dropzone">
+              <div class="dropzone-icon">📂</div>
+              <div class="dropzone-text"><strong>拖拽文件到此处</strong> 或点击选择</div>
+              <div class="dropzone-hint">支持批量上传，单文件最大 100MB</div>
+              <div class="format-pills">
+                <span class="tag tag-orange">PDF</span><span class="tag tag-cyan">Word</span>
+                <span class="tag tag-purple">Excel</span><span class="tag tag-red">PPT</span>
+                <span class="tag">MD</span><span class="tag">TXT</span><span class="tag">HTML</span>
+                <span class="tag">图片</span><span class="tag">扫描 PDF</span><span class="tag">.doc</span>
+              </div>
+            </div>
+            <input type="file" id="file-input" multiple hidden accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.md,.txt,.html,.htm,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.py,.js,.json,.csv,.tsv">
+            <div class="mt-24">
+              <div class="card-title mb-12">上传队列</div>
+              <div class="upload-list" id="upload-queue"></div>
             </div>
           </div>
-          <input type="file" id="file-input" multiple hidden accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.md,.txt,.html,.htm,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.py,.js,.json,.csv,.tsv">
-          <div style="margin-top: 24px">
-            <div class="card-title" style="margin-bottom: 12px">上传队列</div>
-            <div class="upload-list" id="upload-queue"></div>
+          <div id="panel-url" class="ingest-panel" style="display:none">
+            <div class="ingest-form-container">
+              <div class="flex-gap-8">
+                <input class="input flex-1" id="input-url" placeholder="输入网页 URL...">
+                <button class="btn btn-primary" id="btn-url-ingest">入库</button>
+              </div>
+            </div>
           </div>
-          <!-- URL 入库面板 -->
-          <div style="margin-top: 16px; padding: 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius)">
-            <div style="display:flex;gap:8px">
-              <input class="input" id="input-url" placeholder="输入网页 URL..." style="flex:1">
-              <button class="btn btn-primary" id="btn-url-ingest">入库</button>
+          <div id="panel-clipboard" class="ingest-panel" style="display:none">
+            <div class="ingest-form-container">
+              <textarea id="input-clipboard" class="clipboard-textarea" placeholder="粘贴文本内容..."></textarea>
+              <button class="btn btn-primary mt-8" id="btn-clipboard-ingest">入库</button>
             </div>
           </div>
         </div>
         <div>
           <div class="card">
-            <div class="card-title" style="margin-bottom: 12px">📊 入库统计</div>
-            <div style="font-size: 12px; line-height: 2; color: var(--text-secondary)">
-              <div style="display: flex; justify-content: space-between"><span>总文档数</span><span style="color: var(--accent-orange); font-family: var(--font-mono)">{{ initial_stats.documents }}</span></div>
-              <div style="display: flex; justify-content: space-between"><span>总分块数</span><span style="color: var(--accent-cyan); font-family: var(--font-mono)">{{ initial_stats.chunks }}</span></div>
-              <div style="display: flex; justify-content: space-between"><span>自动标签</span><span style="color: var(--accent-purple); font-family: var(--font-mono)">{{ initial_stats.tags_count }}</span></div>
-              <div style="display: flex; justify-content: space-between"><span>图谱节点</span><span style="color: var(--accent-red); font-family: var(--font-mono)">{{ initial_stats.graph_nodes }}</span></div>
-              <div style="display: flex; justify-content: space-between"><span>总 Token</span><span style="color: var(--text-primary); font-family: var(--font-mono)">{{ initial_stats.total_tokens }}</span></div>
+            <div class="card-title mb-12">📊 入库统计</div>
+            <div class="suggestions-list">
+              <div class="stat-row"><span>总文档数</span><span class="metric-inline">{{ initial_stats.documents }}</span></div>
+              <div class="stat-row"><span>总分块数</span><span class="metric-inline-cyan">{{ initial_stats.chunks }}</span></div>
+              <div class="stat-row"><span>自动标签</span><span class="metric-inline-purple">{{ initial_stats.tags_count }}</span></div>
+              <div class="stat-row"><span>图谱节点</span><span class="metric-inline-red">{{ initial_stats.graph_nodes }}</span></div>
+              <div class="stat-row"><span>总 Token</span><span class="metric-inline-primary">{{ initial_stats.total_tokens }}</span></div>
             </div>
           </div>
         </div>
@@ -780,7 +834,7 @@
       </div>
       <div class="search-layout">
         <div class="search-bar">
-          <span style="font-size: 18px">🔍</span>
+          <span class="search-icon">🔍</span>
           <input class="search-input" id="search-input" placeholder="输入关键词或问题...">
           <button class="btn btn-primary" id="search-btn">搜索</button>
         </div>
@@ -788,9 +842,9 @@
           <div class="filter-group"><span>向量检索</span><div class="toggle on"></div></div>
           <div class="filter-group"><span>LLM 重排序</span><div class="toggle on"></div></div>
         </div>
-        <div id="result-count" style="font-size: 12px; color: var(--text-muted)">输入关键词开始搜索</div>
+        <div id="result-count" class="result-count-text">输入关键词开始搜索</div>
         <div class="search-results" id="search-results">
-          <div style="text-align:center;color:var(--text-muted);padding:40px">输入关键词开始搜索</div>
+          <div class="empty-state">输入关键词开始搜索</div>
         </div>
       </div>
     </div>
@@ -802,15 +856,15 @@
           <div class="page-title">📊 数据分析</div>
           <div class="page-subtitle">Excel 多 sheet 自动统计 · 字符图可视化 · AI 趋势解读</div>
         </div>
-        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <div class="header-actions">
           <input type="file" id="analyze-file" accept=".xlsx,.xls,.csv,.tsv,.json" style="display:none">
-          <button class="btn" onclick="document.getElementById('analyze-file').click()">📁 选择文件</button>
+          <button class="btn" id="btn-analyze-file">📁 选择文件</button>
           <button class="btn btn-primary" id="btn-analyze">🤖 AI 分析</button>
         </div>
       </div>
       <div class="analyze-layout" id="analyze-content">
-        <div class="card" style="text-align:center;padding:60px;color:var(--text-muted)">
-          <div style="font-size:48px;margin-bottom:16px">📊</div>
+        <div class="card empty-card">
+          <div class="empty-icon">📊</div>
           <div>上传 Excel/CSV 文件开始数据分析</div>
         </div>
       </div>
@@ -823,7 +877,7 @@
           <div class="page-title">📈 仪表盘</div>
           <div class="page-subtitle">知识库总览 · 质量告警 · 最近活动</div>
         </div>
-        <button class="btn" style="margin-left: auto" onclick="loadDashboard()">🔄 刷新</button>
+        <button class="btn ml-auto" id="btn-refresh-dashboard">🔄 刷新</button>
       </div>
       <div class="dashboard-grid">
         <div class="metric-card">
@@ -852,19 +906,19 @@
           <div class="card-header"><div class="card-title">⚠️ 质量告警</div></div>
           <div id="alerts-list">
             {% if not initial_alerts %}
-            <div style="font-size:12px;color:var(--text-muted);text-align:center;padding:20px">一切正常 ✓</div>
+            <div class="placeholder-text">一切正常 ✓</div>
             {% else %}
             {% for issue, count in initial_alerts.items() %}
             <div class="alert-item warning">
               <strong>⚠️ {{ issue }}</strong><br>
-              <span style="color: var(--text-secondary)">{{ count }} 个</span>
+              <span class="text-secondary">{{ count }} 个</span>
             </div>
             {% endfor %}
             {% endif %}
           </div>
         </div>
       </div>
-      <div class="card" style="margin-top: 16px">
+      <div class="card mt-16">
         <div class="card-header">
           <div class="card-title">🕐 最近入库</div>
         </div>
@@ -884,36 +938,36 @@
           <div class="page-title">🕸️ 知识图谱</div>
           <div class="page-subtitle">{{ initial_stats.graph_nodes }} 节点 · {{ initial_stats.graph_edges }} 边 · LLM 抽取实体关系</div>
         </div>
-        <div style="margin-left: auto; display: flex; gap: 8px">
+        <div class="ml-auto flex-gap-8">
           <button class="btn" id="btn-rebuild-graph">🔄 重建</button>
           <a href="/api/graph/export" class="btn btn-primary" download>📥 导出 HTML</a>
         </div>
       </div>
       <div class="graph-layout">
         <div class="graph-canvas" id="graph-canvas">
-          <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted)">
+          <div class="graph-empty">
             点击上方"知识图谱"页面加载...
           </div>
           <div class="graph-legend">
-            <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary)">节点类型</div>
-            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-orange)"></div>document 文档</div>
-            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-cyan)"></div>region 地区</div>
-            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-red)"></div>agency 机构</div>
-            <div class="legend-item"><div class="legend-dot" style="background: var(--accent-purple)"></div>topic 主题</div>
+            <div class="legend-title">节点类型</div>
+            <div class="legend-item"><div class="legend-dot legend-dot-orange"></div>document 文档</div>
+            <div class="legend-item"><div class="legend-dot legend-dot-teal"></div>region 地区</div>
+            <div class="legend-item"><div class="legend-dot legend-dot-red"></div>agency 机构</div>
+            <div class="legend-item"><div class="legend-dot legend-dot-purple"></div>topic 主题</div>
           </div>
         </div>
         <div class="graph-sidebar">
           <div class="card">
-            <div class="card-title" style="margin-bottom: 12px">📊 图谱统计</div>
-            <div style="font-size: 12px; line-height: 2; color: var(--text-secondary)">
-              <div style="display: flex; justify-content: space-between"><span>总节点数</span><span style="color: var(--accent-orange); font-family: var(--font-mono)" id="graph-node-count">{{ initial_stats.graph_nodes }}</span></div>
-              <div style="display: flex; justify-content: space-between"><span>总边数</span><span style="color: var(--accent-cyan); font-family: var(--font-mono)" id="graph-edge-count">{{ initial_stats.graph_edges }}</span></div>
+            <div class="card-title mb-12">📊 图谱统计</div>
+            <div class="suggestions-list">
+              <div class="stat-row"><span>总节点数</span><span class="metric-inline" id="graph-node-count">{{ initial_stats.graph_nodes }}</span></div>
+              <div class="stat-row"><span>总边数</span><span class="metric-inline-cyan" id="graph-edge-count">{{ initial_stats.graph_edges }}</span></div>
             </div>
           </div>
           <div class="card">
-            <div class="card-title" style="margin-bottom: 12px">🔗 邻居节点</div>
-            <div id="graph-neighbors" style="font-size: 12px; color: var(--text-secondary); line-height: 1.8">
-              <span style="color:var(--text-muted)">点击图谱中的节点查看邻居</span>
+            <div class="card-title mb-12">🔗 邻居节点</div>
+            <div id="graph-neighbors" class="neighbors-panel">
+              <span class="text-muted">点击图谱中的节点查看邻居</span>
             </div>
           </div>
         </div>
@@ -937,19 +991,19 @@
             <div class="pet-stats">
               <div class="pet-stat">
                 <div class="pet-stat-label">😊 心情</div>
-                <div class="pet-stat-bar"><div id="pet-mood" class="pet-stat-fill" style="width:0%;background:var(--accent-orange)"></div></div>
+                <div class="pet-stat-bar"><div id="pet-mood" class="pet-stat-fill fill-orange" style="width:0%"></div></div>
               </div>
               <div class="pet-stat">
                 <div class="pet-stat-label">🍖 饱食</div>
-                <div class="pet-stat-bar"><div id="pet-hunger" class="pet-stat-fill" style="width:0%;background:var(--accent-cyan)"></div></div>
+                <div class="pet-stat-bar"><div id="pet-hunger" class="pet-stat-fill fill-teal" style="width:0%"></div></div>
               </div>
               <div class="pet-stat">
                 <div class="pet-stat-label">⚡ 能量</div>
-                <div class="pet-stat-bar"><div id="pet-energy" class="pet-stat-fill" style="width:0%;background:var(--accent-purple)"></div></div>
+                <div class="pet-stat-bar"><div id="pet-energy" class="pet-stat-fill fill-purple" style="width:0%"></div></div>
               </div>
               <div class="pet-stat">
                 <div class="pet-stat-label">📚 智力</div>
-                <div class="pet-stat-bar"><div id="pet-intellect" class="pet-stat-fill" style="width:0%;background:var(--accent-green)"></div></div>
+                <div class="pet-stat-bar"><div id="pet-intellect" class="pet-stat-fill fill-green" style="width:0%"></div></div>
               </div>
             </div>
             <div class="pet-actions">
@@ -960,27 +1014,27 @@
           </div>
           <div>
             <div class="card">
-              <div class="card-title" style="margin-bottom: 16px">🎨 人格风格</div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+              <div class="card-title mb-16">🎨 人格风格</div>
+              <div class="persona-grid">
                 <div class="persona-card-style" data-style="scholar">
-                  <div style="font-size: 24px; margin-bottom: 8px">🎓</div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--accent-orange)">scholar 学者</div>
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">深度分析·引用密集·表格对比</div>
+                  <div class="persona-card-icon">🎓</div>
+                  <div class="persona-card-name text-orange">scholar 学者</div>
+                  <div class="persona-card-desc">深度分析·引用密集·表格对比</div>
                 </div>
                 <div class="persona-card-style" data-style="warrior">
-                  <div style="font-size: 24px; margin-bottom: 8px">⚔️</div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--text-primary)">warrior 战士</div>
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">直接结论·行动建议·简洁</div>
+                  <div class="persona-card-icon">⚔️</div>
+                  <div class="persona-card-name">warrior 战士</div>
+                  <div class="persona-card-desc">直接结论·行动建议·简洁</div>
                 </div>
                 <div class="persona-card-style" data-style="artisan">
-                  <div style="font-size: 24px; margin-bottom: 8px">🔧</div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--text-primary)">artisan 工匠</div>
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">结构化·小标题·可视化</div>
+                  <div class="persona-card-icon">🔧</div>
+                  <div class="persona-card-name">artisan 工匠</div>
+                  <div class="persona-card-desc">结构化·小标题·可视化</div>
                 </div>
                 <div class="persona-card-style" data-style="auto">
-                  <div style="font-size: 24px; margin-bottom: 8px">🤖</div>
-                  <div style="font-size: 13px; font-weight: 600; color: var(--text-primary)">auto 自动</div>
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px">根据问题自动选择</div>
+                  <div class="persona-card-icon">🤖</div>
+                  <div class="persona-card-name">auto 自动</div>
+                  <div class="persona-card-desc">根据问题自动选择</div>
                 </div>
               </div>
             </div>
@@ -996,7 +1050,7 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <!-- vis.js CDN -->
 <script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
-<!-- 应用脚本 -->
-<script src="/static/app.js"></script>
+<!-- 应用脚本（ES Module） -->
+<script type="module" src="/static/app.js"></script>
 </body>
 </html>

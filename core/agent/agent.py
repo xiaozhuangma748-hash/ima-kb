@@ -5,13 +5,18 @@
 - 系统提示要求 LLM 返回结构化 JSON，提高解析可靠性
 - 保留 XML 格式的向后兼容解析
 
-可用工具：
+重构（2026-07-10）：
+- 工具系统改为 Tool Registry + Schema 校验（core/agent/tools/）
+- 系统提示由 ``ToolRegistry.build_system_prompt()`` 自动生成
+- 工具通过 ``@register_tool`` 装饰器扩展，Agent 经 ``ToolContext`` 注入依赖
+
+可用工具（由 Registry 动态注册，详见 core/agent/tools/builtin.py）：
     search <query>      — BM25 搜索知识库
     list_docs           — 列出所有文档
     get_doc <id>        — 查看文档详情
     analyze <path>      — 数据表分析
-    read <id>           — 智能阅读
-    web_fetch <url>     — 抓取网页（可选）
+    read <id> [n]       — 读取文档段落
+    read_multi <id> a-b — 读取多段落
 
 用法：
     from core.agent.agent import Agent
@@ -27,71 +32,8 @@ from typing import Optional
 from config import settings
 from core.llm.client import get_llm, LLMError
 from core.storage import Storage
-
-
-# Agent 系统提示（改进版：要求 JSON 输出）
-AGENT_SYSTEM_PROMPT = """你是一个能调用工具的智能助手。用户会给你一个任务，你需要分解任务并调用工具完成。
-
-# 可用工具
-
-调用工具的格式（严格遵循 JSON 格式）：
-{"tool": "工具名", "args": "参数"}
-
-最终答案格式：
-{"tool": "done", "args": "最终答案"}
-
-可用工具列表：
-1. search — BM25 搜索知识库（按关键词找内容）
-   {"tool": "search", "args": "搜索关键词"}
-
-2. list_docs — 列出所有已入库文档
-   {"tool": "list_docs", "args": ""}
-
-3. get_doc — 查看文档详情和前 3 段预览
-   {"tool": "get_doc", "args": "文档ID前8位"}
-
-4. read — 读取文档指定段落的原文（1000 字）
-   {"tool": "read", "args": "文档ID前8位 段落号"}
-   段落号从 1 开始，如 "862e0973 3" 读第 3 段
-
-5. read_multi — 一次读取多段（高效！比逐段 read 省步数）
-   {"tool": "read_multi", "args": "文档ID前8位 起始段-结束段"}
-   如 "862e0973 1-5" 读第 1 到 5 段
-
-6. analyze — 数据表分析（Excel/CSV/JSON）
-   {"tool": "analyze", "args": "文件路径"}
-
-7. done — 任务完成，给出最终答案
-   {"tool": "done", "args": "最终答案"}
-
-# 工具选择建议（重要！）
-
-- 不确定知识库有哪些文档 → 先 list_docs
-- 知道关键词要找相关内容 → search（最快）
-- 想快速了解某文档讲什么 → get_doc
-- 想看某段详细内容 → read
-- 想一次看多段 → read_multi（强烈推荐，省步数）
-- 分析数据表文件 → analyze
-
-# 工作流程（ReAct 模式）
-
-每一步先写 Thought（思考），再写工具调用：
-
-Thought: 我需要先了解知识库有哪些文档
-{"tool": "list_docs", "args": ""}
-
-收到工具返回后，分析结果，继续 Thought + 工具调用。
-
-# 注意
-
-- 每次只调一个工具
-- 工具调用必须用 JSON 格式：{"tool": "xxx", "args": "yyy"}
-- 不要编造，所有信息必须来自工具返回
-- 优先用高效工具：read_multi > read > get_doc > 逐段读
-- 信息足够时就用 done 给答案，不要过度调用工具
-- Thought 和 JSON 之间可以有换行
-- 用中文回复用户
-"""
+from core.agent.tools import get_registry
+from core.agent.tools.base import ToolContext
 
 
 class Agent:
@@ -105,14 +47,14 @@ class Agent:
             raise LLMError("LLM 未配置，Agent 模式需要 AGNES_API_KEY")
         self.llm = get_llm()
         self.storage = storage or Storage()
-        self.tools = {
-            "search": self._tool_search,
-            "list_docs": self._tool_list_docs,
-            "get_doc": self._tool_get_doc,
-            "analyze": self._tool_analyze,
-            "read": self._tool_read,
-            "read_multi": self._tool_read_multi,
-        }
+
+        # 工具依赖通过 ToolContext 注入；系统提示由 Registry 生成
+        self._registry = get_registry()
+        self._tool_context = ToolContext(
+            storage=self.storage,
+            llm=self.llm,
+        )
+        self._system_prompt = self._registry.build_system_prompt()
 
     def run(self, task: str, on_step: Optional[callable] = None) -> str:
         """执行任务。
@@ -124,11 +66,12 @@ class Agent:
             最终答案
         """
         messages = [
-            {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+            {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": task},
         ]
 
         called_tools: set = set()
+        available_names = self._registry.names() + ["done"]
 
         for step in range(self.MAX_STEPS):
             reply = self.llm.chat(messages, temperature=0.3, max_tokens=self.MAX_TOKENS)
@@ -161,9 +104,10 @@ class Agent:
                     on_step("done", tool_args)
                 return tool_args
 
-            if tool_name not in self.tools:
+            tool = self._registry.get(tool_name)
+            if tool is None:
                 tool_result = (
-                    f"[错误] 未知工具: {tool_name}。可用工具: {list(self.tools.keys()) + ['done']}"
+                    f"[错误] 未知工具: {tool_name}。可用工具: {available_names}"
                 )
                 if on_step:
                     on_step("error", tool_result)
@@ -181,7 +125,9 @@ class Agent:
                     if on_step:
                         on_step("tool", f"{tool_name} {tool_args}")
                     try:
-                        tool_result = self.tools[tool_name](tool_args)
+                        tool_result = tool.execute_from_str(
+                            tool_args, context=self._tool_context
+                        )
                     except Exception as e:
                         tool_result = f"[工具执行失败] {type(e).__name__}: {e}"
 
@@ -276,166 +222,3 @@ class Agent:
             return xml_match.group(1).strip()
 
         return ""
-
-    # ---- 工具实现 ----
-
-    def _tool_search(self, query: str) -> str:
-        """BM25 搜索。"""
-        from core.search.bm25 import SearchResult
-        query = query.strip()
-        if not query:
-            return "[错误] 搜索关键词不能为空"
-
-        results = self.storage.bm25_search(query, top_k=5)
-        if not results:
-            return "[无结果] 未找到相关内容"
-
-        lines = [f"找到 {len(results)} 条结果：\n"]
-        for i, r in enumerate(results, 1):
-            lines.append(f"[{i}] {r.doc_title} (相关度 {r.score:.2f})")
-            lines.append(f"    {r.content[:200]}...")
-        return "\n".join(lines)
-
-    def _tool_list_docs(self, _: str) -> str:
-        """列出所有文档。"""
-        docs = self.storage.list_documents()
-        if not docs:
-            return "[空] 知识库中没有文档"
-
-        lines = [f"共 {len(docs)} 篇文档：\n"]
-        for d in docs:
-            lines.append(
-                f"  {d.id[:8]}  {d.title}  "
-                f"[{d.chunk_count}段] [{','.join(d.tags[:3])}]"
-            )
-        return "\n".join(lines)
-
-    def _tool_get_doc(self, args: str) -> str:
-        """查看文档详情。"""
-        args = args.strip()
-        if not args:
-            return "[错误] 请指定文档ID"
-
-        doc_id = args[:8]
-        doc = self.storage.get_document(doc_id)
-        if not doc:
-            return f"[错误] 文档不存在: {args[:8]}"
-
-        # 获取前 3 段预览
-        chunks = self.storage.get_chunks_by_doc(doc_id, limit=3)
-        preview = "\n".join(
-            f"  第{i+1}段：{c.content[:200]}..."
-            for i, c in enumerate(chunks)
-        )
-
-        return (
-            f"文档: {doc.title}\n"
-            f"ID: {doc.id}\n"
-            f"标签: {', '.join(doc.tags)}\n"
-            f"总段落: {doc.chunk_count}\n"
-            f"总字数: {doc.total_tokens}\n\n"
-            f"前 3 段预览：\n{preview}"
-        )
-
-    def _tool_analyze(self, file_path: str) -> str:
-        """数据表分析。"""
-        file_path = file_path.strip()
-        from pathlib import Path
-        path = Path(file_path).expanduser().resolve()
-        if not path.exists():
-            return f"文件不存在: {path}"
-
-        try:
-            from core.analyze.analyzer import DataAnalyzer
-            az = DataAnalyzer()
-            result = az.analyze(path)
-            return (
-                f"文件: {result.file_name}\n"
-                f"规模: {result.rows} 行 × {result.cols} 列\n"
-                f"字段: {', '.join(result.columns[:8])}\n"
-                f"数值列描述: {list(result.describe.keys())}\n"
-                f"缺失值: {sum(1 for v in result.missing.values() if v > 0)} 列有缺失\n"
-                f"\nAI 洞察：\n{result.insights}"
-            )
-        except Exception as e:
-            return f"分析失败: {e}"
-
-    def _tool_read(self, args: str) -> str:
-        """读取指定段落的原文。
-
-        参数格式: "文档ID前8位 段落号"，如 "862e0973 3"
-        """
-        args = args.strip()
-        if not args:
-            return "[错误] 请指定文档ID，格式: 文档ID 段落号"
-
-        parts = args.split(None, 1)
-        doc_id = parts[0].strip()
-        chunk_num = 1
-        if len(parts) > 1:
-            try:
-                chunk_num = int(parts[1].strip())
-                if chunk_num < 1:
-                    chunk_num = 1
-            except ValueError:
-                return f"[错误] 段落号必须是数字: {parts[1]}"
-
-        try:
-            from core.reader.reader import SmartReader
-            sr = SmartReader(storage=self.storage)
-            state = sr.open(doc_id)
-            total = state.total_chunks
-            if chunk_num > total:
-                return f"[错误] 该文档共 {total} 段，你请求第 {chunk_num} 段（超出范围）"
-            sr.goto(chunk_num - 1)
-            chunk = sr.current_chunk()
-            return (
-                f"文档: {state.doc_title} (共 {total} 段)\n\n"
-                f"第 {chunk_num} 段内容：\n{chunk.content[:1000]}"
-            )
-        except Exception as e:
-            return f"阅读失败: {e}"
-
-    def _tool_read_multi(self, args: str) -> str:
-        """一次读取多段，格式: "文档ID 起始段-结束段"，如 "862e0973 1-5"。"""
-        args = args.strip()
-        if not args:
-            return "[错误] 格式: 文档ID 起始段-结束段，如 862e0973 1-5"
-
-        parts = args.split(None, 1)
-        if len(parts) < 2:
-            return "[错误] 请指定段落范围，如 862e0973 1-5"
-        doc_id = parts[0].strip()
-        range_str = parts[1].strip()
-
-        range_match = re.match(r"^(\d+)\s*[-~]\s*(\d+)$", range_str)
-        if not range_match:
-            return f"[错误] 段落范围格式错误: {range_str}，应为 起始-结束，如 1-5"
-
-        start = int(range_match.group(1))
-        end = int(range_match.group(2))
-        if start < 1:
-            start = 1
-        if end < start:
-            return f"[错误] 结束段 {end} 小于起始段 {start}"
-
-        try:
-            from core.reader.reader import SmartReader
-            sr = SmartReader(storage=self.storage)
-            state = sr.open(doc_id)
-            total = state.total_chunks
-            if start > total:
-                return f"[错误] 起始段 {start} 超出范围（共 {total} 段）"
-            if end > total:
-                end = total
-            if end - start + 1 > 8:
-                end = start + 7
-
-            lines = [f"文档: {state.doc_title} (共 {total} 段，读取 {start}-{end} 段)\n"]
-            for i in range(start, end + 1):
-                sr.goto(i - 1)
-                chunk = sr.current_chunk()
-                lines.append(f"--- 第 {i} 段 ---\n{chunk.content[:500]}\n")
-            return "\n".join(lines)
-        except Exception as e:
-            return f"阅读失败: {e}"
