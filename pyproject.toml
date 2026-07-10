@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ima-kb"
-version = "3.1.0"
+version = "4.0.0"
 description = "IMA 个人知识库：把电脑里散落的资料整理成可搜索、可问答的本机知识库"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -63,14 +63,15 @@ dev = [
 ima = "run:cli"
 
 [project.urls]
-Homepage = "https://github.com/yourname/ima-kb"
+Homepage = "https://github.com/xiaozhuangma748-hash/ima-kb"
 
 [tool.setuptools]
 # 显式指定包含哪些包（避免把 test_data、storage 误打包）
 packages = ["core", "core.classify", "core.ingestion", "core.llm", "core.qa", "core.search",
     "core.retrieval", "core.memory", "core.persona", "core.pet", "core.pet.arts",
     "core.session", "core.sync", "core.analyze", "core.report", "core.reader",
-    "core.agent", "core.graph", "core.classify", "core.ui",
+    "core.agent", "core.agent.tools", "core.graph", "core.classify", "core.ui",
+    "core.cli", "core.cli.commands", "core.setup",
     "web", "web.routes"]
 # 根目录的顶层 .py 文件（run.py / repl.py / config.py）
 py-modules = ["run", "repl", "config"]

@@ -1,6 +1,6 @@
 # IMA 个人知识库 · Code Wiki
 
-> **版本**：v4.0（宠物知识库管理员） · pyproject 版本号 `3.1.0`
+> **版本**：v4.0（宠物知识库管理员） · pyproject 版本号 `4.0.0`
 > **代码仓库**：`xiaozhuangma748-hash/ima-kb`
 > **最后更新**：2026-07-10
 > **Python 兼容性**：3.9+（macOS 自带 3.9.6 即可运行）
@@ -858,10 +858,22 @@ class VectorResult:
 | 方法 | 说明 |
 |---|---|
 | `is_available() -> bool` | 向量索引是否可用 |
-| `build_index(chunks)` | 全量构建（先删后建） |
-| `add_chunk(chunk)` / `add_chunks_batch(chunks)` | 增量添加 |
+| `build_index(chunks)` | 全量构建（先删后建，带 embedding 缓存） |
+| `add_chunk(chunk)` / `add_chunks_batch(chunks)` | 增量添加（带 embedding 缓存） |
 | `delete_chunk(chunk_id)` / `delete_document(doc_id) -> int` | 删除（按 metadata 过滤） |
-| `search(query, top_k=10)` | 检索（distance 转 score：`score = 1.0 - distance`） |
+| `search(query, top_k=10)` | 检索（query 也走缓存，distance 转 score：`score = 1.0 - distance`） |
+| `cache_stats() -> dict` | 返回 embedding 缓存统计（条目数） |
+| `clear_cache()` | 清空 embedding 缓存 |
+
+##### Embedding 缓存层
+
+`_EmbeddingCache` 类通过 SQLite 持久化 `content hash → embedding vector` 映射，避免重建索引时重复计算 embedding：
+
+- 存储路径：`storage/embedding_cache.db`（WAL 模式，支持并发读）
+- key 为文本 SHA256 hash，value 为 pickle 序列化的 embedding 向量
+- `_embed_with_cache(texts)` 统一入口：先批量查缓存 → 未命中的批量计算 → 写入缓存
+- `build_index` / `add_chunk` / `add_chunks_batch` / `search` 均走缓存
+- 重建索引时，已缓存的内容秒级完成，无需重新跑模型推理
 
 ##### 降级机制
 
@@ -2323,7 +2335,7 @@ RRF 分数低于阈值时：
 5. **Python 版本**：兼容 3.9+，但 3.10+ 体验更好
 6. **`def list()` 命名陷阱**：曾用 `list()` 作函数名覆盖内置 `list()`，已改名为 `list_docs`
 7. **pyproject.toml py-modules**：必须显式声明 `py-modules = ["run", "repl", "config"]`，否则 `pip install -e .` 后 `ima` 找不到 `run` 模块
-8. **版本号不一致**：`pyproject.toml` 版本为 `3.1.0`，但代码自称 v4.0
+8. **版本号已统一**：`pyproject.toml` 版本为 `4.0.0`，与代码 v4.0 一致（已修复）
 9. **PetStorage.save 非原子写入**：与 `MemoryStore.save` 不同，存在崩溃时数据损坏风险
 10. **向量模型大文件**：`model.safetensors` 需用 curl 从 hf-mirror.com 手动下载，HF 镜像 CDN 重定向会超时
 
@@ -2331,11 +2343,10 @@ RRF 分数低于阈值时：
 
 | # | 优化项 | 难度 | 说明 |
 |---|---|---|---|
-| 1 | **Embedding 缓存层** | ★ | `vector.py` 加 SQLite 缓存（chunk hash → embedding） |
-| 2 | **PDF 重新解析** | ★ | OCR 已安装，但旧 PDF 需重新解析 |
-| 3 | **OCR 优化：PaddleOCR** | ★★ | 替换 Tesseract，但 paddlepaddle ~500MB 依赖较重 |
-| 4 | **图谱扩展** | ★★★ | 新增人物/时间/金额等实体类型 |
-| 5 | **多用户隔离** | ★★★★★ | 全栈改造，所有 storage 加 user_id，认证体系从零写 |
+| 1 | **PDF 重新解析** | ★ | OCR 已安装，但旧 PDF 需重新解析 |
+| 2 | **OCR 优化：PaddleOCR** | ★★ | 替换 Tesseract，但 paddlepaddle ~500MB 依赖较重 |
+| 3 | **图谱扩展** | ★★★ | 新增人物/时间/金额等实体类型 |
+| 4 | **多用户隔离** | ★★★★★ | 全栈改造，所有 storage 加 user_id，认证体系从零写 |
 
 ---
 

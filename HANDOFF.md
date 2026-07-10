@@ -282,7 +282,7 @@ ima-kb/
 - `list_all_tags()` / `list_documents_by_tag()`：标签查询
 
 ### `pyproject.toml` + `install.sh` — 分发安装
-- `pyproject.toml`：`name="ima-kb"` `version="3.1.0"`（注意：代码自称 v4.0，pyproject 版本号未同步） `requires-python=">=3.9"`，入口点 `ima = "run:cli"`，`py-modules=["run", "repl", "config"]`
+- `pyproject.toml`：`name="ima-kb"` `version="4.0.0"` `requires-python=">=3.9"`，入口点 `ima = "run:cli"`，`py-modules=["run", "repl", "config"]`
 - `install.sh`：6 步流程（Python 检查 → venv → pip install + `pip install -e .` → .env 配置 → zsh/bash ima 命令 → 验证）
 - 选项：`--ocr`（装 Tesseract 语言包）/ `--dev`（开发依赖）/ `--no-venv`（用系统 Python）
 
@@ -372,7 +372,7 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 7. **`def list()` 命名陷阱**：曾用 `list()` 作函数名覆盖内置 `list()`，已改名为 `list_docs` 并用 `@cli.command(name="list")` 修复
 8. **pyproject.toml py-modules**：因 `run.py` 在根目录不在包内，必须显式声明 `py-modules = ["run", "repl", "config"]`，否则 `pip install -e .` 后 `ima` 找不到 `run` 模块
 9. ~~**`.streamlit/config.toml` 残留~~：✅ 已删除（2026-07-09）
-10. **版本号不一致**：`pyproject.toml` 版本为 `3.1.0`，但 `repl.py` 自称 `v4.0`，建议同步
+10. **版本号已统一**：`pyproject.toml` 版本已从 `3.1.0` 更新为 `4.0.0`，与代码 v4.0 一致（已修复）
 
 ---
 
@@ -481,7 +481,7 @@ ima web
 | 5 | test_data/ | 5个文件 | 6个文件 |
 | 6 | 测试数量 | 153+ | 323+ |
 | 7 | Web 默认端口 | 文档写8000 | 实际默认8501（run.py+repl.py） |
-| 8 | 版本号不一致 | 未标注 | pyproject.toml 3.1.0 vs 代码自称 v4.0，已标注 |
+| 8 | 版本号不一致 | ✅ 已修复 | pyproject.toml 统一为 4.0.0（2026-07-10） |
 | 9 | Web 前端状态 | "页面为空/未实现" | 7页面+7API全部已实现 |
 | 10 | PRD 技术栈 | Streamlit | FastAPI（实际实现） |
 | 11 | INSTALL.md 宠物等级 | Lv6 分系 | Lv5 分系 |
