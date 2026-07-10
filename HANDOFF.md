@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-10（REPL 模块化拆分 + 启动页 Claude Code v2.1 风格重构 + 前端 JS 模块化）
+> 最后更新：2026-07-11（性能优化 + Agent 输出 Trae 垂直风格 + BM25 倒排索引 + SQLite WAL）
 
 ---
 
@@ -28,6 +28,7 @@
 | **P3 体系** | 终端交互式 REPL + `ima` 全局命令 | ✅ 完成 |
 | **P4 增强** | OCR 补齐 + 自动标签 + 分发安装脚本 + Claude Code 风格 CLI + 知识图谱 | ✅ 完成 |
 | **P5 智能化** | 宠物管理员 v4.0 + 混合检索（BM25+向量+RRF+重排）+ 记忆系统 + 人格风格 + 增量同步 + 质量检查 + 近似去重 + 子命令菜单 + 数据分析 + 报告生成 + **Web 前端（7 页面完整实现）** | ✅ 完成 |
+| **P6 性能优化** | BM25 倒排索引 + SQLite WAL 模式 + 连接池 + 懒加载 + 异步 SSE + Web 组件复用 + Agent 输出 Trae 垂直风格 + BM25 索引智能重建 + 命令补全完善 | ✅ 完成 |
 
 ### 实测可用功能
 
@@ -57,6 +58,11 @@
 - ✅ **子命令菜单**（8 个主命令 `/memory /pet /graph /sync /session /tag /dedup /health` 用 `radiolist_dialog` 弹出选择菜单）
 - ✅ **快速入库**（`/note`/`/clip`/`/url` 命令，支持剪贴板/URL/截图 OCR）
 - ✅ **会话管理**（`/session save/load/list`，跨会话恢复对话历史）
+- ✅ **性能优化**（BM25 倒排索引 + SQLite WAL 模式 + 连接池 + 懒加载 + 异步 SSE + Web 组件全局复用）
+- ✅ **Agent 输出 Trae 垂直风格**（图标+标题+缩进内容，无竖线装饰）
+- ✅ **BM25 索引智能重建**（启动时自动检测 chunk_id 过期情况，无需手动 `ima rebuild`）
+- ✅ **命令补全完善**（/theme /memory /web /pet /graph 子命令补全注册）
+- ✅ **工作流分析**（`/memory workflow analyze` 检测低效操作链）
 
 ---
 
@@ -638,3 +644,151 @@ IMAGE_RESPONSE_FORMAT=url
 ### 四、测试
 
 - **319 个测试通过**，4 个失败为已有的 `test_subcommand_menu.py` 问题（与本次改动无关）
+
+---
+
+##  2026-07-10 更新：REPL 模块化拆分 + 启动页重构 + 前端 JS 模块化
+
+### 一、REPL 模块化拆分
+
+原 `repl.py`（约 4300 行）拆分为 `core/cli/` 目录：
+
+| 模块 | 职责 |
+|---|---|
+| `core/cli/main.py` | REPL 启动入口 |
+| `core/cli/repl.py` | REPL 主类（命令分发 + AI 对话） |
+| `core/cli/chat.py` | AI 对话渲染逻辑 |
+| `core/cli/completer.py` | 命令自动补全 |
+| `core/cli/welcome.py` | 启动页渲染 + 活动记录 |
+| `core/cli/constants.py` | 常量、命令列表、别名表、console 实例 |
+| `core/cli/commands/` | 各命令处理器（agent/docs/graph/memory/pet/pipe/session/sync/analyze） |
+
+根目录 `repl.py` 现为薄封装，仅 `from core.cli.main import main` 委托执行。
+
+### 二、启动页重构
+
+参照 Claude Code v2.1 风格，左右分栏布局：
+- 左区：`Welcome back!` + 像素机器人 ASCII 图 + 模型信息
+- 右区：Tips + Recent activity
+- 中间 `│` 竖线分隔，顶部标题线
+
+### 三、前端 JS 模块化
+
+`web/static/app.js` 拆分到 `web/static/js/` 目录，按页面/职责分离：
+
+| 模块 | 职责 |
+|---|---|
+| `nav.js` | 侧边栏导航 + 页面切换 |
+| `qa.js` | AI 问答（SSE 流式） |
+| `ingest.js` | 文档入库（拖拽上传） |
+| `search.js` | 混合检索 |
+| `analyze.js` | 数据分析 |
+| `dashboard.js` | 仪表盘 |
+| `graph.js` | 知识图谱（vis.js） |
+| `pet.js` | 宠物管理 |
+| `state.js` | 全局状态管理 |
+| `utils.js` | 通用工具函数 |
+
+---
+
+## 🆕 2026-07-11 更新：性能优化 + Agent 输出样式重构
+
+### 一、性能优化（P6）
+
+#### 1. BM25 倒排索引
+
+**之前**：BM25 搜索遍历所有文档计算词频，O(N) 复杂度。
+
+**现在**：`core/search/bm25.py` 新增倒排索引（term → chunk_id 列表），搜索时只遍历含目标词的文档，大幅提升检索速度。
+
+#### 2. SQLite WAL 模式
+
+**之前**：SQLite 默认 journal_mode=DELETE，写操作阻塞读操作。
+
+**现在**：`core/storage.py` 启用 WAL 模式（`PRAGMA journal_mode=WAL`），支持并发读写，提升 Web 后台响应速度。
+
+#### 3. 连接池优化
+
+**之前**：每次请求创建新 SQLite 连接。
+
+**现在**：Web 路由模块（`web/routes/`）全局复用 Storage/VectorIndex 实例，避免重复初始化。
+
+#### 4. 懒加载
+
+**之前**：启动时加载所有组件（jieba、向量模型等），冷启动慢。
+
+**现在**：`core/retrieval/vector.py`、`core/search/bm25.py` 等组件改为懒加载，首次使用时才初始化。
+
+#### 5. 异步 SSE
+
+**之前**：SSE 流式问答使用同步生成器。
+
+**现在**：`web/routes/qa.py` 改用 `async generator`，提升并发处理能力。
+
+#### 6. BM25 索引智能重建
+
+**之前**：每次启动都提示"BM25 索引数量与数据库 chunk 数不匹配，请执行 `ima rebuild`"。
+
+**现在**：`core/storage.py` 的 `_sync_bm25_from_db()` 智能检测：当所有 chunk_id 都过期时自动重建索引，无需手动干预。
+
+### 二、Agent 输出样式重构
+
+#### 之前（竖线时间线风格）
+
+```
+│
+│ ◉  思考  7.2s · 用户询问"什么是政策"...
+│  ✓ search 政策 定义
+│  ✓ search  (1156 字符)
+```
+
+#### 现在（Trae 垂直风格）
+
+```
+  [T]  思考  7.2s
+  这是一个关于"爱情"定义的哲学或心理学问题。虽然知识库中可能有关于文学、心理学
+  或社会学的文档涉及爱情，但作为一个通用概念，我可以直接基于常识和广泛的知识...
+
+  [OK]  search  (1288 字符)
+
+  [T]  思考  9.3s
+  搜索结果主要关于殡葬服务和战略发展，并没有直接提供关于"爱情"的学术或哲学定义...
+
+  [OK]  search  (956 字符)
+
+✓ 完成 · 31.5s · 共 2 步
+```
+
+**设计要点**：
+- 无竖线装饰，层次靠缩进区分
+- 每个步骤有图标 + 标题（`[T]` 思考、`[OK]` 工具调用、`[ERR]` 错误）
+- 内容缩进显示在标题下方
+- 思考内容截断到 150 字符，自动换行时保持缩进对齐
+
+### 三、命令补全完善
+
+**之前**：`/theme`、`/memory`、`/web`、`/pet`、`/graph` 等命令输入空格后不显示子选项。
+
+**现在**：在 `core/cli/constants.py` 的 `_SUB_MENU_NESTED` 中注册所有子命令，补全菜单正常显示。
+
+### 四、工作流分析
+
+新增 `/memory workflow analyze` 命令，检测低效操作链（如重复搜索、无效命令序列），给出改进建议。
+
+### 五、改动文件清单
+
+| 文件 | 变更类型 | 说明 |
+|---|---|---|
+| `core/search/bm25.py` | **重写** | 倒排索引 + 智能重建 |
+| `core/storage.py` | 修改 | WAL 模式 + 连接池 + 智能重建 |
+| `core/retrieval/vector.py` | 修改 | 懒加载 |
+| `core/cli/commands/agent.py` | **重写** | Trae 垂直风格输出 |
+| `core/cli/constants.py` | 修改 | 补全注册 |
+| `core/cli/commands/memory.py` | 修改 | 工作流分析 |
+| `web/app.py` | 修改 | 组件全局复用 |
+| `web/routes/*.py` | 修改 | 异步 SSE + 组件复用 |
+
+### 六、测试
+
+- **337 个测试全部通过**（之前 323 个 + 新增 14 个）
+- 之前失败的 4 个测试已修复（调整子命令菜单触发条件）

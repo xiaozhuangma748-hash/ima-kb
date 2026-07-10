@@ -2,7 +2,7 @@
 
 > **版本**：v4.0（宠物知识库管理员） · pyproject 版本号 `4.0.0`
 > **代码仓库**：`xiaozhuangma748-hash/ima-kb`
-> **最后更新**：2026-07-10
+> **最后更新**：2026-07-11（P6 性能优化 + Agent Trae 垂直风格）
 > **Python 兼容性**：3.9+（macOS 自带 3.9.6 即可运行）
 
 ---
@@ -799,7 +799,7 @@ def chunk_document(doc, chunk_size=512, chunk_overlap=64) -> List[Chunk]:
 
 ##### 文件：[core/search/bm25.py](file:///Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库/core/search/bm25.py)
 
-基于 jieba 中文分词的 BM25 关键词检索。
+基于 jieba 中文分词的 BM25 关键词检索。**P6 新增倒排索引**，搜索时只遍历含目标词的文档。
 
 ```python
 @dataclass
@@ -818,10 +818,19 @@ class SearchResult:
 | `add(chunk_id, doc_id, content)` | 添加/更新（已存在先 remove） |
 | `remove(chunk_id) -> bool` | 删除 |
 | `clear()` | 清空 |
-| `search(query, top_k=10)` | BM25 打分检索 |
+| `search(query, top_k=10)` | BM25 打分检索（**倒排索引加速**） |
 | `save()` / `_load()` | pickle 持久化（损坏自动重置） |
 | `info()` | 返回 chunks/vocabulary/total_tokens |
 | `__len__()` | 索引文档数 |
+
+##### 倒排索引（P6 新增）
+
+```python
+# 倒排索引结构：term → {chunk_id: tf}
+self._inverted_index: Dict[str, Dict[str, int]] = {}
+```
+
+搜索时通过倒排索引直接定位含目标词的文档，避免遍历所有文档，大幅提升检索速度。
 
 ##### 关键参数
 
