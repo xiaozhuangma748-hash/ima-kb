@@ -4,7 +4,7 @@ GET /api/stats  返回仪表盘所需全部数据。
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from core.storage import Storage
 
@@ -12,9 +12,11 @@ router = APIRouter(tags=["stats"])
 
 
 @router.get("/stats")
-async def stats():
+async def stats(request: Request):
     """知识库仪表盘数据。"""
-    storage = Storage()
+    from web.app import _get_shared_storage, _get_shared_graph_store, _get_health_cache
+
+    storage = _get_shared_storage(request.app)
     s = storage.stats()
 
     # 按类型分布
@@ -39,41 +41,30 @@ async def stats():
         for d in docs
     ]
 
-    # 质量告警
+    # 质量告警（使用缓存）
     alerts = []
-    health_score = 100
-    try:
-        from core.sync.checker import QualityChecker
-        checker = QualityChecker()
-        all_docs = storage.list_documents(limit=1000)
-        all_issues = []
-        for doc in all_docs:
-            chunks = storage.get_chunks(doc.id)
-            issues = checker.check_document(chunks)
-            all_issues.extend(issues)
-        report = checker.generate_report(all_issues)
-        health_score = report.health_score
-        if report.issues_detail:
-            for issue, count in report.issues_detail.items():
-                severity = "error" if "空" in issue else "warning"
-                alerts.append({
-                    "severity": severity,
-                    "message": f"{issue}: {count} 个",
-                })
-    except Exception:
-        pass
+    health = _get_health_cache(request.app)
+    health_score = health.get("health_score", 100)
+    health_alerts = health.get("alerts", {})
+    if health_alerts:
+        for issue, count in health_alerts.items():
+            severity = "error" if "空" in issue else "warning"
+            alerts.append({
+                "severity": severity,
+                "message": f"{issue}: {count} 个",
+            })
 
-    # 图谱统计
+    # 图谱统计（使用共享实例）
     graph_nodes = 0
     graph_edges = 0
-    try:
-        from core.graph.store import GraphStore
-        gs = GraphStore()
-        gs_stats = gs.stats()
-        graph_nodes = gs_stats["nodes"]
-        graph_edges = gs_stats["edges"]
-    except Exception:
-        pass
+    gs = _get_shared_graph_store(request.app)
+    if gs:
+        try:
+            gs_stats = gs.stats()
+            graph_nodes = gs_stats["nodes"]
+            graph_edges = gs_stats["edges"]
+        except Exception:
+            pass
 
     return {
         "documents": s["documents"],

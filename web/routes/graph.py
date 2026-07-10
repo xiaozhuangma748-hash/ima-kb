@@ -7,7 +7,7 @@ GET  /api/graph/export            导出 HTML
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 
@@ -17,12 +17,14 @@ router = APIRouter(tags=["graph"])
 
 
 @router.get("/graph/data")
-async def graph_data():
+async def graph_data(request: Request):
     """返回知识图谱数据（vis.js 可用格式）。"""
     try:
-        from core.graph.store import GraphStore
+        from web.app import _get_shared_graph_store
 
-        gs = GraphStore()
+        gs = _get_shared_graph_store(request.app)
+        if gs is None:
+            return {"elements": {"nodes": [], "edges": []}, "stats": {"nodes": 0, "edges": 0}}
         if gs.graph.number_of_nodes() == 0:
             return {"elements": {"nodes": [], "edges": []}, "stats": gs.stats()}
 
@@ -38,12 +40,14 @@ async def graph_data():
 
 
 @router.get("/graph/neighbors/{name}")
-async def graph_neighbors(name: str):
+async def graph_neighbors(name: str, request: Request):
     """查询节点的邻居关系。"""
     try:
-        from core.graph.store import GraphStore
+        from web.app import _get_shared_graph_store
 
-        gs = GraphStore()
+        gs = _get_shared_graph_store(request.app)
+        if gs is None:
+            raise HTTPException(status_code=404, detail="图谱未初始化")
 
         # 精确匹配或模糊搜索
         if name not in gs.graph:
@@ -80,18 +84,19 @@ class GraphBuildBody(BaseModel):
 
 
 @router.post("/graph/build")
-async def graph_build(body: GraphBuildBody):
+async def graph_build(body: GraphBuildBody, request: Request):
     """重新构建知识图谱（调用 LLM 抽取实体关系）。"""
     if not settings.has_llm():
         raise HTTPException(status_code=400, detail="LLM 未配置，请在 .env 中设置 AGNES_API_KEY")
 
     try:
+        from web.app import _get_shared_storage, _get_shared_graph_store
         from core.graph.extractor import GraphExtractor
-        from core.graph.store import GraphStore
-        from core.storage import Storage
 
-        storage = Storage()
-        graph_store = GraphStore()
+        storage = _get_shared_storage(request.app)
+        graph_store = _get_shared_graph_store(request.app)
+        if graph_store is None:
+            raise HTTPException(status_code=500, detail="图谱初始化失败")
 
         if body.force:
             graph_store.clear()
@@ -128,18 +133,22 @@ async def graph_build(body: GraphBuildBody):
             "stats": graph_store.stats(),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"构建失败: {e}")
 
 
 @router.get("/graph/export")
-async def graph_export():
+async def graph_export(request: Request):
     """导出知识图谱自包含 HTML。"""
     try:
-        from core.graph.store import GraphStore
+        from web.app import _get_shared_graph_store
         from core.graph.visualizer import generate_html
 
-        gs = GraphStore()
+        gs = _get_shared_graph_store(request.app)
+        if gs is None:
+            raise HTTPException(status_code=404, detail="图谱未初始化")
         if gs.graph.number_of_nodes() == 0:
             raise HTTPException(status_code=404, detail="图谱为空")
 

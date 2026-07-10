@@ -41,6 +41,9 @@ class Agent:
 
     MAX_STEPS = 12
     MAX_TOKENS = 2000
+    MAX_TOOL_RESULT_LEN = 800    # 工具结果最大长度（超出截断）
+    MAX_CONTEXT_LEN = 6000       # 上下文最大总长度（超出压缩）
+    MAX_SAME_TOOL_CALLS = 3      # 同一工具最大调用次数（超出警告）
 
     def __init__(self, storage: Optional[Storage] = None) -> None:
         if not settings.has_llm():
@@ -62,6 +65,7 @@ class Agent:
         Args:
             task: 用户的任务描述
             on_step: 回调函数（step_type, content）
+                step_type: llm_start / thought / tool / result / error / done
         Returns:
             最终答案
         """
@@ -71,11 +75,25 @@ class Agent:
         ]
 
         called_tools: set = set()
+        tool_call_count: dict = {}  # 工具名 → 调用次数（语义重复检测）
         available_names = self._registry.names() + ["done"]
 
         for step in range(self.MAX_STEPS):
-            reply = self.llm.chat(messages, temperature=0.3, max_tokens=self.MAX_TOKENS)
+            # 通知 CLI 层：LLM 开始生成（启动 spinner）
+            if on_step:
+                on_step("llm_start", f"Step {step + 1}")
+
+            try:
+                reply = self.llm.chat(messages, temperature=0.3, max_tokens=self.MAX_TOKENS)
+            except LLMError as e:
+                if on_step:
+                    on_step("error", f"LLM 调用失败: {e}")
+                raise
+
             messages.append({"role": "assistant", "content": reply})
+
+            # 上下文压缩（防止超出 token 限制）
+            self._compress_messages(messages)
 
             # 解析工具调用（支持 JSON 和 XML 两种格式）
             tool_name, tool_args = self._parse_tool_call(reply)
@@ -88,15 +106,14 @@ class Agent:
 
             if tool_name is None:
                 # 没有工具调用，检查截断的 done
-                if "<tool>done" in reply or '{"tool": "done"' in reply or "<args>" in reply:
+                if "<tool>done" in reply or '"tool": "done"' in reply or "<args>" in reply:
                     extracted = self._extract_truncated_args(reply)
                     if extracted:
                         if on_step:
                             on_step("done", extracted)
                         return extracted
-
                 if on_step:
-                    on_step("answer", reply)
+                    on_step("done", reply)
                 return reply
 
             if tool_name == "done":
@@ -113,13 +130,24 @@ class Agent:
                     on_step("error", tool_result)
             else:
                 call_key = f"{tool_name}:{tool_args}"
+                tool_call_count[tool_name] = tool_call_count.get(tool_name, 0) + 1
+
                 if call_key in called_tools:
+                    # 完全重复调用：拦截
                     tool_result = (
                         f"[警告] 你已经调用过 {tool_name} {tool_args}，结果已在上文。"
                         f"请换其他工具或换参数。如果信息已足够，请用 done 给出最终答案。"
                     )
                     if on_step:
                         on_step("error", f"重复调用: {tool_name} {tool_args}（已拦截）")
+                elif tool_call_count[tool_name] > self.MAX_SAME_TOOL_CALLS:
+                    # 同一工具调用过多：警告但不拦截
+                    tool_result = (
+                        f"[警告] {tool_name} 已被调用 {tool_call_count[tool_name]} 次。"
+                        f"请确认是否真的需要继续，或用 done 给出最终答案。"
+                    )
+                    if on_step:
+                        on_step("error", f"{tool_name} 调用过多（{tool_call_count[tool_name]} 次）")
                 else:
                     called_tools.add(call_key)
                     if on_step:
@@ -133,6 +161,10 @@ class Agent:
 
                     if on_step:
                         on_step("result", tool_result)
+
+            # 截断过长的工具结果
+            if len(tool_result) > self.MAX_TOOL_RESULT_LEN:
+                tool_result = tool_result[:self.MAX_TOOL_RESULT_LEN] + "\n...（已截断）"
 
             messages.append({
                 "role": "user",
@@ -154,6 +186,18 @@ class Agent:
             on_step("done", summary)
         return summary
 
+    def _compress_messages(self, messages: list) -> None:
+        """压缩上下文：截断过长的 tool result，防止超出 token 限制。"""
+        total_len = sum(len(m["content"]) for m in messages)
+        if total_len < self.MAX_CONTEXT_LEN:
+            return
+
+        # 从最早的消息开始截断 tool result（保留最近的）
+        for m in messages[2:]:  # 跳过 system + 第一条 user
+            if m["role"] == "user" and "返回结果" in m.get("content", ""):
+                if len(m["content"]) > 300:
+                    m["content"] = m["content"][:300] + "\n...（已截断，如需完整内容请重新调用工具）"
+
     # ---- 解析工具调用（双格式支持） ----
 
     @staticmethod
@@ -167,13 +211,14 @@ class Agent:
         Returns:
             (tool_name, tool_args) 或 (None, None)
         """
-        # 1. 优先尝试 JSON 格式
-        json_match = re.search(
-            r'\{\s*"tool"\s*:\s*"(\w+)"\s*,\s*"args"\s*:\s*"([^"]*)"\s*\}',
-            text,
-        )
-        if json_match:
-            return json_match.group(1), json_match.group(2)
+        # 1. 优先尝试 JSON 格式（用 json.loads 解析，支持转义引号）
+        for match in re.finditer(r'\{[^{}]+\}', text):
+            try:
+                data = json.loads(match.group())
+                if "tool" in data:
+                    return data["tool"], data.get("args", "")
+            except json.JSONDecodeError:
+                continue
 
         # 2. 回退到 XML 格式（向后兼容）
         xml_match = re.search(

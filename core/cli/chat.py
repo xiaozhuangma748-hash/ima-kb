@@ -49,6 +49,8 @@ class ChatMixin:
                 # 流式输出
                 result = None
                 live = None  # 动态 spinner：阶段等待时显示
+                import time as _time
+                _t0 = _time.time()  # 思考计时起点
                 for event in self.administrator.ask_stream(
                     user_input, history=self.history, summary=self.conversation_summary
                 ):
@@ -71,7 +73,10 @@ class ChatMixin:
                             if live is not None:
                                 live.stop()
                                 live = None
+                            # 首次 token 到达，计算思考时间
+                            _think_time = _time.time() - _t0
                             console.print()  # 换行，和阶段提示分开
+                            console.print(f"[dim]思考 {_think_time:.1f}s[/dim]")
                             self._stream_started = True
                             # Live + Text 纯文本渲染，手动去掉 ** 标记
                             # 不用 Markdown 避免动态增长时旧帧残留导致重复
@@ -96,6 +101,7 @@ class ChatMixin:
                             self._stream_live = None
                         result = event["result"]
                         self._stream_started = False
+                        _total_time = _time.time() - _t0
                 # 安全兜底：循环结束确保 spinner 和 Live 已停
                 if live is not None:
                     live.stop()
@@ -108,6 +114,8 @@ class ChatMixin:
                 if result is not None:
                     # 只渲染引用溯源和宠物事件，不重复渲染正文（正文已流式输出）
                     self._render_citations_and_events(result)
+                    _total = _time.time() - _t0
+                    console.print(f"[dim]耗时 {_total:.1f}s[/dim]")
                     # token 使用量（非 debug 模式也显示）
                     if hasattr(self, 'administrator') and self.administrator and hasattr(self.administrator.llm, 'last_usage') and self.administrator.llm.last_usage:
                         u = self.administrator.llm.last_usage
@@ -188,14 +196,17 @@ class ChatMixin:
                 return
 
         # 使用改进的 RAGChain：混合检索 + 重排序 + 多轮上下文扩展
+        import time as _time
+        _t0 = _time.time()
         with console.status("[bold yellow]混合检索知识库...[/bold yellow]", spinner="dots"):
             answer = self.rag.ask(user_input, history=self.history)
+        _think_time = _time.time() - _t0
 
         if not answer.has_answer:
             console.print("[yellow]! 知识库中没有相关资料，尝试基于通用知识回答[/yellow]\n")
             # 退化为纯对话（带多轮上下文）
             try:
-                console.print("[bold yellow]>[/bold yellow] [dim]AI 正在思考...[/dim]")
+                console.print(f"[dim]思考 {_think_time:.1f}s[/dim]")
                 # 构建带历史的 messages
                 recent_history = (self.history or [])[-10:]
                 messages = list(recent_history) + [{"role": "user", "content": user_input}]
@@ -215,15 +226,20 @@ class ChatMixin:
                 if stream_live is not None:
                     stream_live.stop()
                 console.print()
+                _total = _time.time() - _t0
+                console.print(f"[dim]耗时 {_total:.1f}s[/dim]")
                 assistant_content = "".join(full_content)
             except LLMError:
                 console.print("[yellow]（AI 暂时无法回答）[/yellow]\n")
                 return
         else:
             # 同步模式：RAGChain 已生成完整回答
+            console.print(f"[dim]思考 {_think_time:.1f}s[/dim]")
             console.print("[bold yellow]>[/bold yellow] [bold cyan]AI[/bold cyan]")
             # 输出回答内容（去掉 ** 标记）
             console.print(Text(answer.content.replace("**", "")))
+            _total = _time.time() - _t0
+            console.print(f"[dim]耗时 {_total:.1f}s[/dim]")
             assistant_content = answer.content
 
         # 显示引用来源

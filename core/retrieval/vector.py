@@ -293,8 +293,9 @@ class VectorIndex:
                 for i, chunk_id in enumerate(results["ids"][0]):
                     doc_id = results["metadatas"][0][i].get("doc_id", "")
                     # ChromaDB 返回 distance（越小越相似），转为 score（越大越好）
+                    # cosine distance 范围 0-2，归一化到 0-1
                     distance = results["distances"][0][i]
-                    score = 1.0 - distance  # 简单转换
+                    score = max(0.0, 1.0 - distance / 2)
                     vector_results.append(VectorResult(
                         chunk_id=chunk_id,
                         doc_id=doc_id,

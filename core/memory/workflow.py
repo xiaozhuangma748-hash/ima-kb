@@ -1,7 +1,8 @@
-"""工作流模式识别：记录命令序列，推荐下一步。"""
+"""工作流模式识别：记录命令序列，推荐下一步，检测低效操作。"""
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from core.memory.store import MemoryStore
@@ -15,6 +16,21 @@ WINDOW_SECONDS = 30 * 60
 RECENT_LIMIT = 10
 # 模式列表上限（避免无限累积）
 MAX_PATTERNS = 50
+
+# 低效检测阈值
+REPEAT_THRESHOLD = 3       # 连续重复 ≥3 次视为低效
+PINGPONG_THRESHOLD = 3     # 来回切换 A→B 和 B→A 都 ≥3 次视为低效
+BATCHABLE_THRESHOLD = 3    # 可批量操作 ≥3 次视为低效
+
+
+@dataclass
+class Inefficiency:
+    """一条低效操作检测结果。"""
+    type: str           # repeat / pingpong / batchable
+    title: str          # 简短标题
+    pattern: str        # 涉及的模式（如 "/pet → /pet ×15"）
+    count: int          # 出现次数
+    suggestion: str     # 改进建议
 
 
 class WorkflowTracker:
@@ -161,3 +177,97 @@ class WorkflowTracker:
             ):
                 return seq
         return None
+
+    # ---- 低效操作检测 ----
+
+    # 可批量操作的命令：连续多次执行同一操作时，建议用批量方式
+    _BATCHABLE_HINTS = {
+        "/ingest": "用 Web 后台批量上传，或命令行 `ima ingest file1.md file2.md ...` 一次入库多个文件",
+        "/search": "用 `ima search 关键词 --limit 20` 一次取更多结果，减少反复搜索",
+        "/pet": "宠物状态变化不大，无需频繁查看；可在问答完成后统一查看一次",
+        "/list": "用 `ima list --limit 50` 一次看更多文档，减少翻页",
+    }
+
+    def detect_inefficiencies(self) -> List[Inefficiency]:
+        """分析工作流模式，检测低效操作链。
+
+        检测三类低效：
+        1. repeat    — 连续重复同一命令（A → A ≥3 次）
+        2. pingpong  — 来回切换（A → B 和 B → A 都高频）
+        3. batchable — 可批量操作的命令被反复单独执行
+
+        Returns:
+            Inefficiency 列表（按 count 降序）
+        """
+        data = self.store.get_data()
+        patterns = data.get("workflow", {}).get("patterns", [])
+        results: List[Inefficiency] = []
+
+        # 构建 (A, B) → count 的查找表
+        pair_counts: dict = {}
+        for p in patterns:
+            seq = p.get("sequence", [])
+            if isinstance(seq, list) and len(seq) == 2:
+                pair_counts[(seq[0], seq[1])] = p.get("count", 0)
+
+        # 1. 连续重复：A → A
+        for (a, b), count in pair_counts.items():
+            if a == b and count >= REPEAT_THRESHOLD:
+                hint = self._BATCHABLE_HINTS.get(a)
+                if hint:
+                    suggestion = hint
+                else:
+                    suggestion = f"连续 {count} 次执行 `{a}`，考虑合并操作或写脚本自动化"
+                results.append(Inefficiency(
+                    type="repeat",
+                    title="连续重复操作",
+                    pattern=f"{a} → {b} ×{count}",
+                    count=count,
+                    suggestion=suggestion,
+                ))
+
+        # 2. 来回切换：A → B 和 B → A 都高频
+        seen_pairs = set()
+        for (a, b), count_ab in pair_counts.items():
+            if a == b:
+                continue
+            key = tuple(sorted([a, b]))
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            count_ba = pair_counts.get((b, a), 0)
+            if count_ab >= PINGPONG_THRESHOLD and count_ba >= PINGPONG_THRESHOLD:
+                results.append(Inefficiency(
+                    type="pingpong",
+                    title="来回切换",
+                    pattern=f"{a} → {b} ×{count_ab}  /  {b} → {a} ×{count_ba}",
+                    count=count_ab + count_ba,
+                    suggestion=(
+                        f"`{a}` 和 `{b}` 之间来回切换 {count_ab + count_ba} 次，"
+                        "考虑分批处理：先做完所有 A 操作，再做 B 操作"
+                    ),
+                ))
+
+        # 3. 可批量操作：同一命令被反复单独执行
+        for cmd, hint in self._BATCHABLE_HINTS.items():
+            total = sum(
+                count for (a, _), count in pair_counts.items() if a == cmd and count >= BATCHABLE_THRESHOLD
+            )
+            if total >= BATCHABLE_THRESHOLD:
+                # 避免和 repeat 重复报告（repeat 已处理 A→A）
+                non_self = sum(
+                    count for (a, b), count in pair_counts.items()
+                    if a == cmd and b != cmd and count >= BATCHABLE_THRESHOLD
+                )
+                if non_self > 0:
+                    results.append(Inefficiency(
+                        type="batchable",
+                        title="可批量操作",
+                        pattern=f"{cmd} 累计 {total} 次",
+                        count=total,
+                        suggestion=hint,
+                    ))
+
+        # 按 count 降序
+        results.sort(key=lambda x: x.count, reverse=True)
+        return results

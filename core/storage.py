@@ -6,6 +6,10 @@
 - tags: 标签（P3 阶段扩展用）
 
 提供 Storage 类统一管理。
+
+性能优化：
+- SQLite WAL 模式，支持并发读写
+- 线程局部连接复用，避免频繁开关
 """
 from __future__ import annotations
 
@@ -13,6 +17,7 @@ import hashlib
 import json
 import shutil
 import sqlite3
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -74,6 +79,8 @@ class Storage:
         # 可选的向量索引引用（由外部通过 attach_vector_index 注入）
         # 注入后 save_document / delete_document 会自动同步向量索引
         self._vector_index = None
+        # 线程局部连接，避免频繁开关
+        self._tls = threading.local()
         self._init_schema()
         self._sync_bm25_from_db()
 
@@ -96,6 +103,8 @@ class Storage:
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
+            # 启用 WAL 模式，支持并发读写
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS documents (
@@ -137,18 +146,24 @@ class Storage:
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
-        """获取数据库连接（上下文管理）。"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
+        """获取数据库连接（线程局部复用，WAL 模式）。
+
+        连接复用策略：每个线程首次调用时创建连接并缓存到 thread local，
+        后续调用直接复用，避免频繁 connect/close 的开销。
+        """
+        conn = getattr(self._tls, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys = ON")
+            self._tls.conn = conn
         try:
             yield conn
             conn.commit()
         except Exception:
             conn.rollback()
             raise
-        finally:
-            conn.close()
 
     # ---- 写入 ----
 
@@ -299,6 +314,44 @@ class Storage:
             for r in rows
         ]
 
+    def get_documents_batch(self, doc_ids: List[str]) -> Dict[str, DocumentRecord]:
+        """批量查询多个文档的元数据（避免 N+1 查询）。
+
+        Args:
+            doc_ids: 文档 ID 列表
+
+        Returns:
+            {doc_id: DocumentRecord} 字典
+        """
+        if not doc_ids:
+            return {}
+        with self._conn() as conn:
+            placeholders = ",".join("?" * len(doc_ids))
+            rows = conn.execute(
+                f"SELECT * FROM documents WHERE id IN ({placeholders})",
+                doc_ids,
+            ).fetchall()
+        return {r["id"]: self._row_to_doc(r) for r in rows}
+
+    def get_first_chunk(self, doc_id: str) -> Optional[ChunkRecord]:
+        """获取文档的第一个分块（用于搜索结果回填摘要）。"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM chunks WHERE doc_id = ? ORDER BY index_in_doc LIMIT 1",
+                (doc_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ChunkRecord(
+            id=row["id"],
+            doc_id=row["doc_id"],
+            index=row["index_in_doc"],
+            content=row["content"],
+            token_count=row["token_count"],
+            start_char=row["start_char"],
+            end_char=row["end_char"],
+        )
+
     def search_chunks(self, keyword: str, limit: int = 20) -> List[ChunkRecord]:
         """关键词搜索分块（LIKE 模糊匹配，P2 会换成向量检索）。"""
         with self._conn() as conn:
@@ -421,11 +474,17 @@ class Storage:
             ).fetchall()
             doc_title = {r["id"]: r["title"] for r in rows}
 
-        # 填充内容
+        # 填充内容，过滤掉查不到内容的过期条目
+        filled = []
         for r in results:
-            r.content = chunk_content.get(r.chunk_id, "")
+            content = chunk_content.get(r.chunk_id, "")
+            if not content:
+                # BM25 索引中的过期条目，chunk_id 已不在数据库中
+                continue
+            r.content = content
             r.doc_title = doc_title.get(r.doc_id, "")
-        return results
+            filled.append(r)
+        return filled
 
     # ---- 索引维护 ----
 
@@ -468,16 +527,49 @@ class Storage:
         return len(chunks)
 
     def _sync_bm25_from_db(self) -> None:
-        """启动时同步 BM25 索引（如果索引文件不存在或数量不匹配，则重建）。"""
+        """启动时同步 BM25 索引。
+
+        策略：
+        - 索引数量匹配 → 直接用
+        - 索引数量不匹配但 ID 有效 → 只警告（可能是少量增删未同步）
+        - 索引里的 ID 在数据库中完全找不到 → 自动重建（pickle 过期）
+        """
         with self._conn() as conn:
             db_chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         if db_chunk_count == 0:
             return
-        # 如果索引文件存在且数量匹配，直接用；否则重建
+        # 数量匹配，直接用
         if len(self.bm25) == db_chunk_count:
             return
-        # 重建
-        self.rebuild_bm25_index()
+
+        # 数量不匹配，检查 pickle 里的 ID 是否还有效
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if len(self.bm25) > 0:
+            # 抽样检查：取前 10 个 chunk_id 看是否在数据库中存在
+            sample_ids = list(self.bm25._docs.keys())[:10]
+            with self._conn() as conn:
+                placeholders = ",".join("?" * len(sample_ids))
+                found = conn.execute(
+                    f"SELECT COUNT(*) FROM chunks WHERE id IN ({placeholders})",
+                    sample_ids,
+                ).fetchone()[0]
+            if found == 0:
+                # pickle 里的 ID 全部过期，自动重建
+                logger.warning(
+                    f"BM25 索引已过期（{len(self.bm25)} 条记录的 ID 均不在数据库中），"
+                    "自动重建中..."
+                )
+                self.rebuild_bm25_index()
+                logger.info(f"BM25 索引重建完成：{len(self.bm25)} 条")
+                return
+
+        # ID 部分有效或索引为空，只警告
+        logger.warning(
+            f"BM25 索引数量({len(self.bm25)})与数据库 chunk 数({db_chunk_count})不匹配，"
+            "请执行 `ima rebuild` 重建索引"
+        )
 
     # ---- 私有辅助 ----
 

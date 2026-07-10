@@ -6,6 +6,7 @@ GET  /api/analyze/export  下载分析报告
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException
@@ -17,8 +18,34 @@ from config import settings
 router = APIRouter(tags=["analyze"])
 
 
-# 内存缓存分析结果（简单实现，生产环境用 Redis）
+# 内存缓存分析结果（带 TTL，避免长期运行内存泄漏）
+# maxsize=50, ttl=3600s（1小时后自动过期）
 _analysis_cache: dict = {}
+_analysis_cache_ts: dict = {}  # key → 创建时间戳
+_CACHE_TTL = 3600  # 1 小时
+_CACHE_MAXSIZE = 50
+
+
+def _cache_put(key: str, value: dict) -> None:
+    """写入缓存，超过 maxsize 时清理最老的条目。"""
+    _analysis_cache[key] = value
+    _analysis_cache_ts[key] = time.time()
+    # 超容量时清理最老的
+    if len(_analysis_cache) > _CACHE_MAXSIZE:
+        oldest_key = min(_analysis_cache_ts, key=_analysis_cache_ts.get)
+        _analysis_cache.pop(oldest_key, None)
+        _analysis_cache_ts.pop(oldest_key, None)
+
+
+def _cache_get(key: str) -> dict | None:
+    """读取缓存，过期返回 None 并清理。"""
+    if key not in _analysis_cache:
+        return None
+    if time.time() - _analysis_cache_ts.get(key, 0) > _CACHE_TTL:
+        _analysis_cache.pop(key, None)
+        _analysis_cache_ts.pop(key, None)
+        return None
+    return _analysis_cache[key]
 
 
 @router.post("/analyze")
@@ -82,10 +109,10 @@ async def analyze(
             "summary": result.insights or "",
         }
 
-        # 缓存用于导出
+        # 缓存用于导出（带 TTL）
         import uuid
         cache_key = str(uuid.uuid4())[:8]
-        _analysis_cache[cache_key] = response_data
+        _cache_put(cache_key, response_data)
 
         # AI 解读
         if ai_insight and settings.has_llm() and result.summary:
@@ -120,10 +147,9 @@ async def analyze(
 @router.get("/analyze/export")
 async def analyze_export(key: str = Query(..., description="缓存 key")):
     """导出分析报告为 Markdown 下载。"""
-    if key not in _analysis_cache:
+    data = _cache_get(key)
+    if data is None:
         raise HTTPException(status_code=404, detail="分析结果已过期，请重新分析")
-
-    data = _analysis_cache[key]
     md = f"# {data['filename']} · 数据分析报告\n\n"
     md += f"## Sheet: {data['current_sheet']}\n\n"
 

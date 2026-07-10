@@ -28,11 +28,11 @@ def _build_sse_event(event_type: str, data: dict) -> str:
 @router.post("/qa/stream")
 async def qa_stream(request: Request):
     """SSE 流式问答。"""
+    from web.app import _get_shared_storage, _get_shared_vector_index
     from core.pet.administrator import PetAdministrator
     from core.pet.storage import PetStorage
     from core.memory.store import MemoryStore
     from core.retrieval.hybrid import HybridRetriever
-    from core.retrieval.vector import VectorIndex
     from core.retrieval.rerank import Reranker
 
     body = await request.json()
@@ -42,8 +42,8 @@ async def qa_stream(request: Request):
     if not question:
         return {"error": "请输入问题"}
 
-    # 初始化组件（复用 cli_ask 的模式）
-    storage = Storage()
+    # 复用全局共享组件（避免每请求重新加载索引/模型）
+    storage = _get_shared_storage(request.app)
     pet_storage = PetStorage()
     pet = pet_storage.load()
 
@@ -52,11 +52,7 @@ async def qa_stream(request: Request):
 
     memory = MemoryStore()
 
-    try:
-        vector_index = VectorIndex()
-    except Exception:
-        vector_index = None
-
+    vector_index = _get_shared_vector_index(request.app)
     hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index)
     llm = get_llm() if settings.has_llm() else None
     reranker = Reranker(llm) if llm else None
@@ -74,40 +70,79 @@ async def qa_stream(request: Request):
     )
 
     async def event_stream():
+        """异步 SSE 流：同步生成器放到线程中运行，不阻塞 event loop。
+
+        实现：asyncio.Queue + threading.Thread + loop.call_soon_threadsafe。
+        """
+        import asyncio
+        import threading
+
+        loop = asyncio.get_event_loop()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+        _SENTINEL = object()
+
+        def _run_in_thread():
+            """在线程中运行同步生成器，把事件推入队列。"""
+            try:
+                for event in admin.ask_stream(question, history=history):
+                    if event["type"] == "stage":
+                        msg = f"data: {json.dumps({'type': 'stage', 'stage': event['stage'], 'count': event.get('count', 0)}, ensure_ascii=False)}\n\n"
+                    elif event["type"] == "token":
+                        msg = f"data: {json.dumps({'type': 'token', 'text': event['text']}, ensure_ascii=False)}\n\n"
+                    elif event["type"] == "done":
+                        result = event["result"]
+                        # 保存宠物状态
+                        pet_storage.save(admin.pet)
+                        # 保存记忆
+                        try:
+                            memory.save()
+                        except Exception:
+                            pass
+                        # 构造引用数据
+                        citations_data = []
+                        for c in result.citations:
+                            citations_data.append({
+                                "marker": c.marker,
+                                "title": c.title,
+                                "paragraph_num": c.paragraph_num,
+                                "doc_id": c.doc_id,
+                            })
+                        sources_data = []
+                        for s in result.sources:
+                            sources_data.append({
+                                "doc_id": s.doc_id,
+                                "doc_title": s.doc_title,
+                                "score": getattr(s, "score", 0),
+                            })
+                        msg = f"data: {json.dumps({'type': 'done', 'answer': result.text, 'citations': citations_data, 'sources': sources_data, 'pet_events': result.pet_events}, ensure_ascii=False)}\n\n"
+                    else:
+                        continue
+                    # 线程安全地把消息放入 asyncio.Queue
+                    loop.call_soon_threadsafe(queue.put_nowait, msg)
+                # 发送结束标记
+                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+            except Exception as e:
+                err_msg = f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+                try:
+                    loop.call_soon_threadsafe(queue.put_nowait, err_msg)
+                except Exception:
+                    pass
+                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+
+        # 启动线程
+        thread = threading.Thread(target=_run_in_thread, daemon=True)
+        thread.start()
+
+        # 异步消费队列
         try:
-            for event in admin.ask_stream(question, history=history):
-                if event["type"] == "stage":
-                    yield f"data: {json.dumps({'type': 'stage', 'stage': event['stage'], 'count': event.get('count', 0)}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "token":
-                    yield f"data: {json.dumps({'type': 'token', 'text': event['text']}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "done":
-                    result = event["result"]
-                    # 保存宠物状态
-                    pet_storage.save(admin.pet)
-                    # 保存记忆
-                    try:
-                        memory.save()
-                    except Exception:
-                        pass
-                    # 构造引用数据
-                    citations_data = []
-                    for c in result.citations:
-                        citations_data.append({
-                            "marker": c.marker,
-                            "title": c.title,
-                            "paragraph_num": c.paragraph_num,
-                            "doc_id": c.doc_id,
-                        })
-                    sources_data = []
-                    for s in result.sources:
-                        sources_data.append({
-                            "doc_id": s.doc_id,
-                            "doc_title": s.doc_title,
-                            "score": getattr(s, "score", 0),
-                        })
-                    yield f"data: {json.dumps({'type': 'done', 'answer': result.text, 'citations': citations_data, 'sources': sources_data, 'pet_events': result.pet_events}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+            while True:
+                msg = await queue.get()
+                if msg is _SENTINEL:
+                    break
+                yield msg
+        finally:
+            if thread.is_alive():
+                thread.join(timeout=1.0)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

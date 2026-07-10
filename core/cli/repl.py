@@ -386,16 +386,18 @@ class REPL(
         cmd = self.CMD_ALIASES.get(cmd, cmd)
 
         # 子命令菜单：主命令在菜单表中时，以下情况触发菜单
-        # 1. 参数为纯数字（如 "/memory 3"）：作为菜单编号处理
-        # 2. 空参数/有参数：直接交给命令处理器（显示帮助或执行）
+        # 1. 空参数（如 "/memory"）：显示菜单让用户选
+        # 2. 参数为纯数字（如 "/memory 3"）：作为菜单编号处理
+        # 3. 非数字参数（如 "/memory clear"）：跳过菜单，直接执行
         # _menu_skip 标志用于递归调用时跳过菜单（避免死循环）
         trigger_menu = False
         menu_numeric_arg = None
         if cmd in self.SUBCOMMAND_MENU and not getattr(self, '_menu_skip', False):
-            if arg.isdigit():
-                # 纯数字参数 → 菜单编号选择
+            if not arg or arg.isdigit():
+                # 空参数 → 显示菜单；纯数字参数 → 菜单编号选择
                 trigger_menu = True
-                menu_numeric_arg = arg
+                if arg.isdigit():
+                    menu_numeric_arg = arg
 
         if trigger_menu:
             # 如果是纯数字参数，直接用数字选择（跳过菜单显示）

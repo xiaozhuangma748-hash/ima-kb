@@ -6,16 +6,145 @@
 """
 from __future__ import annotations
 
-from rich.panel import Panel
-from rich.text import Text
+import time
+
 from rich.markdown import Markdown
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.text import Text
 
 from core.llm.client import get_llm, LLMError
 from core.cli.constants import console
 
 
+def _wrap_indented(content: str, indent: int = 4, width: int = 0) -> list[Text]:
+    """将内容按指定宽度换行，每行带缩进。
+
+    Args:
+        content: 内容文本
+        indent: 缩进空格数
+        width: 每行最大宽度（0 = 不限制）
+
+    Returns:
+        Text 对象列表
+    """
+    if not width:
+        width = console.width - indent
+    if width <= 10:
+        width = 50
+
+    lines = []
+    remaining = content
+    while remaining:
+        if len(remaining) <= width:
+            lines.append(remaining)
+            break
+        break_pos = width
+        for i in range(width, max(0, width - 20), -1):
+            if remaining[i] in (" ", "，", "。", "、", "；", "：", ",", ".", ";", ":"):
+                break_pos = i + 1
+                break
+        lines.append(remaining[:break_pos])
+        remaining = remaining[break_pos:]
+
+    result = []
+    for line in lines:
+        t = Text()
+        t.append(" " * indent)
+        t.append(line, style="dim")
+        result.append(t)
+    return result
+
+
 class AgentMixin:
     """Agent 模式与智能路由。"""
+
+    def _make_agent_on_step(self):
+        """创建 Agent on_step 回调 — Trae 垂直风格。
+
+        参考 Trae IDE 的展示方式：
+        - 每个步骤有图标 + 标题
+        - 内容缩进显示在标题下方
+        - 无竖线装饰，层次清晰
+
+        返回 (on_step, stop_spinner, t0, step_n) 四元组。
+        """
+        t0 = time.time()
+        llm_start = [0]
+        spinner = [None]
+        step_n = [0]
+        last_tool = [None]
+
+        def _stop():
+            if spinner[0]:
+                spinner[0].stop()
+                spinner[0] = None
+
+        def on_step(step_type: str, content: str) -> None:
+            if step_type == "llm_start":
+                llm_start[0] = time.time()
+                _stop()
+                spinner[0] = Live(
+                    Spinner("dots", text=" [dim]思考中...[/dim]"),
+                    console=console, transient=True, refresh_per_second=10,
+                )
+                spinner[0].start()
+
+            elif step_type == "thought":
+                _stop()
+                step_n[0] += 1
+                elapsed = time.time() - llm_start[0]
+                thought = content.replace('\n', ' ').replace('\\n', ' ').strip()
+                if len(thought) > 150:
+                    thought = thought[:150] + "..."
+                # 标题行：图标 + 思考 + 耗时
+                header = Text()
+                header.append("  ", style="bright_black")
+                header.append("[T]", style="bright_black")
+                header.append("  ", style="bright_black")
+                header.append(f"思考  {elapsed:.1f}s", style="bold dim")
+                console.print(header)
+                # 内容缩进（与 [T] 对齐）
+                for line in _wrap_indented(thought, indent=2):
+                    console.print(line)
+
+            elif step_type == "tool":
+                _stop()
+                last_tool[0] = content
+                spinner[0] = Live(
+                    Spinner("dots", text=f" [dim]{content}[/dim]"),
+                    console=console, transient=True, refresh_per_second=10,
+                )
+                spinner[0].start()
+
+            elif step_type == "result":
+                _stop()
+                tool = last_tool[0] or "tool"
+                tool_parts = tool.split()
+                tool_name = tool_parts[0] if tool_parts else tool
+                header = Text()
+                header.append("  ", style="bright_black")
+                header.append("[OK]", style="green")
+                header.append("  ", style="bright_black")
+                header.append(f"{tool_name}  ({len(content)} 字符)", style="dim")
+                console.print(header)
+
+            elif step_type == "error":
+                _stop()
+                err = content.replace('\n', ' ').strip()
+                if len(err) > 150:
+                    err = err[:150] + "..."
+                header = Text()
+                header.append("  ", style="bright_black")
+                header.append("[ERR]", style="red")
+                header.append("  ", style="bright_black")
+                header.append(err, style="red")
+                console.print(header)
+
+            elif step_type == "done":
+                _stop()
+
+        return on_step, _stop, t0, step_n
 
     def _cmd_agent(self, arg: str) -> None:
         """Agent 模式：/agent <任务描述>
@@ -40,38 +169,27 @@ class AgentMixin:
             console.print(f"[red]初始化失败: {e}[/red]")
             return
 
-        console.print(f"\n[bold magenta]🤖 Agent 启动[/bold magenta]")
-        console.print(f"  任务: [cyan]{arg}[/cyan]\n")
+        console.print(f"\n[bold magenta]Agent 启动[/bold magenta] · 任务: [cyan]{arg}[/cyan]\n")
 
-        # 步骤回调
-        def on_step(step_type: str, content: str) -> None:
-            if step_type == "thought":
-                console.print(f"  [dim italic]💭 {content}[/dim italic]")
-            elif step_type == "tool":
-                console.print(f"  [yellow]🔧 调用工具[/yellow] [bold]{content}[/bold]")
-            elif step_type == "result":
-                # 截断显示
-                preview = content[:300] + ("..." if len(content) > 300 else "")
-                console.print(f"  [green]✓ 返回结果[/green] [dim]({len(content)} 字符)[/dim]")
-                console.print(f"  [dim]{preview}[/dim]\n")
-            elif step_type == "error":
-                console.print(f"  [red]✗ {content}[/red]\n")
-            elif step_type == "done":
-                console.print(f"  [bold magenta]✓ 任务完成[/bold magenta]\n")
+        on_step, stop_spinner, t0, step_n = self._make_agent_on_step()
 
         try:
-            with console.status("[bold yellow]Agent 思考中...[/bold yellow]", spinner="dots"):
-                pass
             result = ag.run(arg, on_step=on_step)
-            console.print(Panel(
-                Text(result),
-                title="[bold magenta]🎯 最终答案[/bold magenta]",
-                border_style="magenta",
-                padding=(1, 2),
-            ))
+            stop_spinner()
+            elapsed = time.time() - t0
+            console.print(f"\n[bold magenta]✓ 完成[/bold magenta] [dim]· {elapsed:.1f}s · 共 {step_n[0]} 步[/dim]\n")
+            # 直接 Markdown 输出，不用 Panel 包裹
+            console.print(Markdown(result))
+            console.print()
             # 宠物经验埋点：agent 行为
             self._pet_gain_exp(15, "agent")
+        except LLMError as e:
+            stop_spinner()
+            err_msg = str(e).replace("[", "\\[")
+            console.print(f"\n[red]LLM 调用失败: {err_msg}[/red]")
+            console.print("[dim]  请检查 API_KEY 和网络连接[/dim]")
         except Exception as e:
+            stop_spinner()
             err_msg = str(e).replace("[", "\\[")
             err_lower = err_msg.lower()
             # 识别网络类错误，给出排查建议
@@ -79,7 +197,7 @@ class AgentMixin:
                 kw in err_lower
                 for kw in ("connection", "apiconnection", "apitimeout", "timeout", "5xx", "502", "503", "504")
             )
-            console.print(f"[red]Agent 执行失败: {type(e).__name__}: {err_msg}[/red]")
+            console.print(f"\n[red]Agent 执行失败: {type(e).__name__}: {err_msg}[/red]")
             if is_network_err:
                 console.print(
                     "\n[yellow]! 这是网络连接错误，常见原因：[/yellow]\n"
@@ -116,11 +234,18 @@ class AgentMixin:
         try:
             from core.agent.agent import Agent
             agent = Agent(storage=self.storage)
-            console.print("[dim]Agent 模式启动...[/dim]\n")
-            result = agent.run(arg)
+            console.print(f"[bold magenta]Agent 启动[/bold magenta] · 任务: [cyan]{arg}[/cyan]\n")
+
+            on_step, stop_spinner, t0, step_n = self._make_agent_on_step()
+            result = agent.run(arg, on_step=on_step)
+            stop_spinner()
+            elapsed = time.time() - t0
+            console.print(f"\n[bold magenta]✓ 完成[/bold magenta] [dim]· {elapsed:.1f}s · 共 {step_n[0]} 步[/dim]\n")
             if result:
                 console.print(Markdown(result))
             console.print()
+            # 宠物经验埋点
+            self._pet_gain_exp(8, "smart")
             return
         except Exception as e:
             console.print(f"[dim]Agent 模式失败，回退到命令路由: {e}[/dim]\n")

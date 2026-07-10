@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from pydantic import BaseModel
 
 from config import settings
@@ -33,9 +33,8 @@ class IngestResult(BaseModel):
     error: str = ""
 
 
-def _ingest_file(file_path: Path) -> IngestResult:
+def _ingest_file(file_path: Path, storage: Storage) -> IngestResult:
     """入库单个文件，返回结果。"""
-    storage = Storage()
 
     if not is_supported(file_path):
         return IngestResult(
@@ -93,8 +92,11 @@ def _ingest_file(file_path: Path) -> IngestResult:
 
 
 @router.post("/ingest/upload")
-async def ingest_upload(files: List[UploadFile] = File(...)):
+async def ingest_upload(request: Request, files: List[UploadFile] = File(...)):
     """多文件上传入库。"""
+    from web.app import _get_shared_storage, invalidate_health_cache
+
+    storage = _get_shared_storage(request.app)
     results = []
     for f in files:
         # 保存临时文件
@@ -110,7 +112,7 @@ async def ingest_upload(files: List[UploadFile] = File(...)):
         dest = quick_dir / (f.filename or "unknown")
         shutil.copy(tmp_path, dest)
 
-        result = _ingest_file(tmp_path)
+        result = _ingest_file(tmp_path, storage)
         results.append(result.model_dump())
 
         # 清理
@@ -119,6 +121,8 @@ async def ingest_upload(files: List[UploadFile] = File(...)):
         except Exception:
             pass
 
+    # 入库后清空健康缓存
+    invalidate_health_cache(request.app)
     return {"results": results}
 
 
@@ -127,10 +131,10 @@ class URLIngestBody(BaseModel):
 
 
 @router.post("/ingest/url")
-async def ingest_url(body: URLIngestBody):
+async def ingest_url(body: URLIngestBody, request: Request):
     """URL 网页入库。"""
+    from web.app import _get_shared_storage, invalidate_health_cache
     from core.ingestion.quick import save_url
-    from core.storage import Storage
 
     url = body.url
     if not (url.startswith("http://") or url.startswith("https://")):
@@ -139,9 +143,12 @@ async def ingest_url(body: URLIngestBody):
     quick_dir = Path(settings.storage_path) / "uploads" / "quick"
     quick_dir.mkdir(parents=True, exist_ok=True)
 
+    storage = _get_shared_storage(request.app)
     file_path = save_url(url)
-    result = _ingest_file(file_path)
+    result = _ingest_file(file_path, storage)
 
+    # 入库后清空健康缓存
+    invalidate_health_cache(request.app)
     return {
         "status": result.status,
         "doc_id": result.doc_id,

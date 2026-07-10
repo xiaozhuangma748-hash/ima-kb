@@ -165,6 +165,7 @@ class MemoryMixin:
             console.print("  [cyan]/memory task delete <id>[/cyan]    彻底删除任务")
             console.print("  [cyan]/memory workflow clear[/cyan]      清空工作流模式")
             console.print("  [cyan]/memory workflow suggest on|off[/cyan]  开关推荐")
+            console.print("  [cyan]/memory workflow analyze[/cyan]    分析低效操作链")
 
     def _memory_set_format(self, value: str) -> None:
         """设置格式偏好。"""
@@ -362,14 +363,15 @@ class MemoryMixin:
             console.print("[dim]允许: done / cancel / reopen / start / delete[/dim]")
 
     def _memory_manage_workflow(self, arg: str) -> None:
-        """工作流管理：/memory workflow [clear|suggest on|off]"""
+        """工作流管理：/memory workflow [clear|suggest|analyze]"""
         parts = arg.split(maxsplit=1) if arg else []
         action = parts[0].lower() if parts else ""
 
         if action == "":
-            console.print("[yellow]用法: /memory workflow <clear|suggest> [参数][/yellow]")
+            console.print("[yellow]用法: /memory workflow <clear|suggest|analyze>[/yellow]")
             console.print("  [cyan]/memory workflow clear[/cyan]            清空所有模式记录")
             console.print("  [cyan]/memory workflow suggest on|off[/cyan]    启用/关闭下一步推荐")
+            console.print("  [cyan]/memory workflow analyze[/cyan]          分析低效操作链")
             return
 
         from core.memory.workflow import WorkflowTracker
@@ -395,8 +397,54 @@ class MemoryMixin:
                 console.print("[dim]  用法: /memory workflow suggest on|off[/dim]")
             else:
                 console.print(f"[red]无效值: '{val}'[/red]  允许: on / off")
+        elif action == "analyze":
+            self._workflow_analyze(tracker)
         else:
-            console.print(f"[red]未知操作: '{action}'[/red]  允许: clear / suggest")
+            console.print(f"[red]未知操作: '{action}'[/red]  允许: clear / suggest / analyze")
+
+    def _workflow_analyze(self, tracker) -> None:
+        """显示工作流低效操作分析报告。"""
+        inefficiencies = tracker.detect_inefficiencies()
+
+        console.print("\n[bold cyan]工作流分析报告[/bold cyan]\n")
+
+        if not inefficiencies:
+            console.print("  [green]未发现低效操作模式[/green]")
+            # 仍展示 Top 模式供参考
+            data = self.memory_store.get_data() if self.memory_store else {}
+            patterns = data.get("workflow", {}).get("patterns", [])
+            if patterns:
+                top = sorted(patterns, key=lambda p: p.get("count", 0), reverse=True)[:5]
+                console.print("\n  [dim]高频操作模式（供参考）:[/dim]")
+                for p in top:
+                    seq = p.get("sequence", [])
+                    console.print(f"    [dim]{' → '.join(seq)} ×{p.get('count', 0)}[/dim]")
+            console.print()
+            return
+
+        # 用表格展示低效项
+        table = Table(show_lines=True, border_style="yellow", title="检测到的低效操作")
+        table.add_column("类型", style="yellow", width=10)
+        table.add_column("模式", style="cyan", width=36)
+        table.add_column("次数", style="bold red", justify="right", width=6)
+        table.add_column("改进建议", style="white")
+
+        type_labels = {
+            "repeat": "重复操作",
+            "pingpong": "来回切换",
+            "batchable": "可批量",
+        }
+        for ineff in inefficiencies:
+            table.add_row(
+                type_labels.get(ineff.type, ineff.type),
+                ineff.pattern,
+                str(ineff.count),
+                ineff.suggestion,
+            )
+        console.print(table)
+
+        console.print(f"\n  [dim]共检测到 {len(inefficiencies)} 项可优化操作[/dim]")
+        console.print(f"  [dim]执行 /memory workflow clear 可清空模式记录重新统计[/dim]\n")
 
     def _memory_show(self) -> None:
         """显示记忆概览。"""
