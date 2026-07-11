@@ -6,15 +6,17 @@
 - Word (.doc)           → macOS textutil
 - Excel (.xlsx)         → openpyxl
 - PowerPoint (.pptx)    → python-pptx
-- 图片 (.png/.jpg/...)  → Tesseract OCR（中文+英文）
+- 图片 (.png/.jpg/...)  → PaddleOCR（优先）/ Tesseract（降级）
 - Markdown (.md/.markdown) → 纯文本读取
 - 文本 (.txt/.log)      → 纯文本读取
 - 代码 (.py/.js/...)    → 纯文本读取，带语言标签
 - HTML (.html/.htm)     → trafilatura 抽取正文
 
-OCR 依赖（可选）：
-- 系统：brew install tesseract tesseract-lang
-- Python：pip install pytesseract pillow
+OCR 依赖（可选，任一即可）：
+- PaddleOCR（推荐，精度高）：pip install paddlepaddle paddleocr
+- Tesseract（降级）：brew install tesseract tesseract-lang + pip install pytesseract pillow
+
+OCR 流程：图片预处理（灰度+二值化+放大）→ PaddleOCR → 降级 Tesseract
 
 返回统一的 ParsedDocument 结构。
 """
@@ -81,56 +83,176 @@ class ParseError(Exception):
 
 
 # ============================================================
-# OCR 工具（基于 Tesseract，可选依赖）
+# OCR 工具（PaddleOCR 优先，Tesseract 降级，可选依赖）
 # ============================================================
 
-# 是否已经检测过 tesseract 可用性
+# OCR 引擎检测缓存
 _ocr_checked = False
 _ocr_available = False
 
+# PaddleOCR 单例（初始化慢，全局复用）
+_paddle_ocr = None
+_paddle_ocr_failed = False  # 标记 PaddleOCR 不可用，避免反复尝试
+
 
 def _check_ocr() -> bool:
-    """检测 OCR（tesseract + pytesseract）是否可用。"""
+    """检测 OCR 是否可用（PaddleOCR 或 Tesseract 任一可用即可）。"""
     global _ocr_checked, _ocr_available
     if _ocr_checked:
         return _ocr_available
     _ocr_checked = True
+    # 1. 检测 PaddleOCR
     try:
-        import pytesseract  # type: ignore
-        # 检测 tesseract 可执行文件
-        from shutil import which
-        if which("tesseract") is None:
-            _ocr_available = False
-        else:
-            _ocr_available = True
+        from paddleocr import PaddleOCR  # type: ignore  # noqa: F401
+        _ocr_available = True
+        return True
     except ImportError:
-        _ocr_available = False
-    return _ocr_available
+        pass
+    # 2. 降级：检测 Tesseract
+    try:
+        import pytesseract  # type: ignore  # noqa: F401
+        from shutil import which
+        if which("tesseract") is not None:
+            _ocr_available = True
+            return True
+    except ImportError:
+        pass
+    _ocr_available = False
+    return False
 
 
 def reset_ocr_cache() -> None:
     """重置 OCR 可用性检测缓存。
 
-    应用场景：用户在 REPL 运行期间安装了 tesseract，
+    应用场景：用户在 REPL 运行期间安装了 OCR 依赖，
     调用此函数后下次解析会重新检测，无需重启进程。
     """
-    global _ocr_checked, _ocr_available
+    global _ocr_checked, _ocr_available, _paddle_ocr, _paddle_ocr_failed
     _ocr_checked = False
     _ocr_available = False
+    _paddle_ocr = None
+    _paddle_ocr_failed = False
 
 
-def _ocr_image(image) -> str:
-    """对 PIL Image 做 OCR，返回识别文本。
+def _get_paddle_ocr():
+    """获取 PaddleOCR 单例（懒加载）。
+
+    Returns:
+        PaddleOCR 实例，或 None（不可用）
+    """
+    global _paddle_ocr, _paddle_ocr_failed
+    if _paddle_ocr_failed:
+        return None
+    if _paddle_ocr is not None:
+        return _paddle_ocr
+    try:
+        from paddleocr import PaddleOCR  # type: ignore
+        # 静默 PaddleOCR 的日志
+        import logging
+        logging.getLogger("paddleocr").setLevel(logging.WARNING)
+        logging.getLogger("paddle").setLevel(logging.WARNING)
+        _paddle_ocr = PaddleOCR(lang="ch")
+        return _paddle_ocr
+    except Exception:
+        _paddle_ocr_failed = True
+        return None
+
+
+def _preprocess_image(image):
+    """图片预处理：灰度化 + 二值化 + 放大，提升 OCR 识别率。
 
     Args:
         image: PIL.Image 对象
 
     Returns:
-        识别出的文本（中文 + 英文）
+        预处理后的 PIL.Image（L 模式，灰度二值化）
     """
+    from PIL import Image, ImageOps  # type: ignore
+
+    # 1. 转灰度
+    if image.mode != "L":
+        image = image.convert("L")
+
+    # 2. 如果分辨率较低，放大 2 倍（提升小字识别）
+    w, h = image.size
+    if w < 1000:
+        image = image.resize((w * 2, h * 2), Image.LANCZOS)
+
+    # 3. 自动对比度
+    image = ImageOps.autocontrast(image)
+
+    # 4. Otsu 自适应二值化（对扫描公文效果显著）
+    import numpy as np  # type: ignore
+    arr = np.array(image)
+    # 简单 Otsu：用 PIL 内置的点操作近似
+    threshold = arr.mean()
+    arr_bin = (arr > threshold) * 255
+    image = Image.fromarray(arr_bin.astype("uint8"), mode="L")
+
+    return image
+
+
+def _ocr_image_paddle(image) -> str:
+    """用 PaddleOCR 识别图片，返回文本。
+
+    Args:
+        image: PIL.Image 对象
+
+    Returns:
+        识别出的文本
+    """
+    import numpy as np  # type: ignore
+    ocr = _get_paddle_ocr()
+    if ocr is None:
+        return ""
+    # PIL → numpy array
+    arr = np.array(image)
+    result = ocr.predict(arr)
+    if not result:
+        return ""
+    # PaddleOCR 3.x 返回结果：list of dict-like
+    texts = []
+    for item in result:
+        # 3.x API：item.json['res']['rec_texts']
+        if hasattr(item, "json"):
+            res = item.json.get("res", {})
+            rec_texts = res.get("rec_texts", [])
+            texts.extend(rec_texts)
+        elif isinstance(item, dict):
+            rec_texts = item.get("rec_texts", [])
+            texts.extend(rec_texts)
+    return "\n".join(texts)
+
+
+def _ocr_image_tesseract(image) -> str:
+    """用 Tesseract 识别图片（降级方案）。"""
     import pytesseract  # type: ignore
-    # chi_sim+eng：中文简体 + 英文
     return pytesseract.image_to_string(image, lang="chi_sim+eng")
+
+
+def _ocr_image(image) -> str:
+    """对 PIL Image 做 OCR，返回识别文本。
+
+    优先使用 PaddleOCR（精度高，内部自带文档预处理），降级到 Tesseract。
+    Tesseract 路径会做外部预处理（灰度+二值化+放大）。
+
+    Args:
+        image: PIL.Image 对象
+
+    Returns:
+        识别出的文本
+    """
+    # 1. 优先 PaddleOCR（直接传原图，PaddleOCR 内部自带预处理）
+    paddle_text = _ocr_image_paddle(image)
+    if paddle_text.strip():
+        return paddle_text
+
+    # 2. 降级 Tesseract（外部预处理提升识别率）
+    try:
+        processed = _preprocess_image(image)
+        return _ocr_image_tesseract(processed)
+    except Exception:
+        return ""
 
 
 def _ocr_pdf_page(page) -> str:
@@ -143,7 +265,7 @@ def _ocr_pdf_page(page) -> str:
         识别出的文本
     """
     import fitz  # PyMuPDF
-    # 渲染页面为图片（DPI 200 兼顾速度和准确率）
+    # 渲染页面为图片（DPI 200，PaddleOCR 内部会做超分辨率）
     pix = page.get_pixmap(dpi=200)
     from PIL import Image  # type: ignore
     import io

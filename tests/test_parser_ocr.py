@@ -25,8 +25,16 @@ def test_reset_ocr_cache_allows_redetect():
     if "pytesseract" not in sys.modules:
         sys.modules["pytesseract"] = MagicMock()
 
-    # 模拟首次检测：tesseract 不在 PATH
-    with patch("shutil.which", return_value=None):
+    # 模拟 PaddleOCR 不可用（import 抛 ImportError）
+    real_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+    def mock_import(name, *args, **kwargs):
+        if name == "paddleocr":
+            raise ImportError("mocked: paddleocr not available")
+        return real_import(name, *args, **kwargs)
+
+    # 模拟首次检测：PaddleOCR 和 Tesseract 都不可用
+    with patch("shutil.which", return_value=None), \
+         patch("builtins.__import__", side_effect=mock_import):
         parser.reset_ocr_cache()
         assert parser._check_ocr() is False
         assert parser._ocr_checked is True
