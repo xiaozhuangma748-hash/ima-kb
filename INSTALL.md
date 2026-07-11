@@ -52,7 +52,7 @@ cd ima-kb
 | 选项 | 说明 |
 |---|---|
 | `--vector` | 安装向量检索依赖（chromadb + sentence-transformers，约 2GB） |
-| `--ocr` | 安装 OCR 依赖（需先 `brew install tesseract tesseract-lang`） |
+| `--ocr` | 安装 OCR 依赖（PaddleOCR 主 + Tesseract 降级） |
 | `--dev` | 安装开发工具（pytest 等） |
 | `--no-venv` | 不创建虚拟环境 |
 
@@ -199,15 +199,22 @@ ima                          # 进入 REPL
 
 ### OCR 支持（识别扫描版 PDF / 图片）
 
-```bash
-# 1. 装 Tesseract（macOS）
-brew install tesseract tesseract-lang
+系统支持双 OCR 引擎，自动选择可用的：
 
-# 2. 重装时加 --ocr
+```bash
+# 方案 1：PaddleOCR（推荐，精度更高）
+pip install paddlepaddle paddleocr
+
+# 方案 2：Tesseract（降级方案）
+brew install tesseract tesseract-lang
+pip install pytesseract
+
+# 或用安装脚本
 ./install.sh --ocr
 ```
 
 装好后，入库扫描版 PDF 和图片（PNG/JPG/TIFF）会自动 OCR 识别文字。
+PaddleOCR 优先使用（原图直传，内部自带预处理），不可用时降级到 Tesseract（外部预处理：灰度+二值化+放大）。
 
 ### 开发模式
 
@@ -309,9 +316,11 @@ brew install python@3.11
 
 ### Q: 入库时跳过了图片/扫描 PDF？
 
-A: 没装 OCR。运行：
+A: 没装 OCR。运行（推荐 PaddleOCR）：
 
 ```bash
+pip install paddlepaddle paddleocr
+# 或降级方案
 brew install tesseract tesseract-lang
 ./install.sh --ocr
 ```

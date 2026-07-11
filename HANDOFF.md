@@ -371,7 +371,7 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 | # | 优化项 | 难度 | 工作量 | 状态 | 核心要点 |
 |---|---|---|---|---|---|
 | 1 | **Embedding 缓存层** | ★ | ~1 小时 | ❌ 未做 | vector.py 加 SQLite 缓存（chunk hash → embedding），处理失效即可 |
-| 2 | **OCR 优化：PaddleOCR** | ★★ | 1-2 小时 | ❌ 未做 | 替换 parser.py 的 OCR 调用；主要痛点是 paddlepaddle ~500MB 依赖 |
+| ✅ | ~~**OCR 优化：PaddleOCR**~~ | ★★ | 1-2 小时 | ✅ **2026-07-12 完成** | PaddleOCR 为主引擎（原图直传，内部自带预处理），Tesseract 降级（外部预处理：灰度+二值化+放大）；DPI 200；见 [parser.py](file:///core/ingestion/parser.py) |
 | 3 | **图谱扩展：人物/时间/金额** | ★★★ | 2-3 小时 | ❌ 未做 | LLM prompt 调优 + 新关系类型 + store/visualizer 适配 + 重建图谱验证 |
 | 4 | **多用户：FastAPI + 隔离** | ★★★★★ | 8-12 小时 | ❌ 未做 | 断层式最难：全栈改造，所有 storage/bm25/vector/graph 加 user_id，认证体系从零写 |
 | ✅ | ~~**Web 端开发：7 页面 FastAPI + 前端**~~ | — | — | ✅ **P5 已完成** | 7 页面 + 7 API 全部实现，见 web/ 目录；PRD 原定 Streamlit 方案改为 FastAPI 原生方案 |
@@ -522,11 +522,11 @@ ima web
 
 | # | 任务 | 优先级 | 说明 |
 |---|---|---|---|
-| 1 | **PDF 重新解析** | 🟡 中 | OCR 已安装可用，但之前入库的 PDF 是在装 OCR 前入库的，需重新解析 |
-| 2 | **Embedding 缓存层** | 🟡 低 | `vector.py` 加 SQLite 缓存（chunk hash → embedding），处理失效即可 |
-| 3 | **OCR 优化：PaddleOCR** | 🟡 低 | 替换 Tesseract，但 paddlepaddle ~500MB 依赖较重 |
-| 4 | **图谱扩展** | 🟡 低 | 新增人物/时间/金额等实体类型，需重建图谱验证 |
-| 5 | **多用户隔离** | 🔴 高（仅如需内网多人） | 全栈改造，所有 storage 加 user_id，认证体系从零写 |
+| 1 | **Embedding 缓存层** | 🟡 低 | `vector.py` 加 SQLite 缓存（chunk hash → embedding），处理失效即可 |
+| 2 | **图谱扩展** | 🟡 低 | 新增人物/时间/金额等实体类型，需重建图谱验证 |
+| 3 | **多用户隔离** | 🔴 高（仅如需内网多人） | 全栈改造，所有 storage 加 user_id，认证体系从零写 |
+| ✅ | ~~**PDF 重新解析**~~ | — | ✅ **2026-07-12 完成**：8 个 PDF 全部用 PaddleOCR 重新入库，39 篇文档 812 chunks |
+| ✅ | ~~**OCR 优化：PaddleOCR**~~ | — | ✅ **2026-07-12 完成**：PaddleOCR 主引擎 + Tesseract 降级，见 [parser.py](file:///core/ingestion/parser.py) |
 
 ### Web 前端已完成确认
 

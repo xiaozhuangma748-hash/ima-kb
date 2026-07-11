@@ -42,7 +42,7 @@
 | 运行时 | Python 3.9+ |
 | CLI 框架 | click + rich + prompt_toolkit |
 | 元数据库 | SQLite（单文件 `metadata.db`） |
-| 文档解析 | PyMuPDF / python-docx / openpyxl / python-pptx / trafilatura / Pillow + pytesseract（OCR）/ macOS textutil（.doc） |
+| 文档解析 | PyMuPDF / python-docx / openpyxl / python-pptx / trafilatura / PaddleOCR（主）+ pytesseract（降级）/ macOS textutil（.doc） |
 | 中文检索 | jieba + 自实现 BM25 |
 | 向量检索 | ChromaDB + sentence-transformers（`BAAI/bge-small-zh-v1.5`） |
 | LLM | Agnes AI（OpenAI 兼容协议，`agnes-2.0-flash`） |
@@ -722,7 +722,7 @@ class ParsedDocument:
 | Word .doc | macOS textutil | 转 txt 后读取 |
 | Excel .xlsx | openpyxl | 逐 sheet 转 TSV |
 | PPT .pptx | python-pptx | 逐 slide 提取 |
-| 图片 | Pillow + pytesseract | OCR（chi_sim + eng） |
+| 图片 | PaddleOCR（主）+ pytesseract（降级） | PaddleOCR 原图直传（内部自带预处理）；Tesseract 降级时外部预处理（灰度+二值化+放大） |
 | Markdown/TXT | 直接读取 | |
 | HTML | trafilatura | 正文抽取 |
 | 代码 | 直接读取 | 带语言标签 |
@@ -731,17 +731,22 @@ class ParsedDocument:
 
 - `parse(file_path) -> ParsedDocument` — 公共入口，按扩展名分发
 - `is_supported(file_path) -> bool` — 判断格式支持
-- `_parse_pdf` — PDF 解析（OCR 降级）
+- `_parse_pdf` — PDF 解析（文本层 < 50 字符自动走 OCR）
 - `_parse_image` — 图片 OCR
 - `_ocr_pdf_page(page)` — PDF 单页渲染为 200 DPI 图片后 OCR
-- `_check_ocr()` — 检测 tesseract + pytesseract 可用性（带缓存）
-- `reset_ocr_cache()` — 重置 OCR 检测缓存
+- `_ocr_image(image)` — 图片 OCR 入口：PaddleOCR 优先（原图直传）→ Tesseract 降级（外部预处理）
+- `_ocr_image_paddle(image)` — PaddleOCR 识别（处理 3.x API 返回格式）
+- `_ocr_image_tesseract(image)` — Tesseract 识别（降级方案）
+- `_preprocess_image(image)` — 图片预处理（灰度+自动对比度+Otsu 二值化+小图放大，仅 Tesseract 路径）
+- `_get_paddle_ocr()` — PaddleOCR 单例（懒加载，全局复用）
+- `_check_ocr()` — 检测 PaddleOCR 或 Tesseract 任一可用（带缓存）
+- `reset_ocr_cache()` — 重置 OCR 检测缓存（含 PaddleOCR 单例）
 
 ##### 设计模式
 
 - **注册表 + 策略模式**：`_PARSER_MAP` 字典分发，新增格式只需注册一个函数
 - **可选依赖延迟导入**：第三方库在函数内 import，缺失时给出明确错误
-- **OCR 降级**：PDF 无文本层自动走 Tesseract，OCR 不可用时返回 `meta={"ocr_unavailable": "true"}`
+- **OCR 双引擎降级**：PaddleOCR 优先（原图直传，内部自带预处理）→ Tesseract 降级（外部预处理：灰度+二值化+放大）；OCR 不可用时返回 `meta={"ocr_unavailable": "true"}`
 
 #### 6.2.2 智能分块器
 
@@ -2254,7 +2259,9 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .              # 注册 ima 命令
 
-# 可选：OCR 支持
+# 可选：OCR 支持（推荐 PaddleOCR，精度更高）
+pip install paddlepaddle paddleocr
+# 降级方案：Tesseract
 brew install tesseract tesseract-lang
 pip install pytesseract
 
@@ -2464,10 +2471,11 @@ RRF 分数低于阈值时：
 
 | # | 优化项 | 难度 | 说明 |
 |---|---|---|---|
-| 1 | **PDF 重新解析** | ★ | OCR 已安装，但旧 PDF 需重新解析 |
-| 2 | **OCR 优化：PaddleOCR** | ★★ | 替换 Tesseract，但 paddlepaddle ~500MB 依赖较重 |
-| 3 | **图谱扩展** | ★★★ | 新增人物/时间/金额等实体类型 |
-| 4 | **多用户隔离** | ★★★★★ | 全栈改造，所有 storage 加 user_id，认证体系从零写 |
+| 1 | **Embedding 缓存层** | ★ | vector.py 加 SQLite 缓存（chunk hash → embedding） |
+| 2 | **图谱扩展** | ★★★ | 新增人物/时间/金额等实体类型 |
+| 3 | **多用户隔离** | ★★★★★ | 全栈改造，所有 storage 加 user_id，认证体系从零写 |
+| ✅ | ~~**PDF 重新解析**~~ | — | ✅ **2026-07-12 完成**：8 个 PDF 全部用 PaddleOCR 重新入库 |
+| ✅ | ~~**OCR 优化：PaddleOCR**~~ | — | ✅ **2026-07-12 完成**：PaddleOCR 主引擎（原图直传）+ Tesseract 降级（外部预处理），见 [parser.py](file:///core/ingestion/parser.py) |
 
 ---
 
