@@ -415,8 +415,8 @@ _INPUT_STYLE = PtStyle.from_dict({
     "prompt": "bold fg:ansiyellow",
     "completion-menu.completion": "bg:ansiblack fg:ansiwhite",
     "completion-menu.completion.current": "bg:ansiyellow fg:ansiblack bold",
-    "completion-menu.meta.completion": "bg:ansiblue fg:ansiwhite",
-    "completion-menu.meta.completion.current": "bg:ansicyan fg:ansiblack bold",
-    "completion-menu.progress-button": "bg:ansiblue",
-    "completion-menu.progress-bar": "bg:ansiblue",
+    "completion-menu.meta.completion": "bg:ansicyan fg:ansiwhite",
+    "completion-menu.meta.completion.current": "bg:ansiyellow fg:ansiblack bold",
+    "completion-menu.progress-button": "bg:ansicyan",
+    "completion-menu.progress-bar": "bg:ansicyan",
 })

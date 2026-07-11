@@ -572,13 +572,14 @@ class Storage:
 
         # 有过期 ID
         if len(expired_ids) == len(bm25_ids):
-            # 全部过期，全量重建
-            logger.warning(
-                f"BM25 索引已过期（{len(self.bm25)} 条记录的 ID 均不在数据库中），"
-                f"过期 ID: {sorted(expired_ids)}，自动重建中..."
+            # 全部过期 → 清空 + 从数据库全部补入
+            logger.info(
+                f"BM25 索引清理 {len(self.bm25)} 条过期 ID，从数据库重建中..."
             )
-            self.rebuild_bm25_index()
-            logger.info(f"BM25 索引重建完成：{len(self.bm25)} 条")
+            self.bm25.clear()
+            self._add_missing_bm25_chunks(db_ids)
+            self.bm25.save()
+            logger.info(f"BM25 索引同步完成：{len(self.bm25)} 条")
             return
 
         # 部分过期，增量修复

@@ -58,14 +58,21 @@ class MemoryMixin:
             console.print(f"[red]{e}[/red]")
             return
         # 更新输入框样式（写入 constants 模块级变量，跨模块可见）
+        # 主题色映射到 ANSI 颜色名
+        _color_to_ansi = {
+            "yellow": "ansiyellow", "cyan": "ansicyan", "white": "ansiwhite",
+            "blue": "ansiblue", "dim": "ansibrightblack", "magenta": "ansimagenta",
+        }
+        primary = _color_to_ansi.get(new_t.colors.get("primary",""), "ansiyellow")
+        secondary = _color_to_ansi.get(new_t.colors.get("secondary",""), "ansicyan")
         constants._INPUT_STYLE = PtStyle.from_dict({
             "prompt": new_t.colors["prompt"],
             "completion-menu.completion": "bg:ansiblack fg:ansiwhite",
-            "completion-menu.completion.current": f"bg:{new_t.colors['primary']} fg:ansiblack bold",
-            "completion-menu.meta.completion": "bg:ansiblue fg:ansiwhite",
-            "completion-menu.meta.completion.current": "bg:ansicyan fg:ansiblack bold",
-            "completion-menu.progress-button": "bg:ansiblue",
-            "completion-menu.progress-bar": "bg:ansiblue",
+            "completion-menu.completion.current": f"bg:{primary} fg:ansiblack bold",
+            "completion-menu.meta.completion": f"bg:{secondary} fg:ansiwhite",
+            "completion-menu.meta.completion.current": f"bg:{primary} fg:ansiblack bold",
+            "completion-menu.progress-button": f"bg:{secondary}",
+            "completion-menu.progress-bar": f"bg:{secondary}",
         })
         console.print(f"[green]✓ 已切换主题[/green] [bold]{new_t.label}[/bold]")
         console.print(f"[dim]{new_t.desc}[/dim]\n")
