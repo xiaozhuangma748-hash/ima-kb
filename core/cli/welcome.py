@@ -42,17 +42,20 @@ def _load_activities() -> list[dict]:
 
 
 def _record_activity(act_type: str, desc: str) -> None:
-    """记录一条活动（最多保留 20 条）。"""
-    from datetime import datetime
+    """记录一条活动（最多保留 50 条，自动清理 7 天前的记录）。"""
+    from datetime import datetime, timedelta
     import json
     entries = _load_activities()
+    # 清理 7 天前的旧记录
+    cutoff = (datetime.now() - timedelta(days=7)).strftime("%m-%d")
+    entries = [e for e in entries if e.get("time", "") >= cutoff]
     entries.insert(0, {
         "type": act_type,
         "desc": desc,
         "time": datetime.now().strftime("%m-%d %H:%M"),
     })
-    if len(entries) > 20:
-        entries = entries[:20]
+    if len(entries) > 50:
+        entries = entries[:50]
     try:
         _ACTIVITY_PATH.parent.mkdir(parents=True, exist_ok=True)
         _ACTIVITY_PATH.write_text(json.dumps(entries, ensure_ascii=False, indent=2), "utf-8")
@@ -117,7 +120,7 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
         ("直接输入问题", "AI 问答"),
         ("/search <词>", "搜索知识库"),
         ("/ingest <路径>", "入库文件"),
-        ("/analyze <路径>", "数据分析"),
+        ("/agent", "AI Agent 模式"),
         ("/theme", "切换主题"),
     ]
 
@@ -172,7 +175,7 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
 
     # 底部统计信息
     right_rows.append(Text(""))
-    doc_count = stats.get("docs", 0)
+    doc_count = stats.get("documents", 0)
     today_count = len([e for e in recent_entries if e.get("time", "").startswith(datetime.now().strftime("%m-%d"))]) if recent_entries else 0
     stat_text = f"  {doc_count} 篇文档 · 今日 {today_count} 次操作"
     stat_row = Text(stat_text, style="dim")
@@ -221,6 +224,15 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
     model_row.append(f"{settings.llm_model} · ", style="dim")
     model_row.append(status_text, style=status_color)
     left_content.append(_pad_to_width(model_row, left_w))
+
+    # 项目路径
+    path_pad = (left_w - _w(project_path)) // 2
+    if path_pad < 0:
+        path_pad = 0
+    path_row = Text()
+    path_row.append(" " * path_pad)
+    path_row.append(project_path, style="dim")
+    left_content.append(_pad_to_width(path_row, left_w))
 
     content_h = len(left_content)
 

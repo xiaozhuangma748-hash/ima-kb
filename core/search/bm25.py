@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import jieba
+jieba.setLogLevel(jieba.logging.WARNING)
 
 from config import settings
 

@@ -531,9 +531,12 @@ class Storage:
 
         策略：
         - 索引数量匹配 → 直接用
-        - 索引数量不匹配但 ID 有效 → 只警告（可能是少量增删未同步）
-        - 索引里的 ID 在数据库中完全找不到 → 自动重建（pickle 过期）
+        - 数量不匹配 → 增量修复：删除过期 ID + 补充缺失 ID
+        - pickle 里的 ID 全部过期 → 全量重建
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         with self._conn() as conn:
             db_chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         if db_chunk_count == 0:
@@ -542,34 +545,62 @@ class Storage:
         if len(self.bm25) == db_chunk_count:
             return
 
-        # 数量不匹配，检查 pickle 里的 ID 是否还有效
-        import logging
-        logger = logging.getLogger(__name__)
+        if len(self.bm25) == 0:
+            # 索引为空，全量重建
+            logger.info(f"BM25 索引为空，全量重建中...")
+            self.rebuild_bm25_index()
+            logger.info(f"BM25 索引重建完成：{len(self.bm25)} 条")
+            return
 
-        if len(self.bm25) > 0:
-            # 抽样检查：取前 10 个 chunk_id 看是否在数据库中存在
-            sample_ids = list(self.bm25._docs.keys())[:10]
-            with self._conn() as conn:
-                placeholders = ",".join("?" * len(sample_ids))
-                found = conn.execute(
-                    f"SELECT COUNT(*) FROM chunks WHERE id IN ({placeholders})",
-                    sample_ids,
-                ).fetchone()[0]
-            if found == 0:
-                # pickle 里的 ID 全部过期，自动重建
-                logger.warning(
-                    f"BM25 索引已过期（{len(self.bm25)} 条记录的 ID 均不在数据库中），"
-                    "自动重建中..."
-                )
-                self.rebuild_bm25_index()
-                logger.info(f"BM25 索引重建完成：{len(self.bm25)} 条")
-                return
+        # 数量不匹配，增量修复
+        bm25_ids = set(self.bm25._docs.keys())
+        with self._conn() as conn:
+            db_ids = set(row[0] for row in conn.execute("SELECT id FROM chunks").fetchall())
 
-        # ID 部分有效或索引为空，只警告
-        logger.warning(
-            f"BM25 索引数量({len(self.bm25)})与数据库 chunk 数({db_chunk_count})不匹配，"
-            "请执行 `ima rebuild` 重建索引"
+        expired_ids = bm25_ids - db_ids
+        missing_ids = db_ids - bm25_ids
+
+        if not expired_ids and not missing_ids:
+            return  # 理论上不会到这里，但安全起见
+
+        if not expired_ids:
+            # 只有缺失 ID，补充即可
+            logger.info(f"BM25 索引缺少 {len(missing_ids)} 条，增量补充中...")
+            self._add_missing_bm25_chunks(missing_ids)
+            logger.info(f"BM25 索引同步完成：{len(self.bm25)} 条")
+            return
+
+        # 有过期 ID
+        if len(expired_ids) == len(bm25_ids):
+            # 全部过期，全量重建
+            logger.warning(
+                f"BM25 索引已过期（{len(self.bm25)} 条记录的 ID 均不在数据库中），"
+                f"过期 ID: {sorted(expired_ids)}，自动重建中..."
+            )
+            self.rebuild_bm25_index()
+            logger.info(f"BM25 索引重建完成：{len(self.bm25)} 条")
+            return
+
+        # 部分过期，增量修复
+        logger.info(
+            f"BM25 索引不同步：{len(expired_ids)} 条过期，{len(missing_ids)} 条缺失，增量修复中..."
         )
+        for eid in expired_ids:
+            self.bm25.remove(eid)
+        self._add_missing_bm25_chunks(missing_ids)
+        self.bm25.save()
+        logger.info(f"BM25 索引同步完成：{len(self.bm25)} 条")
+
+    def _add_missing_bm25_chunks(self, missing_ids: set) -> None:
+        """补充缺失的 chunk 到 BM25 索引。"""
+        with self._conn() as conn:
+            placeholders = ",".join("?" * len(missing_ids))
+            rows = conn.execute(
+                f"SELECT id, doc_id, content FROM chunks WHERE id IN ({placeholders})",
+                list(missing_ids),
+            ).fetchall()
+        for row in rows:
+            self.bm25.add(chunk_id=row["id"], doc_id=row["doc_id"], content=row["content"])
 
     # ---- 私有辅助 ----
 

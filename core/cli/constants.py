@@ -357,77 +357,8 @@ CMD_ALIASES = {
 }
 
 # 子命令菜单：主命令 → [(子命令参数, 描述), ...]
-# 第 1 项固定为空字符串（执行默认行为），其余为可用子命令
-# 占位符语法：
-#   <名称>           普通参数，提示 "请输入 名称:"
-#   <名称|a|b|c>     有固定选项，提示 "请输入 名称 (a/b/c):" 并验证输入
-SUBCOMMAND_MENU = {
-    "/memory": [
-        ("", "查看记忆概览"),
-        ("clear", "清空所有记忆"),
-        ("format <格式|table|list|prose|auto|none>", "设置格式偏好"),
-        ("style <风格|auto|scholar|warrior|artisan>", "设置风格偏好"),
-        ("topic add <主题>", "添加关注主题"),
-        ("topic remove <主题>", "移除关注主题"),
-        ("topic clear", "清空所有主题"),
-        ("region add <地区>", "添加关注地区"),
-        ("region clear", "清空所有地区"),
-        ("task add <描述>", "添加任务"),
-        ("tasks", "列出所有任务"),
-        ("workflow analyze", "分析低效操作链"),
-        ("workflow clear", "清空工作流模式"),
-        ("workflow suggest <on|off>", "开关下一步推荐"),
-    ],
-    "/pet": [
-        ("", "查看宠物状态"),
-        ("adopt <名字>", "领养宠物"),
-        ("feed", "喂食宠物"),
-        ("play", "陪宠物玩耍"),
-        ("train", "训练宠物"),
-        ("wash", "给宠物洗澡"),
-        ("sleep", "让宠物睡觉"),
-        ("name <新名>", "给宠物改名"),
-        ("tasks", "查看每日任务"),
-        ("shop", "查看商店"),
-        ("buy <id>", "购买道具"),
-        ("use <id>", "使用道具"),
-        ("style <风格>", "切换人格风格（scholar/warrior/artisan/auto）"),
-        ("bag", "查看背包"),
-        ("reset <stats|effects>", "重置行为统计/清空限时效果"),
-    ],
-    "/graph": [
-        ("stats", "图谱统计"),
-        ("build", "构建图谱 (--force 强制重建)"),
-        ("neighbors <名称>", "查询节点邻居"),
-        ("export", "导出 HTML 可视化"),
-        ("clear", "清空图谱"),
-    ],
-    "/sync": [
-        ("<目录路径>", "增量同步目录"),
-        ("reset", "清空文件追踪记录"),
-    ],
-    "/session": [
-        ("save [名称]", "保存当前会话"),
-        ("load <名称>", "恢复已保存的会话"),
-        ("list", "列出所有已保存会话"),
-        ("export <名称>", "导出为 Markdown"),
-        ("delete <名称>", "删除已保存的会话"),
-    ],
-    "/tag": [
-        ("", "显示所有标签"),
-        ("rename <旧> <新>", "重命名标签"),
-        ("merge <源> <目标>", "合并标签"),
-        ("<名称>", "按标签筛选文档"),
-    ],
-    "/dedup": [
-        ("", "扫描近似重复内容"),
-        ("delete <chunk_id>", "删除指定 chunk"),
-    ],
-    "/health": [
-        ("", "生成健康报告"),
-        ("list", "列出问题文档详情"),
-    ],
-}
+# 子命令菜单已禁用（用户偏好直接输入命令）
+SUBCOMMAND_MENU = {}
 
 # 命令派发表：命令名 → 处理器方法名
 _COMMAND_DISPATCH = {
