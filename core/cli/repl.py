@@ -164,15 +164,10 @@ class REPL(
         stats = self.storage.stats()
         _render_welcome_panel(stats, self.llm_available, pet=self.pet)
 
-        # 底部提示只在启动时显示一次
+        # 底部简洁分隔线
         import shutil
         _width = shutil.get_terminal_size((80, 24)).columns
-        _left = "/help for shortcuts"
-        _right = "Ctrl+C to exit"
-        _middle = _width - len(_left) - len(_right)
-        if _middle < 1:
-            _middle = 1
-        console.print(f"[dim]{_left}{' ' * _middle}{_right}[/dim]")
+        console.print(f"[dim]{'─' * _width}[/dim]")
         console.print()
 
         # 续接上次会话 (--continue)
