@@ -447,6 +447,14 @@ ima web
 7. **为什么图谱抽取用 temperature=0.1**：实体关系抽取要求确定性输出，低温保证 LLM 输出稳定可解析的 JSON
 8. **为什么宠物管理员是统一入口**（P5 新增）：所有 AI 交互走 PetAdministrator，串联检索→重排→prompt→LLM→引用→记忆→宠物经验，失败时降级到 RAGChain
 9. **为什么主题提取用 jieba 分词**（P5 新增）：比简单 `[:10]` 截断更智能，"骨灰安置政策"→"骨灰安置"；并加了 4 级过滤（空白/停用词/单字/代词开头）
+10. **为什么不把入库文件保存成 .md 替代 SQLite**（2026-07-12 评估）：经过完整利弊分析后决定**不替代**，理由如下：
+    - **分块无处存**：chunks 表存分块内容，.md 只能存原文 → 每次启动都要重新分块（39 篇文档 812 chunks，冷启动慢 3-5 秒）
+    - **BM25 索引失效**：`bm25_index.pkl` 序列化了 `chunk_id → 文本` 映射，.md 重新分块后 chunk_id 变化，索引要重建
+    - **向量索引失效**：ChromaDB 用 chunk_id 关联向量，chunk_id 不稳定 → 向量检索全废
+    - **元数据查询慢**：title/tags/meta 要塞 frontmatter，`ima list`/`ima stats` 要扫整个目录而非一条 SQL
+    - **去重检查慢**：当前 `content_hash` 索引 O(log n)，改 .md 要读所有文件算 hash
+    - **并发写入风险**：REPL + web 同时写同一 .md 会冲突，SQLite 有事务保护
+    - **结论**：保留 SQLite 作为主存储，如需人类可读/Git 追踪可采用折中方案（SQLite + 额外导出 .md 副本到 `storage/markdown/`），改动量小且不破坏检索架构
 
 ---
 
