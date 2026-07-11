@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-11（性能优化 + Agent 输出 Trae 垂直风格 + BM25 倒排索引 + SQLite WAL）
+> 最后更新：2026-07-12（BM25 匹配度提升 + 跨会话记忆自动提取 + 搜索默认配置 + 会话管理系统）
 
 ---
 
@@ -29,6 +29,7 @@
 | **P4 增强** | OCR 补齐 + 自动标签 + 分发安装脚本 + Claude Code 风格 CLI + 知识图谱 | ✅ 完成 |
 | **P5 智能化** | 宠物管理员 v4.0 + 混合检索（BM25+向量+RRF+重排）+ 记忆系统 + 人格风格 + 增量同步 + 质量检查 + 近似去重 + 子命令菜单 + 数据分析 + 报告生成 + **Web 前端（7 页面完整实现）** | ✅ 完成 |
 | **P6 性能优化** | BM25 倒排索引 + SQLite WAL 模式 + 连接池 + 懒加载 + 异步 SSE + Web 组件复用 + Agent 输出 Trae 垂直风格 + BM25 索引智能重建 + 命令补全完善 | ✅ 完成 |
+| **P7 智能增强** | BM25 匹配度提升（归一化+多模式分词+IDF 截断+b=0.5）+ 跨会话记忆自动提取（LLM 分析对话提取偏好/主题/问题/事实）+ 搜索默认配置（/search config）+ 会话管理系统（独立记忆+自动持久化+跨会话恢复）+ 启动页优化 + 命令补全完善 | ✅ 完成 |
 
 ### 实测可用功能
 
@@ -63,6 +64,12 @@
 - ✅ **BM25 索引智能重建**（启动时自动检测 chunk_id 过期情况，无需手动 `ima rebuild`）
 - ✅ **命令补全完善**（/theme /memory /web /pet /graph 子命令补全注册）
 - ✅ **工作流分析**（`/memory workflow analyze` 检测低效操作链）
+- ✅ **BM25 匹配度提升**（文本归一化 NFKC + 多模式分词并集 + IDF 截断 + b=0.5 降低长文档惩罚）
+- ✅ **跨会话记忆自动提取**（每轮对话后 LLM 自动提取偏好/主题/问题/事实，去重合并，按会话名隔离存储）
+- ✅ **搜索默认配置**（`/search config tag/limit/reset`，持久化默认参数）
+- ✅ **会话管理系统**（启动时命名会话，每个会话独立记忆文件，自动保存 + 跨会话恢复）
+- ✅ **启动页优化**（左区顺序：Welcome → 宠物 → 会话名 → 模型 → 路径；活动记录上限 50 条 + 7 天自动清理）
+- ✅ **命令补全完善**（/cross 加入 COMMAND_LIST，/search config 三级补全，/cross add 三级补全）
 
 ---
 
@@ -74,13 +81,15 @@
 | CLI 框架 | click + rich + prompt_toolkit（补全 + `radiolist_dialog` 子命令菜单） |
 | 元数据库 | SQLite（单文件 metadata.db） |
 | 文档解析 | PyMuPDF / python-docx / openpyxl / python-pptx / trafilatura / **Pillow + pytesseract（OCR）** / **macOS textutil（.doc）** |
-| 中文检索 | jieba + 自实现 BM25 |
+| 中文检索 | jieba（搜索引擎模式 + 全模式并集）+ 自实现 BM25（k1=1.5, b=0.5, IDF 截断）+ NFKC 文本归一化 |
 | **向量检索**（P5） | **ChromaDB + sentence-transformers（bge-small-zh-v1.5）+ RRF 融合 + LLM 重排序** |
 | LLM | Agnes AI（OpenAI 兼容协议，模型 `agnes-2.0-flash`） |
 | 知识图谱 | networkx + vis.js（HTML 可视化） |
 | **Web 后端**（P5） | **FastAPI + uvicorn + SSE（流式问答）+ 7 个 API 路由模块** |
 | **Web 前端**（P5） | **单页 HTML + JS（7 页面侧边栏切换 + vis.js 图谱 + SSE 流式）** |
 | **记忆系统**（P5） | **MemoryStore（JSON 原子写入）+ TaskManager + ProfileManager（jieba 主题）+ WorkflowTracker（2-gram）** |
+| **跨会话记忆**（P7） | **CrossSessionMemory（按会话名隔离 JSON 存储）+ MemoryExtractor（LLM 自动提取，温度 0.1）** |
+| **搜索配置**（P7） | **SearchConfig（JSON 持久化默认 tag/limit）** |
 | **人格系统**（P5） | **4 风格 scholar/warrior/artisan/neutral + 像素风 ASCII 艺术** |
 | API Key | 配置在 `.env` 中（`AGNES_API_KEY`） |
 
@@ -113,7 +122,8 @@ ima-kb/
 │   │   ├── client.py             # Agnes LLM 客户端（chat / chat_stream）
 │   │   └── degrade.py            # 统一降级提示
 │   ├── search/
-│   │   └── bm25.py               # BM25 索引 + 检索
+│   │   ├── bm25.py               # BM25 索引 + 检索（P7: 归一化+多模式分词+IDF 截断+b=0.5）
+│   │   └── config.py             # P7: 搜索默认配置（/search config）
 │   ├── retrieval/                # P5 新增：混合检索
 │   │   ├── vector.py             # ChromaDB + bge-small-zh-v1.5 向量索引
 │   │   ├── hybrid.py             # BM25 + 向量 + RRF 融合（k=60）
@@ -131,7 +141,9 @@ ima-kb/
 │   │   ├── store.py              # MemoryStore（JSON 原子写入）
 │   │   ├── tasks.py              # TaskManager（跨会话任务）
 │   │   ├── profile.py            # ProfileManager（jieba 主题提取 + 4 级过滤）
-│   │   └── workflow.py           # WorkflowTracker（非重叠 2-gram）
+│   │   ├── workflow.py           # WorkflowTracker（非重叠 2-gram）
+│   │   ├── cross_session.py       # P7: 跨会话记忆（四类：偏好/主题/问题/事实，按会话名隔离）
+│   │   └── extractor.py           # P7: LLM 自动提取器（每轮对话后提取值得记住的信息）
 │   ├── persona/                  # P5 新增：人格系统
 │   │   ├── prompts.py            # build_system_prompt（4 风格分系 prompt）
 │   │   └── styles.py             # 风格定义
@@ -792,3 +804,77 @@ IMAGE_RESPONSE_FORMAT=url
 
 - **337 个测试全部通过**（之前 323 个 + 新增 14 个）
 - 之前失败的 4 个测试已修复（调整子命令菜单触发条件）
+
+---
+
+## 🆕 2026-07-12 更新：BM25 匹配度提升 + 跨会话记忆 + 搜索配置 + 会话管理（P7）
+
+### 一、BM25 匹配度提升
+
+**之前**：BM25 使用默认参数，长文档被过度惩罚，分词单一。
+
+**现在**：
+- **文本归一化**：NFKC 规范化全角/半角字符
+- **多模式分词**：搜索引擎模式 + 全模式并集，提高召回
+- **IDF 截断**：避免极端高频词主导评分
+- **b=0.5**：降低长文档惩罚（默认 0.75），更适合政策文档
+
+### 二、跨会话记忆自动提取
+
+**之前**：记忆系统仅记录任务和主题，不会从对话中主动提取有价值信息。
+
+**现在**：
+- 每轮对话后 LLM 自动分析，提取四类信息：偏好 / 主题 / 问题 / 事实
+- 提取温度 0.1，保证稳定性
+- 按会话名隔离存储，不同会话互不干扰
+- 去重合并，避免重复记忆
+
+### 三、搜索默认配置
+
+新增 `/search config` 命令，持久化默认搜索参数：
+- `/search config tag <标签>` - 设置默认标签筛选
+- `/search config limit <数量>` - 设置默认返回数量
+- `/search config reset` - 重置为默认值
+- `/search config` - 查看当前配置
+
+### 四、会话管理系统
+
+**之前**：会话仅能手动 save/load，记忆不隔离。
+
+**现在**：
+- 启动时命名会话（支持默认会话）
+- 每个会话独立记忆文件，自动保存
+- 跨会话恢复对话历史和记忆
+- 与跨会话记忆系统联动
+
+### 五、启动页优化
+
+左区显示顺序调整为：Welcome → 宠物 → 会话名 → 模型 → 路径。
+活动记录上限 50 条，超过 7 天自动清理。
+
+### 六、命令补全完善
+
+- `/cross` 加入 COMMAND_LIST
+- `/search config` 三级补全（tag/limit/reset）
+- `/cross add` 三级补全（preference/topic/question/fact）
+
+### 七、P7 新增命令
+
+| 命令 | 功能 |
+|---|---|
+| `/search config` | 设置/查看搜索默认配置（tag/limit/reset） |
+| `/cross list` | 查看跨会话记忆 |
+| `/cross add preference\|topic\|question\|fact <内容>` | 手动添加记忆 |
+| `/cross remove topic <内容>` | 删除某条记忆 |
+| `/cross clear` | 清空所有跨会话记忆 |
+
+### 八、改动文件清单
+
+| 文件 | 变更类型 | 说明 |
+|---|---|---|
+| `core/search/bm25.py` | 修改 | 归一化 + 多模式分词 + IDF 截断 + b=0.5 |
+| `core/search/config.py` | **新增** | 搜索默认配置（JSON 持久化） |
+| `core/memory/cross_session.py` | **新增** | 跨会话记忆（按会话名隔离） |
+| `core/memory/extractor.py` | **新增** | LLM 自动提取器 |
+| `core/cli/repl.py` | 修改 | 会话管理 + 启动页优化 |
+| `core/cli/constants.py` | 修改 | 命令补全注册 |

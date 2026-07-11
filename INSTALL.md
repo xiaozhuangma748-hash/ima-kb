@@ -102,8 +102,11 @@ ima
 |---|---|
 | 直接输入问题 | AI 问答（宠物管理员回答，带引用溯源） |
 | `/ingest 路径` | 入库文件（PDF/Word/Excel/PPT/图片...） |
-| `/analyze 文件.xlsx` | **数据表智能分析**（自动统计 + 字符图 + AI 解读） |
+| `/agent` | AI Agent 模式（数据分析） |
 | `/search 关键词` | 搜索（`/s` 是别名） |
+| `/search config` | 设置搜索默认 tag/limit |
+| `/cross list` | 查看跨会话记忆（AI 自动提取） |
+| `/cross add topic <内容>` | 手动添加跨会话记忆 |
 | `/web` | **启动 Web 后台**（后台线程，不阻塞 REPL） |
 | `/web stop` | **停止 Web 后台** |
 | `/se save [名称]` | 保存当前会话 |
