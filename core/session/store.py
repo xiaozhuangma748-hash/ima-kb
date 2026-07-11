@@ -35,6 +35,63 @@ class SessionStore:
     def _path(self, name: str) -> Path:
         return self.storage_dir / f"{self._safe_name(name)}.json"
 
+    # ---- 活跃会话 ----
+
+    ACTIVE_SESSION_FILE = "active_session.json"
+
+    def _active_path(self) -> Path:
+        return self.storage_dir / self.ACTIVE_SESSION_FILE
+
+    def create_session(self, name: Optional[str] = None) -> str:
+        """创建新会话，设为活跃会话，返回会话名。"""
+        if name is None:
+            name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+        safe_name = self._safe_name(name)
+        path = self.storage_dir / f"{safe_name}.json"
+        data = {
+            "name": name,
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "message_count": 0,
+            "meta": {},
+            "history": [],
+        }
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        # 设为活跃会话
+        active = {
+            "name": name,
+            "safe_name": safe_name,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        self._active_path().write_text(
+            json.dumps(active, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return name
+
+    def get_active_session(self) -> Optional[str]:
+        """获取活跃会话名，不存在返回 None。"""
+        if not self._active_path().exists():
+            return None
+        try:
+            data = json.loads(self._active_path().read_text(encoding="utf-8"))
+            return data.get("name")
+        except Exception:
+            return None
+
+    def save_active_session(self, name: str) -> None:
+        """更新活跃会话记录。"""
+        active = {
+            "name": name,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        self._active_path().write_text(
+            json.dumps(active, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
     # ---- 增删改查 ----
 
     def save(self, name: str, history: List[Dict[str, Any]],

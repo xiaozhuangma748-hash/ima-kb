@@ -69,7 +69,8 @@ class PetAdministrator:
 
     def ask(self, query: str, style_override: Optional[str] = None,
             history: Optional[List[Dict]] = None,
-            summary: Optional[str] = None) -> AnswerResult:
+            summary: Optional[str] = None,
+            cross_session_context: Optional[str] = None) -> AnswerResult:
         """主入口：用户提问 → 带引用的回答。
 
         Args:
@@ -77,6 +78,7 @@ class PetAdministrator:
             style_override: 临时覆盖人格风格
             history: 多轮对话历史（[{role, content}, ...]），最多取最近 10 条
             summary: 早期对话的摘要（压缩长期记忆）
+            cross_session_context: 跨会话记忆上下文
         """
         # 1. 加载记忆
         profile = self.profile_mgr.get_profile()
@@ -131,6 +133,8 @@ class PetAdministrator:
         # 取最近 10 条历史（5 轮对话），避免 token 超限
         recent_history = (history or [])[-10:]
         messages = [{"role": "system", "content": system_prompt}]
+        if cross_session_context:
+            messages.append({"role": "system", "content": f"## 跨会话记忆\n{cross_session_context}"})
         if summary:
             messages.append({"role": "system", "content": f"## 之前的对话摘要\n{summary}"})
         messages.extend(recent_history)
@@ -183,7 +187,8 @@ class PetAdministrator:
 
     def ask_stream(self, query: str, style_override: Optional[str] = None,
                    history: Optional[List[Dict]] = None,
-                   summary: Optional[str] = None):
+                   summary: Optional[str] = None,
+                   cross_session_context: Optional[str] = None):
         """流式问答生成器。yield 事件 dict:
         - {"type": "stage", "stage": "检索", "count": N}
         - {"type": "stage", "stage": "重排", "count": N}
@@ -248,6 +253,8 @@ class PetAdministrator:
         # 取最近 10 条历史（5 轮对话），避免 token 超限
         recent_history = (history or [])[-10:]
         messages = [{"role": "system", "content": system_prompt}]
+        if cross_session_context:
+            messages.append({"role": "system", "content": f"## 跨会话记忆\n{cross_session_context}"})
         if summary:
             messages.append({"role": "system", "content": f"## 之前的对话摘要\n{summary}"})
         messages.extend(recent_history)

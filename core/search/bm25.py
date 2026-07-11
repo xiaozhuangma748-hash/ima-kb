@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import pickle
 import threading
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -43,14 +44,28 @@ def _ensure_jieba() -> None:
     _jieba_ready = True
 
 
+# ---- 文本归一化 ----
+def _normalize_text(text: str) -> str:
+    """文本归一化：全角转半角（NFKC）+ 英文小写。
+
+    - 全角字符（如 （）、ＡＢＣ、１２３）统一转为半角，消除格式差异
+    - 英文字母统一小写，让 "API" 与 "api" 能匹配
+    """
+    text = unicodedata.normalize("NFKC", text)
+    text = text.lower()
+    return text
+
+
 # ---- 停用词（无意义的常见词，不参与检索）----
+# 说明：精简自原版，移除了 "通过"/"进行"/"根据"/"按照" 等在专业文档中
+# 可能承载实际语义的词，避免误杀；保留真正无语义价值的虚词。
 _STOP_WORDS: Set[str] = {
     "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",
     "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会", "着", "没有",
     "看", "好", "自己", "这", "那", "它", "他", "她", "与", "及", "或", "但",
     "而", "且", "则", "于", "以", "对", "为", "由", "把", "被", "让", "使",
     "其", "此", "该", "那些", "这些", "什么", "怎么", "如何", "为什么",
-    "可以", "可能", "应该", "需要", "通过", "进行", "根据", "按照",
+    "可以", "可能", "应该",
     "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
     "and", "or", "but", "if", "of", "at", "by", "for", "with", "in", "on",
     "to", "from", "this", "that", "these", "those",
@@ -58,25 +73,42 @@ _STOP_WORDS: Set[str] = {
 
 
 def tokenize(text: str) -> List[str]:
-    """jieba 分词 + 过滤停用词和空白。
+    """jieba 分词 + 文本归一化 + 过滤停用词和空白。
+
+    改进点（提升召回率）：
+    - 先做 NFKC 归一化（全角→半角）+ 英文小写，消除格式差异
+    - 同时用搜索引擎模式（cut_for_search）和全模式（cut_all=True），
+      取两者 token 并集。全模式会切出所有可能的词组合，覆盖更细粒度的切分，
+      提升召回率（可能引入噪音，但 BM25 的 IDF 会自动降低无意义词的权重）
+    - 过滤停用词和单字符标点
 
     Args:
         text: 原文本
 
     Returns:
-        token 列表（保留词形，已过滤停用词和单字符标点）
+        token 列表（已归一化、去重、过滤停用词）
     """
     _ensure_jieba()
+    text = _normalize_text(text)
     tokens: list[str] = []
-    for tok in jieba.cut_for_search(text):
+    seen: set[str] = set()
+
+    def _add(tok: str) -> None:
         tok = tok.strip()
-        if not tok:
-            continue
-        if tok in _STOP_WORDS:
-            continue
+        if not tok or tok in _STOP_WORDS:
+            return
         if len(tok) == 1 and not tok.isalnum():
-            continue
-        tokens.append(tok)
+            return
+        if tok not in seen:
+            seen.add(tok)
+            tokens.append(tok)
+
+    # 搜索引擎模式：精确切分 + 对长词再切分
+    for tok in jieba.cut_for_search(text):
+        _add(tok)
+    # 全模式：列出所有可能的词组合，补充搜索引擎模式遗漏的切分
+    for tok in jieba.cut(text, cut_all=True):
+        _add(tok)
     return tokens
 
 
@@ -118,7 +150,7 @@ class BM25Index:
     def __init__(
         self,
         k1: float = 1.5,
-        b: float = 0.75,
+        b: float = 0.5,
         index_path: Optional[Path] = None,
     ) -> None:
         self.k1 = k1
@@ -227,7 +259,8 @@ class BM25Index:
                 if not postings:
                     continue
                 n_qi = self._doc_freq.get(qt, 0)
-                idf = math.log((N - n_qi + 0.5) / (n_qi + 0.5) + 1)
+                # IDF 截断：当词在多数文档出现时 IDF 可能为负，设为 0 避免反向扣分
+                idf = max(0.0, math.log((N - n_qi + 0.5) / (n_qi + 0.5) + 1))
                 for cid in postings:
                     entry = self._docs.get(cid)
                     if entry is None:
@@ -254,9 +287,9 @@ class BM25Index:
         """保存索引到磁盘。"""
         with self._lock:
             self.index_path.parent.mkdir(parents=True, exist_ok=True)
+            # 注意：k1/b 不持久化，作为运行时参数由代码默认值决定，
+            # 这样调参后无需重建索引即可生效
             data = {
-                "k1": self.k1,
-                "b": self.b,
                 "docs": self._docs,
                 "doc_freq": self._doc_freq,
                 "inverted": self._inverted,
@@ -266,14 +299,16 @@ class BM25Index:
                 pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def _load(self) -> None:
-        """从磁盘加载索引。"""
+        """从磁盘加载索引。
+
+        注意：k1/b 不从持久化加载，使用代码中的默认值/构造参数。
+        这样调整 BM25 参数后无需重建索引即可立即生效。
+        """
         if not self.index_path.exists():
             return
         try:
             with open(self.index_path, "rb") as f:
                 data = pickle.load(f)
-            self.k1 = data.get("k1", self.k1)
-            self.b = data.get("b", self.b)
             self._docs = data.get("docs", {})
             self._doc_freq = data.get("doc_freq", {})
             self._inverted = data.get("inverted", {})

@@ -111,11 +111,11 @@ HELP_TEXT = """\
 
 [bold green]文档[/bold green]
   /read <ID>           智能阅读模式     /compare <A> <B>    对比文档
-  /report <ID>         生成分析报告     /analyze <文件>     数据表分析
+  /report <ID>         生成分析报告     /agent <文件>       数据表分析
 
 [bold green]系统[/bold green]
   /stats               知识库统计       /tags              标签管理
-  /memory              记忆管理         /graph             知识图谱
+  /memory              记忆管理         /cross             跨会话记忆
   /health              健康检查         /dedup             去重
 
 [bold green]高级[/bold green]
@@ -180,6 +180,7 @@ COMMAND_LIST = [
     ("/h",       "= /help（别名）"),
     ("/pet",     "虚拟宠物（adopt/feed/play/train/wash/sleep/name/tasks/shop/buy/use/style/bag/reset）"),
     ("/memory",  "记忆管理（show/clear/add/tasks）"),
+    ("/cross",   "跨会话记忆（list/add/remove/clear）"),
     ("/exit",    "退出"),
     ("/q",       "= /quit（别名）"),
     ("/quit",    "退出"),
@@ -220,6 +221,13 @@ _SUB_MENU_NESTED = {
     '/health': {'list': None},
     '/theme': {'claude': None, 'mimo': None, 'minimal': None},
     '/web': {'stop': None},
+    '/search': {'config': {'tag': None, 'limit': None, 'reset': None}},
+    '/cross': {
+        'list': None,
+        'add': {'preference': None, 'topic': None, 'question': None, 'fact': None},
+        'remove': {'topic': None},
+        'clear': None,
+    },
 }
 
 # 子命令中文描述（path → 描述，path 是命令+各层级子命令组成的 tuple）
@@ -301,6 +309,19 @@ _SUB_MENU_DESC = {
     ('/theme', 'mimo'): 'MiMo 风格',
     ('/theme', 'minimal'): '极简风格',
     ('/web', 'stop'): '停止 Web 服务',
+    ('/search', 'config'): '搜索默认配置 (tag/limit/reset)',
+    ('/search', 'config', 'tag'): '设置默认标签',
+    ('/search', 'config', 'limit'): '设置默认数量',
+    ('/search', 'config', 'reset'): '重置配置',
+    ('/cross', 'list'): '显示跨会话记忆',
+    ('/cross', 'add'): '添加跨会话记忆 (preference/topic/question/fact)',
+    ('/cross', 'add', 'preference'): '添加用户偏好 (键:值)',
+    ('/cross', 'add', 'topic'): '添加关注主题',
+    ('/cross', 'add', 'question'): '记录未解决问题',
+    ('/cross', 'add', 'fact'): '记录关键事实',
+    ('/cross', 'remove'): '移除跨会话记忆 (topic)',
+    ('/cross', 'remove', 'topic'): '移除关注主题',
+    ('/cross', 'clear'): '清空所有跨会话记忆',
 }
 
 # 别名 → 完整命令（补全器用的小表）
@@ -398,6 +419,7 @@ _COMMAND_DISPATCH = {
     "/graph": "_cmd_graph",
     "/pet": "_cmd_pet",
     "/memory": "_cmd_memory",
+    "/cross": "_cmd_cross",
     "/theme": "_cmd_theme",
     "/sync": "_cmd_sync",
     "/health": "_cmd_health",

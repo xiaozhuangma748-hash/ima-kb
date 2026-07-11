@@ -46,10 +46,60 @@ class DocsMixin:
     """文档管理相关命令。"""
 
     def _cmd_search(self, query: str) -> None:
-        """BM25 搜索：/search <关键词> [--tag 标签] [--limit N]"""
+        """BM25 搜索：/search <关键词> [--tag 标签] [--limit N]
+
+        子命令:
+            /search config             显示当前默认配置
+            /search config tag <标签>   设置默认标签
+            /search config limit <N>   设置默认数量
+            /search config reset       重置配置
+        """
+        from core.search.config import SearchConfig
+
+        # ---- config 子命令 ----
+        if query and query.strip().startswith("config"):
+            parts = query.strip().split()
+            cfg = SearchConfig()
+            if len(parts) == 1:
+                # /search config → 显示当前配置
+                tag_val = cfg.get_default_tag()
+                limit_val = cfg.get_default_limit()
+                console.print("\n[bold]搜索默认配置[/bold]\n")
+                console.print(f"  默认标签: [cyan]{tag_val}[/cyan]" if tag_val else "  默认标签: [dim]（未设置）[/dim]")
+                console.print(f"  默认数量: [cyan]{limit_val}[/cyan]\n")
+                console.print("[dim]用法: /search config tag <标签> | limit <N> | reset[/dim]\n")
+                return
+            sub = parts[1].lower()
+            if sub == "tag" and len(parts) >= 3:
+                cfg.set_defaults(tag=parts[2])
+                console.print(f"[green]✓ 默认标签已设置:[/green] [cyan]{parts[2]}[/cyan]")
+            elif sub == "limit" and len(parts) >= 3:
+                try:
+                    new_limit = int(parts[2])
+                    cfg.set_defaults(limit=new_limit)
+                    console.print(f"[green]✓ 默认数量已设置:[/green] [cyan]{new_limit}[/cyan]")
+                except ValueError:
+                    console.print(f"[yellow]无效的数量值: {parts[2]}[/yellow]")
+            elif sub == "reset":
+                cfg.reset()
+                console.print("[green]✓ 搜索配置已重置[/green]")
+            else:
+                console.print("[yellow]用法: /search config tag <标签> | limit <N> | reset[/yellow]")
+            return
+
         if not query:
+            # 无参数时显示默认配置
+            cfg = SearchConfig()
+            tag_val = cfg.get_default_tag()
+            limit_val = cfg.get_default_limit()
             console.print("[yellow]用法: /search <关键词> [--tag 标签] [--limit N][/yellow]")
             console.print("[dim]示例: /search 骨灰 --tag 政策 --limit 5[/dim]")
+            if tag_val or limit_val != 10:
+                console.print()
+                console.print("[bold]当前默认配置:[/bold]")
+                console.print(f"  默认标签: [cyan]{tag_val}[/cyan]" if tag_val else "  默认标签: [dim]（未设置）[/dim]")
+                console.print(f"  默认数量: [cyan]{limit_val}[/cyan]")
+                console.print("[dim]管理配置: /search config[/dim]")
             return
 
         # 解析可选参数 --tag / --limit
@@ -59,8 +109,11 @@ class DocsMixin:
         except ValueError:
             tokens = query.split()
 
+        # 从 SearchConfig 读取默认值
+        cfg = SearchConfig()
         tag_filter: Optional[str] = None
-        limit = 10
+        limit = cfg.get_default_limit()
+        use_default_tag = False
         keyword_parts: list[str] = []
         i = 0
         while i < len(tokens):
@@ -78,6 +131,12 @@ class DocsMixin:
             else:
                 keyword_parts.append(tok)
                 i += 1
+
+        # 如果用户未指定 --tag，使用默认标签
+        default_tag = cfg.get_default_tag()
+        if tag_filter is None and default_tag is not None:
+            tag_filter = default_tag
+            use_default_tag = True
 
         keyword = " ".join(keyword_parts)
         if not keyword:
@@ -107,7 +166,12 @@ class DocsMixin:
             total_found = len(results)
             results = results[:limit]
 
-        tag_hint = f" [dim]· 标签筛选: {tag_filter}[/dim]" if tag_filter else ""
+        if use_default_tag:
+            tag_hint = f" [dim]· 使用默认标签: {tag_filter}[/dim]"
+        elif tag_filter:
+            tag_hint = f" [dim]· 标签筛选: {tag_filter}[/dim]"
+        else:
+            tag_hint = ""
         console.print(f"\n[bold]找到 {len(results)} 条相关结果[/bold] [dim](BM25)[/dim]{tag_hint}\n")
         _record_activity("search", keyword[:40])
         import re as _re

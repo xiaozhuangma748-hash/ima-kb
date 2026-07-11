@@ -87,7 +87,8 @@ def _make_row(parts: list[tuple], width: int) -> Text:
     return _pad_to_width(result, width)
 
 
-def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"] = None) -> None:
+def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"] = None,
+                          session_name: Optional[str] = None) -> None:
     """渲染启动页（Claude Code 风格）。"""
     t = get_theme()
     term_cols = shutil.get_terminal_size((80, 24)).columns
@@ -213,6 +214,17 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
         left_content.append(_pad_to_width(pet_line, left_w))
 
     left_content.append(Text(" " * left_w))
+
+    # 会话名称（如果有）
+    if session_name:
+        session_text = f"会话: {session_name}"
+        session_pad = (left_w - _w(session_text)) // 2
+        if session_pad < 0:
+            session_pad = 0
+        session_row = Text()
+        session_row.append(" " * session_pad)
+        session_row.append(session_text, style="dim")
+        left_content.append(_pad_to_width(session_row, left_w))
 
     # 模型信息 + 状态
     model_text = f"{settings.llm_model} · {status_text}"

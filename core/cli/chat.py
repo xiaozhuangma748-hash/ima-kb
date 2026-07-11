@@ -51,8 +51,16 @@ class ChatMixin:
                 live = None  # 动态 spinner：阶段等待时显示
                 import time as _time
                 _t0 = _time.time()  # 思考计时起点
+                # 获取跨会话记忆上下文
+                _cross_ctx = None
+                if getattr(self, 'cross_session_memory', None) is not None:
+                    try:
+                        _cross_ctx = self.cross_session_memory.get_context()
+                    except Exception:
+                        pass
                 for event in self.administrator.ask_stream(
-                    user_input, history=self.history, summary=self.conversation_summary
+                    user_input, history=self.history, summary=self.conversation_summary,
+                    cross_session_context=_cross_ctx,
                 ):
                     if event["type"] == "stage":
                         # 显示阶段提示 — 用动态 spinner 等待下一阶段
@@ -147,6 +155,10 @@ class ChatMixin:
                     if self.pet is not None:
                         self.pet.energy = min(100, self.pet.energy + 2)
                         self.pet_storage.save(self.pet)
+                    # 自动保存会话
+                    self._auto_save_session()
+                    # 跨会话记忆自动提取（每轮都触发，详细反馈）
+                    self._auto_extract_cross_session(user_input, result.text)
                 return
             except Exception as e:
                 # 异常时确保 spinner 和 Live 已停
@@ -210,6 +222,15 @@ class ChatMixin:
                 # 构建带历史的 messages
                 recent_history = (self.history or [])[-10:]
                 messages = list(recent_history) + [{"role": "user", "content": user_input}]
+                # 注入跨会话记忆
+                _cross_ctx2 = None
+                if getattr(self, 'cross_session_memory', None) is not None:
+                    try:
+                        _cross_ctx2 = self.cross_session_memory.get_context()
+                    except Exception:
+                        pass
+                if _cross_ctx2:
+                    messages.insert(0, {"role": "system", "content": f"## 跨会话记忆\n{_cross_ctx2}"})
                 full_content: list[str] = []
                 first_token = True
                 stream_live = None
@@ -277,8 +298,57 @@ class ChatMixin:
             self.pet.energy = min(100, self.pet.energy + 2)
             self.pet_storage.save(self.pet)
         _record_activity("qa", user_input[:40])
+        # 自动保存会话
+        self._auto_save_session()
+        # 跨会话记忆自动提取（每轮都触发，详细反馈）
+        self._auto_extract_cross_session(user_input, assistant_content)
 
     # ---- 管理员回答渲染 + 工作流 ----
+
+    def _auto_extract_cross_session(self, user_input: str, assistant_reply: str) -> None:
+        """跨会话记忆自动提取（每轮对话后触发）。
+
+        用 LLM 分析本轮对话，提取值得跨会话记住的信息，
+        合并到 cross_session_memory，并给出详细反馈。
+
+        失败静默降级，不影响主流程。
+        """
+        # 前置条件：跨会话记忆可用 + LLM 可用
+        if getattr(self, 'cross_session_memory', None) is None:
+            console.print("[dim]! 记忆提取跳过: cross_session_memory 未初始化[/dim]")
+            return
+        if not self.llm_available:
+            console.print("[dim]! 记忆提取跳过: LLM 不可用[/dim]")
+            return
+
+        try:
+            from core.memory.extractor import MemoryExtractor
+            from core.llm.client import get_llm
+
+            llm = get_llm()
+            extractor = MemoryExtractor(llm=llm, memory=self.cross_session_memory)
+            added = extractor.extract_and_merge(user_input, assistant_reply)
+
+            # 详细反馈：显示新增的记忆
+            new_items: list[str] = []
+            for pref in added.get("preferences", []):
+                new_items.append(f"偏好 {pref}")
+            for topic in added.get("topics", []):
+                new_items.append(f"主题: {topic}")
+            for q in added.get("questions", []):
+                new_items.append(f"问题: {q}")
+            for fact in added.get("facts", []):
+                new_items.append(f"事实: {fact}")
+
+            if new_items:
+                console.print()
+                console.print("[dim]! 已记住:[/dim]")
+                for item in new_items:
+                    console.print(f"[dim]  + {item}[/dim]")
+                console.print("[dim]  (用 /cross list 查看)[/dim]")
+        except Exception as e:
+            # 提取失败：显示错误（调试用，确认稳定后改回静默）
+            console.print(f"[dim]! 记忆提取失败: {e}[/dim]")
 
     def _compress_history(self) -> None:
         """当 history 超过 20 条时，压缩早期对话为摘要。

@@ -571,3 +571,101 @@ class MemoryMixin:
             )
         else:
             console.print(f"[green]✓ 已清空对话历史[/green] [dim]({n} 条记录)[/dim]")
+
+    # ---- 跨会话记忆 ----
+
+    def _cmd_cross(self, arg: str) -> None:
+        """跨会话记忆管理：/cross [list|add|remove|clear]。
+
+        - /cross                         显示跨会话记忆
+        - /cross list                    同上
+        - /cross add preference 键:值    添加用户偏好
+        - /cross add topic 主题           添加关注主题
+        - /cross add question 问题        记录未解决问题
+        - /cross add fact 事实            记录关键事实
+        - /cross remove topic 主题        移除主题
+        - /cross clear                   清空所有跨会话记忆
+        """
+        from core.memory.cross_session import CrossSessionMemory
+
+        # 复用 REPL 实例的 cross_session_memory（会话级路径），
+        # 没有则降级到全局默认路径
+        cm = getattr(self, 'cross_session_memory', None)
+        if cm is None:
+            cm = CrossSessionMemory()
+        parts = arg.split(maxsplit=2) if arg else []
+        sub = parts[0].lower() if parts else ""
+
+        # 缩写别名
+        SUB_ALIASES = {"l": "list", "ls": "list", "a": "add", "r": "remove", "rm": "remove", "c": "clear", "cl": "clear"}
+        sub = SUB_ALIASES.get(sub, sub)
+
+        if sub in ("", "list"):
+            context = cm.get_context()
+            if context:
+                console.print(f"\n[bold]跨会话记忆[/bold]\n")
+                console.print(context)
+                console.print()
+            else:
+                console.print("[yellow]暂无跨会话记忆[/yellow]")
+                console.print("[dim]用法: /cross add topic 殡葬政策[/dim]")
+                console.print("[dim]     /cross add preference 格式:表格[/dim]")
+                console.print("[dim]     /cross add question 什么是知识库？[/dim]")
+                console.print("[dim]     /cross add fact 用户关注殡葬领域[/dim]\n")
+            return
+
+        if sub == "add":
+            if len(parts) < 3:
+                console.print("[yellow]用法: /cross add <类别> <内容>[/yellow]")
+                console.print("[dim]类别: preference / topic / question / fact[/dim]")
+                return
+            category = parts[1].lower()
+            content = parts[2].strip()
+            if not content:
+                console.print("[yellow]内容不能为空[/yellow]")
+                return
+
+            if category == "preference":
+                if ":" in content:
+                    key, value = content.split(":", 1)
+                    cm.save_preference(key.strip(), value.strip())
+                    console.print(f"[green]✓ 偏好已保存: {key.strip()} = {value.strip()}[/green]")
+                else:
+                    console.print("[yellow]格式: /cross add preference 键:值[/yellow]")
+            elif category == "topic":
+                cm.add_topic(content)
+                console.print(f"[green]✓ 主题已添加: {content}[/green]")
+            elif category == "question":
+                cm.add_unresolved_question(content)
+                console.print(f"[green]✓ 问题已记录: {content}[/green]")
+            elif category == "fact":
+                cm.add_key_fact(content)
+                console.print(f"[green]✓ 事实已记录: {content}[/green]")
+            else:
+                console.print(f"[red]未知类别: {category}[/red]  允许: preference / topic / question / fact")
+
+        elif sub == "remove":
+            if len(parts) < 3:
+                console.print("[yellow]用法: /cross remove <类别> <内容>[/yellow]")
+                return
+            category = parts[1].lower()
+            content = parts[2].strip()
+            if category == "topic":
+                cm.remove_topic(content)
+                console.print(f"[green]✓ 主题已移除: {content}[/green]")
+            else:
+                console.print(f"[yellow]仅支持移除 topic: /cross remove topic {content}[/yellow]")
+
+        elif sub == "clear":
+            cm.clear_all()
+            console.print("[green]✓ 跨会话记忆已清空[/green]")
+
+        else:
+            console.print("[yellow]用法: /cross [list|add|remove|clear][/yellow]")
+            console.print("[dim]  /cross list                       显示记忆[/dim]")
+            console.print("[dim]  /cross add topic 主题               添加主题[/dim]")
+            console.print("[dim]  /cross add preference 键:值         添加偏好[/dim]")
+            console.print("[dim]  /cross add question 问题            记录问题[/dim]")
+            console.print("[dim]  /cross add fact 事实                记录事实[/dim]")
+            console.print("[dim]  /cross remove topic 主题            移除主题[/dim]")
+            console.print("[dim]  /cross clear                      清空所有[/dim]")

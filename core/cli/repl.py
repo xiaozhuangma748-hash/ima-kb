@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import threading
+from datetime import datetime
 from typing import List, Optional
 
 from rich.panel import Panel
@@ -36,6 +37,7 @@ from core.pet.shop import Shop
 from core.pet.administrator import PetAdministrator
 from core.memory.store import MemoryStore
 from core.memory.workflow import WorkflowTracker
+from core.memory.cross_session import CrossSessionMemory
 from core.retrieval.hybrid import HybridRetriever
 from core.retrieval.vector import VectorIndex
 from core.retrieval.rerank import Reranker
@@ -81,6 +83,8 @@ class REPL(
         self.rag: Optional[RAGChain] = None
         # 对话历史（多轮）
         self.history: List[dict] = []
+        # 当前活跃会话名
+        self.active_session_name: Optional[str] = None
         # 早期对话摘要（history 超过 20 条时自动生成，保留长期记忆）
         self.conversation_summary: Optional[str] = None
         # LLM 是否可用
@@ -112,6 +116,7 @@ class REPL(
         self.administrator: Optional[PetAdministrator] = None
         self.memory_store: Optional[MemoryStore] = None
         self.workflow_tracker: Optional[WorkflowTracker] = None
+        self.cross_session_memory: Optional[CrossSessionMemory] = None
         self._admin_init_failed: bool = False
         self._vector_available: Optional[bool] = None  # None=未检测, True/False=已检测
         if self.pet:
@@ -120,6 +125,8 @@ class REPL(
                 self.workflow_tracker = WorkflowTracker(self.memory_store)
             except Exception as e:
                 console.print(f"[dim]记忆系统初始化失败: {e}[/dim]")
+        # 跨会话记忆延迟初始化（会话确定后按会话名加载）
+        self.cross_session_memory: Optional[CrossSessionMemory] = None
 
     def _init_administrator(self) -> None:
         """延迟初始化 PetAdministrator（首次问答时调用）。"""
@@ -155,36 +162,101 @@ class REPL(
             console.print(f"[dim]宠物管理员初始化失败，降级为普通问答: {e}[/dim]")
             self._admin_init_failed = True
 
+    # ---- 活跃会话管理 ----
+
+    def _init_active_session(self) -> None:
+        """初始化活跃会话：恢复已有会话或创建新会话（在启动页之后调用）。
+
+        流程：
+        1. 检查是否有活跃会话 → 有则自动恢复（静默）
+        2. 无活跃会话 → 提示用户命名 → 创建新会话
+        3. 初始化该会话的独立记忆文件
+        """
+        from core.session.store import SessionStore
+        ss = SessionStore()
+        active_name = ss.get_active_session()
+        if active_name:
+            # 恢复活跃会话
+            history = ss.load(active_name)
+            if history is not None:
+                self.history = history
+                self.active_session_name = active_name
+                # 加载该会话的独立记忆
+                self._init_session_memory(active_name)
+                return
+        # 无活跃会话，提示用户命名
+        default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+        prompt_text = f"  新会话名称 (直接回车使用默认: {default_name}): "
+        console.print(f"[dim]{prompt_text}[/dim]", end="")
+        try:
+            name = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            name = ""
+        if not name:
+            name = default_name
+        ss.create_session(name)
+        self.active_session_name = name
+        self.history = []
+        # 初始化该会话的独立记忆
+        self._init_session_memory(name)
+        console.print(f"[dim]已创建新会话: {name}[/dim]\n")
+
+    def _init_session_memory(self, session_name: str) -> None:
+        """为指定会话初始化独立的跨会话记忆文件。"""
+        try:
+            from pathlib import Path as _Path
+            session_safe = session_name.replace("/", "_").replace("\\", "_").replace(" ", "_")
+            memory_path = settings.storage_path / "memory" / "sessions" / session_safe
+            self.cross_session_memory = CrossSessionMemory(storage_path=memory_path)
+        except Exception as e:
+            console.print(f"[dim]会话记忆初始化失败: {e}[/dim]")
+            self.cross_session_memory = None
+
+    def _save_active_session(self) -> None:
+        """保存当前活跃会话（退出时调用）。"""
+        if not self.active_session_name:
+            return
+        try:
+            from core.session.store import SessionStore
+            ss = SessionStore()
+            ss.save(self.active_session_name, self.history)
+            ss.save_active_session(self.active_session_name)
+        except Exception:
+            pass
+
+    def _auto_save_session(self) -> None:
+        """自动保存会话（每次对话后调用）。"""
+        if not self.active_session_name or not self.history:
+            return
+        try:
+            from core.session.store import SessionStore
+            ss = SessionStore()
+            ss.save(self.active_session_name, self.history)
+        except Exception:
+            pass
+
     # ---- 启动 ----
 
     def run(self) -> None:
         """启动 REPL 主循环。"""
-        # 清屏 + 渲染欢迎面板
+        # 先初始化活跃会话（可能需要用户命名）
+        self._init_active_session()
+
+        # 清屏 + 渲染欢迎面板（带会话名称）
         console.clear()
         stats = self.storage.stats()
-        _render_welcome_panel(stats, self.llm_available, pet=self.pet)
+        _render_welcome_panel(stats, self.llm_available, pet=self.pet, session_name=self.active_session_name)
 
-        # 底部简洁分隔线
+        # 底部提示只在启动时显示一次
         import shutil
         _width = shutil.get_terminal_size((80, 24)).columns
-        console.print(f"[dim]{'─' * _width}[/dim]")
+        _left = "/help for shortcuts"
+        _right = "Ctrl+C to exit"
+        _middle = _width - len(_left) - len(_right)
+        if _middle < 1:
+            _middle = 1
+        console.print(f"[dim]{_left}{' ' * _middle}{_right}[/dim]")
         console.print()
-
-        # 续接上次会话 (--continue)
-        if os.environ.get("IMA_CONTINUE"):
-            try:
-                from core.session.store import SessionStore
-                ss = SessionStore()
-                sessions = ss.list_sessions()
-                if sessions:
-                    latest = sessions[0]
-                    loaded = ss.load(latest["name"])
-                    self.history = loaded if isinstance(loaded, list) else []
-                    console.print(f"[green]已恢复会话: {latest['name']} ({latest['message_count']} 条消息)[/green]\n")
-                else:
-                    console.print("[dim]无已保存会话[/dim]\n")
-            except Exception as e:
-                console.print(f"[dim]恢复会话失败: {e}[/dim]\n")
 
         while self.running:
             try:
@@ -208,6 +280,9 @@ class REPL(
             else:
                 # 普通对话
                 self._handle_chat(user_input)
+
+        # 退出时自动保存活跃会话
+        self._save_active_session()
 
     def _handle_read_input(self, user_input: str) -> None:
         """阅读模式下的输入处理。"""
