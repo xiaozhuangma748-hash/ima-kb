@@ -217,7 +217,7 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
 
     # 会话名称（如果有）
     if session_name:
-        session_text = f"会话: {session_name}"
+        session_text = f"上次会话: {session_name}"
         session_pad = (left_w - _w(session_text)) // 2
         if session_pad < 0:
             session_pad = 0
