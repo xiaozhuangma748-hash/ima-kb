@@ -923,13 +923,15 @@ class HybridResult:
     source: str           # "bm25" / "vector" / "both"
     content: str = ""
     doc_title: str = ""
+    paragraph_num: int = 0  # 真实段落号（由 storage.enrich_hybrid_results 填充）
 ```
 
 ##### `HybridRetriever` 类
 
 ```python
 class HybridRetriever:
-    def __init__(self, bm25_index: BM25Index, vector_index: VectorIndex):
+    def __init__(self, bm25_index: BM25Index, vector_index: VectorIndex, storage=None):
+        # storage 可选：传入后 search() 末尾自动补全 content/doc_title/paragraph_num
         ...
     
     def search(self, query: str, top_k: int = 10) -> List[HybridResult]:
@@ -937,8 +939,14 @@ class HybridRetriever:
         1. BM25 检索
         2. 向量检索（不可用降级为纯 BM25）
         3. RRF 融合
+        4. 若有 storage 引用，批量补全 content/doc_title/paragraph_num
         """
 ```
+
+> **引用溯源修复**：BM25 的 `_DocEntry` 不存 content/title，`VectorResult` 也只有 3 个字段，
+> 所以混合检索后的 `HybridResult` 可能 content/doc_title 为空。
+> `Storage.enrich_hybrid_results()` 用 chunk_id 批量从 SQLite 查出真实 content/doc_title/index_in_doc，
+> 修复了引用溯源标题缺失和段落号虚假问题。
 
 ##### RRF 融合算法
 
@@ -967,6 +975,7 @@ class RerankResult:
     doc_title: str
     relevance_score: float  # LLM 0-10 分
     reason: str
+    paragraph_num: int = 0  # 真实段落号（从 HybridResult 透传）
 ```
 
 ##### `Reranker` 类

@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-12（BM25 匹配度提升 + 跨会话记忆自动提取 + 搜索默认配置 + 会话管理系统）
+> 最后更新：2026-07-12（OCR 双引擎升级 + 引用溯源修复 + 启动流程多会话选择）
 
 ---
 
@@ -886,3 +886,60 @@ IMAGE_RESPONSE_FORMAT=url
 | `core/memory/extractor.py` | **新增** | LLM 自动提取器 |
 | `core/cli/repl.py` | 修改 | 会话管理 + 启动页优化 |
 | `core/cli/constants.py` | 修改 | 命令补全注册 |
+
+---
+
+## 🆕 2026-07-12 更新（续）：OCR 升级 + 引用溯源修复 + 启动流程优化
+
+### 一、OCR 双引擎升级（PaddleOCR 主 + Tesseract 降级）
+
+**之前**：仅 Tesseract + 外部图片预处理，扫描 PDF 识别率低（"萧山区" → "击山区"）。
+
+**现在**：
+- **PaddleOCR 优先**（PP-OCRv6 模型，内部自带方向检测/去扭曲/超分辨率），原图直传
+- **Tesseract 降级**（外部灰度+二值化+放大预处理）
+- DPI 200（PaddleOCR 内部会超分，300 过慢）
+- 8 个扫描 PDF 全部重新入库，39 篇文档 812 chunks，识别准确率 95%+
+
+### 二、引用溯源修复（标题缺失 + 段落号虚假）
+
+**问题**：引用溯源显示 `1. §1 · doc:6796aa4a`，文档标题缺失，段落号是假的（1-5 序号而非真实段落位置）。
+
+**根因**：BM25 的 `_DocEntry` 不存 content/title；`VectorResult` 只有 3 个字段；`administrator.py` 用 `i+1` 作假段落号。
+
+**修复**：
+- `Storage.enrich_hybrid_results()`：用 chunk_id 批量从 SQLite 查出真实 content/doc_title/index_in_doc
+- `HybridRetriever` 新增可选 `storage` 参数，search() 末尾自动 enrich
+- `HybridResult`/`RerankResult` 新增 `paragraph_num` 字段透传真实段落号
+- 所有 `HybridRetriever(...)` 调用点（5 处）传入 `storage=storage`
+
+### 三、/session list 重复会话名修复
+
+**问题**：`/session list` 显示两个同名会话（一个真实存档，一个 `active_session.json` 被误扫描）。
+
+**修复**：`list_sessions()` 排除 `active_session.json`。
+
+### 四、启动流程优化（多会话选择）
+
+**之前**：启动时直接弹出命名提示，无启动页；只能恢复最近一次会话。
+
+**现在**：
+1. 先渲染启动页（显示"上次会话: xxx"，只渲染一次）
+2. 列出所有历史会话（名称/消息数/时间/上次标记）
+3. 输入序号选择历史会话 / 输入 0 新建 / 直接输入新名称新建 / 回车恢复上次
+4. 支持 3+ 会话场景
+
+### 五、改动文件清单
+
+| 文件 | 变更类型 | 说明 |
+|---|---|---|
+| `core/ingestion/parser.py` | 修改 | PaddleOCR 单例 + 降级 Tesseract + 图片预处理 |
+| `core/storage.py` | 修改 | 新增 `enrich_hybrid_results()` 批量补全检索结果 |
+| `core/retrieval/hybrid.py` | 修改 | HybridResult 加 paragraph_num；HybridRetriever 加 storage 参数 |
+| `core/retrieval/rerank.py` | 修改 | RerankResult 加 paragraph_num，从 HybridResult 透传 |
+| `core/pet/administrator.py` | 修改 | paragraph_num 改用真实值 |
+| `core/qa/chain.py` | 修改 | HybridRetriever 传 storage |
+| `core/cli/repl.py` | 修改 | 启动流程改为启动页 + 多会话选择 |
+| `core/cli/welcome.py` | 修改 | "会话:" 改为 "上次会话:" |
+| `core/session/store.py` | 修改 | list_sessions 排除 active_session.json |
+| `run.py` / `web/routes/qa.py` / `web/routes/search.py` | 修改 | HybridRetriever 传 storage |
