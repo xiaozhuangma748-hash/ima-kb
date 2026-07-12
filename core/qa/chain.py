@@ -170,6 +170,7 @@ class RAGChain:
             self.hybrid = HybridRetriever(
                 bm25_index=self.storage.bm25,
                 vector_index=self.storage.vector,
+                storage=self.storage,
             )
 
         # 重排序器

@@ -102,11 +102,12 @@ class PetAdministrator:
 
         # 5. 组装 system prompt
         # sources_dict 同时为 build_system_prompt（用 content）和 extract_citations（用 snippet）提供数据
+        # paragraph_num 来自 enrich_hybrid_results 填充的真实 chunk 段落号
         sources_dict = [
             {
                 "doc_id": s.doc_id,
                 "title": s.doc_title,
-                "paragraph_num": i + 1,  # 简化：用序号作为段落号
+                "paragraph_num": s.paragraph_num or (i + 1),  # 真实段落号，回退到序号
                 "content": s.content,
                 "snippet": s.content,
             }
@@ -222,11 +223,12 @@ class PetAdministrator:
 
         # 5. 组装 system prompt
         # sources_dict 同时为 build_system_prompt（用 content）和 extract_citations（用 snippet）提供数据
+        # paragraph_num 来自 enrich_hybrid_results 填充的真实 chunk 段落号
         sources_dict = [
             {
                 "doc_id": s.doc_id,
                 "title": s.doc_title,
-                "paragraph_num": i + 1,  # 简化：用序号作为段落号
+                "paragraph_num": s.paragraph_num or (i + 1),  # 真实段落号，回退到序号
                 "content": s.content,
                 "snippet": s.content,
             }

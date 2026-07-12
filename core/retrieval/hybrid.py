@@ -21,14 +21,23 @@ class HybridResult:
     source: str           # "bm25" / "vector" / "both"
     content: str = ""
     doc_title: str = ""
+    paragraph_num: int = 0  # 真实段落号（chunk 的 index_in_doc + 1，由 storage.enrich_hybrid_results 填充）
 
 
 class HybridRetriever:
     """混合检索器：BM25 + 向量并行检索，RRF 融合。"""
 
-    def __init__(self, bm25_index: BM25Index, vector_index: VectorIndex) -> None:
+    def __init__(
+        self,
+        bm25_index: BM25Index,
+        vector_index: VectorIndex,
+        storage=None,
+    ) -> None:
         self.bm25 = bm25_index
         self.vector = vector_index
+        # 可选：传入 Storage 实例后，检索结果会自动从 SQLite 补全
+        # content/doc_title/paragraph_num（修复引用溯源标题缺失问题）
+        self.storage = storage
 
     def search(self, query: str, top_k: int = 10) -> List[HybridResult]:
         """混合检索：BM25 + 向量 + RRF 融合。
@@ -38,19 +47,24 @@ class HybridRetriever:
             top_k: 返回结果数量
 
         Returns:
-            融合后的结果列表，按 RRF 分数降序
+            融合后的结果列表，按 RRF 分数降序。若构造时传入了 storage，
+            结果会自动补全 content/doc_title/paragraph_num 并过滤过期 chunk。
         """
         # 1. BM25 检索
         bm25_results = self.bm25.search(query, top_k=top_k)
 
         # 2. 向量检索（不可用时降级为纯 BM25）
         if not self.vector.is_available():
-            return self._bm25_only_results(bm25_results, top_k)
+            results = self._bm25_only_results(bm25_results, top_k)
+        else:
+            vector_results = self.vector.search(query, top_k=top_k)
+            # 3. RRF 融合
+            results = self._rrf_fusion(bm25_results, vector_results, top_k)
 
-        vector_results = self.vector.search(query, top_k=top_k)
-
-        # 3. RRF 融合
-        return self._rrf_fusion(bm25_results, vector_results, top_k)
+        # 4. 若有 storage 引用，批量补全 content/doc_title/paragraph_num
+        if self.storage is not None and results:
+            results = self.storage.enrich_hybrid_results(results)
+        return results
 
     def _bm25_only_results(self, bm25_results: List[SearchResult], top_k: int) -> List[HybridResult]:
         """纯 BM25 降级结果。"""

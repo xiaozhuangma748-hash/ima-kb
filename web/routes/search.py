@@ -38,7 +38,7 @@ async def search(
             from core.retrieval.hybrid import HybridRetriever
             vector_index = _get_shared_vector_index(request.app)
             if vector_index and vector_index.is_available():
-                hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index)
+                hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index, storage=storage)
                 raw_results = hybrid.search(q, top_k=limit * 2)
             else:
                 raw_results = storage.bm25_search(q, top_k=limit * 2)

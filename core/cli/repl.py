@@ -146,6 +146,7 @@ class REPL(
 
             hybrid = HybridRetriever(
                 bm25_index=self.storage.bm25, vector_index=vector_index,
+                storage=self.storage,
             )
             llm = get_llm() if settings.has_llm() else None
             reranker = Reranker(llm) if llm else None

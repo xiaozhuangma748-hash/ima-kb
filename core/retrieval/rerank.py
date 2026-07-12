@@ -24,6 +24,7 @@ class RerankResult:
     doc_title: str
     relevance_score: float          # LLM 打分（0-10）
     reason: str                     # LLM 相关性理由
+    paragraph_num: int = 0          # 真实段落号（从 HybridResult 透传）
 
 
 class Reranker:
@@ -61,6 +62,7 @@ class Reranker:
                 doc_title=c.doc_title,
                 relevance_score=score_data.get("score", 0),
                 reason=score_data.get("reason", ""),
+                paragraph_num=getattr(c, "paragraph_num", 0),
             ))
 
         results.sort(key=lambda r: r.relevance_score, reverse=True)

@@ -152,7 +152,7 @@ def _run_headless(question: str, output: str = "text") -> None:
         vector_index = VectorIndex()
     except Exception:
         vector_index = None
-    hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index)
+    hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index, storage=storage)
     llm = get_llm()
     reranker = Reranker(llm)
 
@@ -575,7 +575,7 @@ def cli_ask(question: str, model: str = None) -> None:
         vector_index = VectorIndex()
     except Exception:
         vector_index = None
-    hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index)
+    hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index, storage=storage)
     llm = get_llm()
     reranker = Reranker(llm)
 

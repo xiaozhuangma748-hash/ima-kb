@@ -486,6 +486,55 @@ class Storage:
             filled.append(r)
         return filled
 
+    def enrich_hybrid_results(self, results: List) -> List:
+        """批量补全混合检索结果的 content/doc_title/paragraph_num。
+
+        BM25 的 _DocEntry 不存 content/title，VectorResult 也没有这些字段，
+        所以混合检索后的 HybridResult 可能 content/doc_title 为空。
+        此方法用 chunk_id 批量从 SQLite 查出真实内容、文档标题和段落号。
+
+        同时过滤掉数据库中已不存在的过期 chunk（避免引用溯源显示空标题）。
+
+        Args:
+            results: HybridResult 列表（content/doc_title 可能为空）
+
+        Returns:
+            补全后的 HybridResult 列表（过滤掉过期条目）
+        """
+        if not results:
+            return results
+        chunk_ids = [r.chunk_id for r in results]
+        doc_ids = list({r.doc_id for r in results if r.doc_id})
+
+        with self._conn() as conn:
+            placeholders = ",".join("?" * len(chunk_ids))
+            rows = conn.execute(
+                f"SELECT id, content, index_in_doc FROM chunks WHERE id IN ({placeholders})",
+                chunk_ids,
+            ).fetchall()
+            chunk_map = {r["id"]: (r["content"], r["index_in_doc"]) for r in rows}
+
+            doc_title = {}
+            if doc_ids:
+                placeholders = ",".join("?" * len(doc_ids))
+                rows = conn.execute(
+                    f"SELECT id, title FROM documents WHERE id IN ({placeholders})",
+                    doc_ids,
+                ).fetchall()
+                doc_title = {r["id"]: r["title"] for r in rows}
+
+        filled = []
+        for r in results:
+            entry = chunk_map.get(r.chunk_id)
+            if entry is None:
+                # 过期 chunk，跳过
+                continue
+            r.content = entry[0]
+            r.paragraph_num = entry[1] + 1  # 0-based → 1-based 段落号
+            r.doc_title = doc_title.get(r.doc_id, "") or r.doc_title
+            filled.append(r)
+        return filled
+
     # ---- 索引维护 ----
 
     def rebuild_bm25_index(self) -> int:
