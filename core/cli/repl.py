@@ -166,24 +166,23 @@ class REPL(
     # ---- 活跃会话管理 ----
 
     def _init_active_session(self) -> None:
-        """初始化活跃会话：显示启动页后询问用户恢复或新建。
+        """初始化活跃会话：显示启动页后询问用户恢复或新建（只渲染一次启动页）。
 
         流程：
-        1. 先渲染启动页（无会话名或显示上次活跃会话名作为预览）
-        2. 询问：恢复上次会话 or 新建会话
-        3. 根据选择加载/创建会话
-        4. 刷新启动页显示最终会话名
+        1. 渲染启动页（显示上次活跃会话名，若无则留空）
+        2. 在启动页下方询问：恢复上次会话 or 新建会话
+        3. 用户输入后只追加一行确认，不刷新启动页
         """
         from core.session.store import SessionStore
         ss = SessionStore()
         active_name = ss.get_active_session()
 
-        # 1. 先渲染启动页（预览模式：显示上次会话名或"未命名"）
+        # 1. 渲染启动页（只一次，显示上次会话名或留空）
         console.clear()
         stats = self.storage.stats()
         _render_welcome_panel(
             stats, self.llm_available, pet=self.pet,
-            session_name=active_name,  # 预览上次会话名
+            session_name=active_name,
         )
         # 底部提示
         import shutil as _shutil
@@ -196,18 +195,16 @@ class REPL(
         console.print(f"[dim]{_left}{' ' * _middle}{_right}[/dim]")
         console.print()
 
-        # 2. 询问用户：恢复 or 新建
+        # 2. 在启动页下方询问会话选择
         if active_name:
-            # 有上次会话，询问恢复或新建
-            console.print(f"[dim]上次会话: {active_name}[/dim]")
-            console.print(f"[dim]回车恢复上次会话，或输入新名称新建会话:[/dim]", end="")
-            default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+            # 有上次会话：回车恢复，或输入新名称新建
+            console.print(f"[dim]上次会话: {active_name} · 回车恢复，或输入新名称新建:[/dim]", end="")
             try:
                 user_input = input().strip()
             except (EOFError, KeyboardInterrupt):
                 user_input = ""
             if not user_input:
-                # 恢复上次会话
+                # 恢复上次会话（启动页已是正确会话名，无需刷新）
                 history = ss.load(active_name)
                 if history is not None:
                     self.history = history
@@ -215,15 +212,15 @@ class REPL(
                 self._init_session_memory(active_name)
             else:
                 # 新建会话
-                name = user_input
-                ss.create_session(name)
-                self.active_session_name = name
+                ss.create_session(user_input)
+                self.active_session_name = user_input
                 self.history = []
-                self._init_session_memory(name)
+                self._init_session_memory(user_input)
+                console.print(f"[dim]已切换到新会话: {user_input}[/dim]")
         else:
-            # 无上次会话，直接问新名称
+            # 无上次会话：直接问新名称
             default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
-            console.print(f"[dim]新会话名称 (直接回车使用默认: {default_name}):[/dim]", end="")
+            console.print(f"[dim]新会话名称 (回车默认: {default_name}):[/dim]", end="")
             try:
                 name = input().strip()
             except (EOFError, KeyboardInterrupt):
@@ -234,16 +231,7 @@ class REPL(
             self.active_session_name = name
             self.history = []
             self._init_session_memory(name)
-
-        # 3. 刷新启动页显示最终会话名
-        console.clear()
-        stats = self.storage.stats()
-        _render_welcome_panel(
-            stats, self.llm_available, pet=self.pet,
-            session_name=self.active_session_name,
-        )
-        console.print(f"[dim]{_left}{' ' * _middle}{_right}[/dim]")
-        console.print()
+        # 不刷新启动页——只渲染一次
 
     def _init_session_memory(self, session_name: str) -> None:
         """为指定会话初始化独立的跨会话记忆文件。"""
