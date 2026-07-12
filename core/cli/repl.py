@@ -195,30 +195,84 @@ class REPL(
         console.print(f"[dim]{_left}{' ' * _middle}{_right}[/dim]")
         console.print()
 
-        # 2. 在启动页下方询问会话选择
-        if active_name:
-            # 有上次会话：回车恢复，或输入新名称新建
-            console.print(f"[dim]上次会话: {active_name} · 回车恢复，或输入新名称新建:[/dim]", end="")
+        # 2. 在启动页下方列出所有会话让用户选择
+        sessions = ss.list_sessions()
+        if sessions:
+            # 有历史会话：列出来让用户选
+            console.print("[dim]历史会话:[/dim]")
+            for i, s in enumerate(sessions, 1):
+                time_str = s["saved_at"][:16].replace("T", " ") if s["saved_at"] else ""
+                msg_str = f"{s['message_count']}条" if s["message_count"] else "空"
+                marker = " ← 上次" if s["name"] == active_name else ""
+                console.print(f"  [dim]{i}.[/dim] {s['name']}  [dim]({msg_str}, {time_str}){marker}[/dim]")
+            console.print(f"  [dim]0. 新建会话[/dim]")
+            console.print(f"[dim]输入序号选择，或直接输入新名称新建:[/dim]", end="")
+
             try:
                 user_input = input().strip()
             except (EOFError, KeyboardInterrupt):
                 user_input = ""
-            if not user_input:
-                # 恢复上次会话（启动页已是正确会话名，无需刷新）
-                history = ss.load(active_name)
-                if history is not None:
-                    self.history = history
-                self.active_session_name = active_name
-                self._init_session_memory(active_name)
-            else:
-                # 新建会话
+
+            # 判断输入是序号还是新名称
+            if user_input.isdigit():
+                idx = int(user_input)
+                if idx == 0:
+                    # 新建会话
+                    default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+                    console.print(f"[dim]新会话名称 (回车默认: {default_name}):[/dim]", end="")
+                    try:
+                        name = input().strip() or default_name
+                    except (EOFError, KeyboardInterrupt):
+                        name = default_name
+                    ss.create_session(name)
+                    self.active_session_name = name
+                    self.history = []
+                    self._init_session_memory(name)
+                elif 1 <= idx <= len(sessions):
+                    # 选择历史会话
+                    chosen = sessions[idx - 1]
+                    name = chosen["name"]
+                    history = ss.load(name)
+                    if history is not None:
+                        self.history = history
+                    self.active_session_name = name
+                    self._init_session_memory(name)
+                else:
+                    # 序号越界，回退到上次会话或新建
+                    if active_name:
+                        history = ss.load(active_name)
+                        if history is not None:
+                            self.history = history
+                        self.active_session_name = active_name
+                        self._init_session_memory(active_name)
+                    else:
+                        name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+                        ss.create_session(name)
+                        self.active_session_name = name
+                        self.history = []
+                        self._init_session_memory(name)
+            elif user_input:
+                # 输入的是新名称
                 ss.create_session(user_input)
                 self.active_session_name = user_input
                 self.history = []
                 self._init_session_memory(user_input)
-                console.print(f"[dim]已切换到新会话: {user_input}[/dim]")
+            else:
+                # 直接回车：恢复上次会话或新建
+                if active_name:
+                    history = ss.load(active_name)
+                    if history is not None:
+                        self.history = history
+                    self.active_session_name = active_name
+                    self._init_session_memory(active_name)
+                else:
+                    name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+                    ss.create_session(name)
+                    self.active_session_name = name
+                    self.history = []
+                    self._init_session_memory(name)
         else:
-            # 无上次会话：直接问新名称
+            # 无历史会话：直接问新名称
             default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
             console.print(f"[dim]新会话名称 (回车默认: {default_name}):[/dim]", end="")
             try:
