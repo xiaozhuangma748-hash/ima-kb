@@ -134,6 +134,9 @@ class SessionStore:
         """列出所有已保存的会话。按保存时间倒序。"""
         sessions = []
         for f in self.storage_dir.glob("*.json"):
+            # 排除活跃会话记录文件（它不是真正的会话存档）
+            if f.name == self.ACTIVE_SESSION_FILE:
+                continue
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 sessions.append({
