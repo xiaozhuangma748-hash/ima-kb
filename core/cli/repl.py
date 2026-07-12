@@ -166,41 +166,84 @@ class REPL(
     # ---- 活跃会话管理 ----
 
     def _init_active_session(self) -> None:
-        """初始化活跃会话：恢复已有会话或创建新会话（在启动页之后调用）。
+        """初始化活跃会话：显示启动页后询问用户恢复或新建。
 
         流程：
-        1. 检查是否有活跃会话 → 有则自动恢复（静默）
-        2. 无活跃会话 → 提示用户命名 → 创建新会话
-        3. 初始化该会话的独立记忆文件
+        1. 先渲染启动页（无会话名或显示上次活跃会话名作为预览）
+        2. 询问：恢复上次会话 or 新建会话
+        3. 根据选择加载/创建会话
+        4. 刷新启动页显示最终会话名
         """
         from core.session.store import SessionStore
         ss = SessionStore()
         active_name = ss.get_active_session()
+
+        # 1. 先渲染启动页（预览模式：显示上次会话名或"未命名"）
+        console.clear()
+        stats = self.storage.stats()
+        _render_welcome_panel(
+            stats, self.llm_available, pet=self.pet,
+            session_name=active_name,  # 预览上次会话名
+        )
+        # 底部提示
+        import shutil as _shutil
+        _width = _shutil.get_terminal_size((80, 24)).columns
+        _left = "/help for shortcuts"
+        _right = "Ctrl+C to exit"
+        _middle = _width - len(_left) - len(_right)
+        if _middle < 1:
+            _middle = 1
+        console.print(f"[dim]{_left}{' ' * _middle}{_right}[/dim]")
+        console.print()
+
+        # 2. 询问用户：恢复 or 新建
         if active_name:
-            # 恢复活跃会话
-            history = ss.load(active_name)
-            if history is not None:
-                self.history = history
+            # 有上次会话，询问恢复或新建
+            console.print(f"[dim]上次会话: {active_name}[/dim]")
+            console.print(f"[dim]回车恢复上次会话，或输入新名称新建会话:[/dim]", end="")
+            default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+            try:
+                user_input = input().strip()
+            except (EOFError, KeyboardInterrupt):
+                user_input = ""
+            if not user_input:
+                # 恢复上次会话
+                history = ss.load(active_name)
+                if history is not None:
+                    self.history = history
                 self.active_session_name = active_name
-                # 加载该会话的独立记忆
                 self._init_session_memory(active_name)
-                return
-        # 无活跃会话，提示用户命名
-        default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
-        prompt_text = f"  新会话名称 (直接回车使用默认: {default_name}): "
-        console.print(f"[dim]{prompt_text}[/dim]", end="")
-        try:
-            name = input().strip()
-        except (EOFError, KeyboardInterrupt):
-            name = ""
-        if not name:
-            name = default_name
-        ss.create_session(name)
-        self.active_session_name = name
-        self.history = []
-        # 初始化该会话的独立记忆
-        self._init_session_memory(name)
-        console.print(f"[dim]已创建新会话: {name}[/dim]\n")
+            else:
+                # 新建会话
+                name = user_input
+                ss.create_session(name)
+                self.active_session_name = name
+                self.history = []
+                self._init_session_memory(name)
+        else:
+            # 无上次会话，直接问新名称
+            default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+            console.print(f"[dim]新会话名称 (直接回车使用默认: {default_name}):[/dim]", end="")
+            try:
+                name = input().strip()
+            except (EOFError, KeyboardInterrupt):
+                name = ""
+            if not name:
+                name = default_name
+            ss.create_session(name)
+            self.active_session_name = name
+            self.history = []
+            self._init_session_memory(name)
+
+        # 3. 刷新启动页显示最终会话名
+        console.clear()
+        stats = self.storage.stats()
+        _render_welcome_panel(
+            stats, self.llm_available, pet=self.pet,
+            session_name=self.active_session_name,
+        )
+        console.print(f"[dim]{_left}{' ' * _middle}{_right}[/dim]")
+        console.print()
 
     def _init_session_memory(self, session_name: str) -> None:
         """为指定会话初始化独立的跨会话记忆文件。"""
@@ -240,24 +283,8 @@ class REPL(
 
     def run(self) -> None:
         """启动 REPL 主循环。"""
-        # 先初始化活跃会话（可能需要用户命名）
+        # 初始化活跃会话（内部已处理启动页渲染 + 会话询问 + 刷新）
         self._init_active_session()
-
-        # 清屏 + 渲染欢迎面板（带会话名称）
-        console.clear()
-        stats = self.storage.stats()
-        _render_welcome_panel(stats, self.llm_available, pet=self.pet, session_name=self.active_session_name)
-
-        # 底部提示只在启动时显示一次
-        import shutil
-        _width = shutil.get_terminal_size((80, 24)).columns
-        _left = "/help for shortcuts"
-        _right = "Ctrl+C to exit"
-        _middle = _width - len(_left) - len(_right)
-        if _middle < 1:
-            _middle = 1
-        console.print(f"[dim]{_left}{' ' * _middle}{_right}[/dim]")
-        console.print()
 
         while self.running:
             try:
