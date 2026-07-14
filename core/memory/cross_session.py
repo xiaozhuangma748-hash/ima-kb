@@ -29,7 +29,8 @@ DEFAULT_CROSS_SESSION: Dict[str, Any] = {
 class CrossSessionMemory:
     """跨会话记忆存储。
 
-    记忆文件路径: storage/memory/cross_session.json
+    记忆文件路径: storage/memory/sessions/<会话名>/cross_session.json（按会话名隔离）
+    默认路径: storage/memory/cross_session.json（未指定 storage_path 时）
     """
 
     def __init__(self, storage_path: Optional[Path] = None) -> None:

@@ -2,7 +2,7 @@
 
 从 repl.py 第 131-342 行迁移：
 - ``_load_activities()`` 读取活动记录
-- ``_record_activity()`` 记录一条活动（最多保留 20 条）
+- ``_record_activity()`` 记录一条活动（最多保留 50 条，7 天自动清理）
 - ``_render_welcome_panel()`` 渲染启动页
 - ``_render_pet_compact()`` 渲染宠物紧凑横版
 - ``_render_pet_empty_compact()`` 未领养宠物占位

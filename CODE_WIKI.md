@@ -181,7 +181,7 @@ ima-kb/
 │   │   └── pet.py                #   宠物管理
 │   ├── templates/index.html      # 单页应用（7 页面）
 │   └── static/                   # 前端资源
-│       ├── app.js                #   入口（初始化 + 路由调度）
+│       ├── app.js                #   入口重定向（→ js/app.js）
 │       └── js/                   #   模块化 JS（按页面拆分）
 │           ├── nav.js            #     侧边栏导航 + 页面切换
 │           ├── qa.js             #     AI 问答（SSE 流式）
@@ -218,7 +218,7 @@ ima-kb/
     ├── todo.json                 #   每日任务数据
     ├── cmd_history               #   命令历史记录
     ├── embedding_cache.db        #   向量缓存（SQLite WAL 模式）
-    ├── memory/                   #   跨会话记忆（按会话名隔离）
+    ├── memory/                   #   跨会话记忆（按会话名隔离，存储在 sessions/<name>/cross_session.json）
     ├── sessions/                 #   会话历史
     ├── uploads/                  #   原文件副本
     ├── uploads/quick/            #   快速入库内容
@@ -241,7 +241,7 @@ IMA 采用清晰的分层架构，从上到下分为五层：
 │  入口层（Entry Layer）                                        │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
 │  │  CLI (run.py) │  │ REPL(core/cli)│  │ Web (web/)   │       │
-│  │  22 顶层命令  │  │  40+ 子命令   │  │ 7 页面+API   │       │
+│  │  23 顶层命令  │  │  40+ 子命令   │  │ 7 页面+API   │       │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘       │
 └─────────┼─────────────────┼─────────────────┼───────────────┘
           │                 │                 │
@@ -1311,7 +1311,7 @@ DEFAULT_CROSS_SESSION = {
 
 ##### 设计要点
 
-- **存储路径**：`storage/memory/cross_session.json`
+- **存储路径**：`storage/memory/sessions/<会话名>/cross_session.json`（按会话名隔离存储，REPL 启动时根据会话名创建子目录）
 - **线程安全**：`threading.Lock` 保护所有读写
 - **原子写入**：写 `.json.tmp` 后 `os.replace` 覆盖，避免崩溃时数据损坏
 - **腐败容错**：JSON 解析失败时备份为 `cross_session.json.bak.{timestamp}` 并回退默认值
@@ -2129,18 +2129,26 @@ tests/
 │   ├── test_checker.py
 │   ├── test_dedup.py
 │   └── test_tracker.py
+├── todo/               # 每日任务测试
+│   └── test_manager.py
 ├── llm/                # LLM 测试
 │   └── test_degrade.py
 ├── integration/        # 集成测试
 │   └── test_pet_admin_flow.py
+├── test_administrator_stream.py
+├── test_cli_agent.py
 ├── test_cli_memory.py
-├── test_repl_aliases.py
-├── test_subcommand_menu.py
-├── test_storage_edit.py
-├── test_storage_vector_sync.py
+├── test_cross_session_memory.py
 ├── test_graph_store.py
 ├── test_parser_ocr.py
-└── test_batch3_fixes.py
+├── test_repl_aliases.py
+├── test_search_config.py
+├── test_search_config_integration.py
+├── test_session_auto_save.py
+├── test_storage_edit.py
+├── test_storage_vector_sync.py
+├── test_subcommand_menu.py
+── test_batch3_fixes.py
 ```
 
 ### 8.3 运行测试

@@ -188,7 +188,7 @@ ima-kb/
 │   ├── templates/
 │   │   └── index.html            # 单页应用（7 页面，~1000 行，侧边栏导航切换）
 │   └── static/
-│       └── app.js                # 前端交互脚本（635 行，SSE/拖拽/搜索/图谱/宠物等）
+│       └── app.js                # 入口（重定向至模块化 js/ 目录）
 │
 ├── tests/                        # 407+ 测试
 │   ├── retrieval/                # 混合检索测试
@@ -213,11 +213,14 @@ ima-kb/
     ├── todo.json                 # 每日任务数据
     ├── cmd_history               # 命令历史记录
     ├── embedding_cache.db        # 向量缓存（SQLite WAL 模式）
+    ├── file_tracker.db           # 增量同步文件追踪数据库
     ├── memory/                   # 跨会话记忆（按会话名隔离）
     ├── sessions/                 # 会话历史
     ├── uploads/                  # 原文件副本
     ├── uploads/quick/            # 快速入库内容
     ├── cache/                    # 解析缓存
+    ├── images/                   # 生成图片
+    ├── reports/                  # 生成的报告
     ├── chroma/                   # ChromaDB 向量库
     └── models/bge-small-zh-v1.5/ # 本地向量模型
 ```
@@ -970,10 +973,16 @@ IMAGE_RESPONSE_FORMAT=url
 ```python
 class _AgentStatus:
     """动态状态渲染器，实现 __rich_console__ 协议"""
-    def __init__(self):
+    def __init__(self, task_start: float):
         self._thinking = True
-        self._start = time.time()
-    
+        self._label = "Thinking"
+        self._detail = ""
+        self._start = task_start  # 任务开始时间，不重置
+
+    def set_thinking(self) -> None:
+        self._thinking = True
+        # 不重置 _start，让计时器从任务开始持续增长
+
     def __rich_console__(self, console, options):
         if self._thinking:
             elapsed = time.time() - self._start
