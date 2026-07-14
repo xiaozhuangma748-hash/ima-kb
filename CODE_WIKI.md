@@ -84,7 +84,7 @@
 ```
 ima-kb/
 ├── config.py                     # 配置中心（Settings 单例）
-├── run.py                        # CLI 入口（22 个顶层命令 + graph 5 子命令）
+├── run.py                        # CLI 入口（23 个顶层命令 + graph 5 子命令）
 ├── repl.py                       # 交互式 REPL 入口（薄封装，委托 core/cli/）
 ├── pyproject.toml                # 打包配置，入口点 ima = "run:cli"
 ├── requirements.txt              # 依赖清单
@@ -111,7 +111,8 @@ ima-kb/
 │   │       ├── pet.py            #     /pet 子命令
 │   │       ├── pipe.py           #     管道操作
 │   │       ├── session.py        #     /session 子命令
-│   │       └── sync.py           #     /sync /health /dedup 命令
+│   │       ├── sync.py           #     /sync /health /dedup 命令
+│   │       └── todo.py           #     /todo 每日任务命令
 │   ├── setup/                    # 首次运行引导
 │   │   └── wizard.py             #   配置向导（API Key 检测 + 初始化）
 │   ├── ingestion/                # 入库
@@ -193,7 +194,7 @@ ima-kb/
 │           ├── state.js          #     全局状态管理
 │           └── utils.js          #     通用工具函数
 │
-├── tests/                        # 测试套件（323+ 测试）
+├── tests/                        # 测试套件（407+ 测试）
 │   ├── retrieval/ memory/ pet/ persona/ sync/ ...
 │
 ├── test_data/                    # 6 个测试文件
@@ -204,13 +205,20 @@ ima-kb/
 │   └── specs/ superpowers/ ...
 │
 └── storage/                      # 本地数据（.gitignore）
-    ├── metadata.db               #   SQLite 元数据
+    ├── metadata.db               #   SQLite 元数据（WAL 模式，含 -shm/-wal 伴生文件）
     ├── bm25_index.pkl            #   BM25 持久化索引
     ├── chroma/                   #   ChromaDB 向量库
     ├── models/bge-small-zh-v1.5/ #   本地向量模型
     ├── memory.json               #   记忆系统持久化
     ├── pet.json                  #   宠物状态持久化
-    ├── graph.json                #   知识图谱持久化
+    ├── graph.json                #   知识图谱 networkx 数据
+    ├── graph.html                #   知识图谱 HTML 可视化
+    ├── activity.json             #   启动页 Recent activity 记录
+    ├── agent_config.json         #   Agent 配置（show_thoughts 等）
+    ├── todo.json                 #   每日任务数据
+    ├── cmd_history               #   命令历史记录
+    ├── embedding_cache.db        #   向量缓存（SQLite WAL 模式）
+    ├── memory/                   #   跨会话记忆（按会话名隔离）
     ├── sessions/                 #   会话历史
     ├── uploads/                  #   原文件副本
     ├── uploads/quick/            #   快速入库内容
@@ -441,11 +449,12 @@ def cli(ctx):
 
 > ⚠️ **关键约束**：所有 `@cli.command` 必须定义在 `cli` group 之后，否则会触发 `NameError`（项目早期踩过的坑）。
 
-##### 22 个顶层命令
+##### 23 个顶层命令
 
 | 命令 | 说明 |
 |---|---|
 | `web` | 启动 Web 后台（`--host` `--port`） |
+| `init` | 首次运行引导或重新配置 |
 | `chat` | 进入交互式 REPL |
 | `ingest <path>` | 入库文件或目录（递归） |
 | `note <text>` | 文本直入库 |
@@ -465,6 +474,7 @@ def cli(ctx):
 | `sync <dir>` | 增量同步目录 |
 | `health` | 知识库质量报告 |
 | `dedup` | 近似重复扫描 |
+| `doctor` | 环境健康检查 |
 | `delete <doc_id>` | 删除文档 |
 
 ##### `graph` 子命令组（5 个）
@@ -2088,7 +2098,7 @@ CSS Grid 布局的单页应用：
 
 ### 8.1 测试规模
 
-**323+ 测试**，覆盖所有核心模块。
+**407+ 测试**，覆盖所有核心模块。
 
 ### 8.2 测试目录结构
 
@@ -2523,8 +2533,8 @@ RRF 分数低于阈值时：
 
 ---
 
-**项目状态**：P1-P5 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），323+ 测试通过，可用于日常使用。
+**项目状态**：P1-P7 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），407+ 测试通过，可用于日常使用。
 
 ---
 
-*本文档由代码分析自动生成，最后更新：2026-07-10*
+*本文档由代码分析自动生成，最后更新：2026-07-15*

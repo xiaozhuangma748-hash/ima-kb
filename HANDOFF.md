@@ -110,7 +110,7 @@ ima-kb/
 ├── .env.example                  # 模板（Agnes 配置）
 ├── .gitignore
 ├── config.py                     # 配置中心（Settings 单例）
-├── run.py                        # CLI 入口（22 个顶层命令 + graph 5 子命令，无子命令时进入 REPL）
+├── run.py                        # CLI 入口（23 个顶层命令 + graph 5 子命令，无子命令时进入 REPL）
 ├── repl.py                       # 交互式 REPL（IMA v4.0 · Claude Code 风格 + 40+ 子命令）
 │
 ├── core/
@@ -190,7 +190,7 @@ ima-kb/
 │   └── static/
 │       └── app.js                # 前端交互脚本（635 行，SSE/拖拽/搜索/图谱/宠物等）
 │
-├── tests/                        # 323+ 测试
+├── tests/                        # 407+ 测试
 │   ├── retrieval/                # 混合检索测试
 │   ├── memory/                   # 记忆系统测试
 │   ├── pet/                      # 宠物系统测试
@@ -201,13 +201,19 @@ ima-kb/
 ├── test_data/                    # 6 个测试文件
 │
 └── storage/                      # 本地数据（gitignore）
-    ├── metadata.db               # SQLite 元数据
+    ├── metadata.db               # SQLite 元数据（WAL 模式，含 -shm/-wal 伴生文件）
     ├── bm25_index.pkl            # BM25 持久化索引
-    ├── file_tracker.db           # 文件同步追踪数据库
     ├── theme.json                # 主题配置持久化
     ├── graph.html                # 知识图谱 HTML 可视化
+    ├── graph.json                # 知识图谱 networkx 数据
     ├── memory.json               # 记忆系统持久化
     ├── pet.json                  # 宠物状态持久化
+    ├── activity.json             # 启动页 Recent activity 记录
+    ├── agent_config.json         # Agent 配置（show_thoughts 等）
+    ├── todo.json                 # 每日任务数据
+    ├── cmd_history               # 命令历史记录
+    ├── embedding_cache.db        # 向量缓存（SQLite WAL 模式）
+    ├── memory/                   # 跨会话记忆（按会话名隔离）
     ├── sessions/                 # 会话历史
     ├── uploads/                  # 原文件副本
     ├── uploads/quick/            # 快速入库内容
@@ -227,7 +233,7 @@ ima-kb/
 
 ### `run.py` — CLI 入口
 - `cli` group（**注意**：之前的 bug 是 chat 命令放在 cli 定义之前导致 NameError，已修复，新增命令要放在 `cli` 之后）
-- **顶层命令**（22个）：`web` `chat` `ingest` `note` `clip` `url` `list` `search` `ask` `show` `stats` `retag` `delete` `rebuild` `memory` `watch` `report` `analyze` `sync` `health` `dedup` `graph`
+- **顶层命令**（23个）：`web` `init` `chat` `ingest` `note` `clip` `url` `list` `search` `ask` `show` `stats` `retag` `delete` `rebuild` `memory` `watch` `report` `analyze` `sync` `health` `dedup` `doctor` `graph`
 - **`graph` 子命令组**（5 个）：
   - `ima graph build [--force] [-d ID] [-n N]`：调 LLM 抽取实体关系构建图谱
   - `ima graph stats [-t TYPE]`：图谱统计 + 节点列表
@@ -248,7 +254,7 @@ ima-kb/
 - **AI 对话**：橙色 `⏺` 圆点标记 + 首 token Spinner + 流式输出
 - **Web 后台**：`/web` 后台线程启动 FastAPI、`/web stop` 关闭；支持 `--host --port` 参数
 - 命令：`/help /search /ingest /list /show /tags /tag /delete /stats /rebuild /clear /web /web stop /exit /quit`
-- 多轮对话：保留最近 10 条 history（5 轮）
+- 多轮对话：保留最近 20 条 history（10 轮）
 - **已移除**：自适应 Logo 切换（`_pick_logo`、`ASCII_LOGO_SMALL`、`ASCII_LOGO_MINI`）
 
 ### `core/ingestion/parser.py` — 多格式解析
@@ -458,7 +464,7 @@ ima web
 
 ---
 
-**项目状态**：P1-P7 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），323 个测试（319 通过 / 4 失败为已知老问题），可用于日常使用。后续优化方向见上方「后续待办」章节（2 项剩余：图谱扩展、多用户隔离）。
+**项目状态**：P1-P7 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），407 个测试全部通过，可用于日常使用。后续优化方向见上方「后续待办」章节（2 项剩余：图谱扩展、多用户隔离）。
 
 ---
 
@@ -681,7 +687,7 @@ IMAGE_RESPONSE_FORMAT=url
 | `core/cli/completer.py` | 命令自动补全 |
 | `core/cli/welcome.py` | 启动页渲染 + 活动记录 |
 | `core/cli/constants.py` | 常量、命令列表、别名表、console 实例 |
-| `core/cli/commands/` | 各命令处理器（agent/docs/graph/memory/pet/pipe/session/sync/analyze） |
+| `core/cli/commands/` | 各命令处理器（agent/docs/graph/memory/pet/pipe/session/sync/analyze/todo） |
 
 根目录 `repl.py` 现为薄封装，仅 `from core.cli.main import main` 委托执行。
 
