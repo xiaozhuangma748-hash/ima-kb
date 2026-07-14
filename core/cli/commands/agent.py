@@ -144,6 +144,7 @@ class AgentMixin:
         agent_status = _AgentStatus()
         step_n = [0]
         last_tool = [None]
+        tool_live = [None]  # 工具行的 Live spinner
 
         def _stop_spinner():
             if spinner[0]:
@@ -155,9 +156,15 @@ class AgentMixin:
                 live[0].stop()
                 live[0] = None
 
+        def _stop_tool_live():
+            if tool_live[0]:
+                tool_live[0].stop()
+                tool_live[0] = None
+
         def _stop():
             _stop_spinner()
             _stop_live()
+            _stop_tool_live()
 
         def _ensure_live():
             if live[0] is None:
@@ -172,6 +179,7 @@ class AgentMixin:
                 step_n[0] += 1
                 llm_start[0] = time.time()
                 _stop_spinner()
+                _stop_tool_live()
                 if show_thoughts:
                     spinner[0] = Live(
                         Spinner("dots", text=" [dim]Thinking...[/dim]"),
@@ -201,6 +209,7 @@ class AgentMixin:
             elif step_type == "tool":
                 last_tool[0] = content
                 _stop_spinner()
+                _stop_tool_live()
                 if show_thoughts:
                     spinner[0] = Live(
                         Spinner("dots", text=f" [dim]{content}[/dim]"),
@@ -208,10 +217,13 @@ class AgentMixin:
                     )
                     spinner[0].start()
                 else:
-                    # 先停止 Live，否则 print 输出会被吞掉
-                    _stop_live()
+                    # 动态 spinner 工具行
                     tool_name = content.split()[0] if content.split() else content
-                    console.print(f"  [dim]⠋ {tool_name}[/dim]")
+                    tool_live[0] = Live(
+                        Spinner("dots", text=Text(f" {tool_name}", style="dim"), style="cyan"),
+                        console=console, transient=True, refresh_per_second=8,
+                    )
+                    tool_live[0].start()
 
             elif step_type == "result":
                 if show_thoughts:
@@ -226,8 +238,8 @@ class AgentMixin:
                     header.append(f"{tool_name}  ({len(content)} chars)", style="dim")
                     console.print(header)
                 else:
-                    # 先停止 Live，否则 print 输出会被吞掉
-                    _stop_live()
+                    # 停止工具 spinner，打印完成行
+                    _stop_tool_live()
                     tool = last_tool[0] or "tool"
                     tool_name = tool.split()[0] if tool.split() else tool
                     console.print(f"  [dim][OK] {tool_name}  ({len(content)} chars)[/dim]")

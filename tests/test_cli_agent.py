@@ -9,7 +9,7 @@ class _DummyREPL(AgentMixin):
 
 
 def test_hide_thoughts_live_reused():
-    """Hide Thoughts 模式：Live 在 tool/result 时停止，llm_start 时重启。"""
+    """Hide Thoughts 模式：tool 用 Live spinner，result 用 print 打印完成行。"""
     repl = _DummyREPL()
     mock_live = MagicMock()
 
@@ -24,11 +24,10 @@ def test_hide_thoughts_live_reused():
         on_step("done", "")
         stop()
 
-    # Live 在 tool/result 时停止，在下一个 llm_start 时重启
-    assert mock_live.start.call_count == 2, "Live 应启动两次（Step 1 和 Step 2）"
-    assert mock_live.stop.call_count >= 2, "Live 应在 tool/result 时停止"
-    # tool 和 result 应打印永久行
-    assert mock_print.call_count >= 2, "tool 和 result 各打印一行"
+    # tool 用 Live spinner（不经过 print），result 用 print 打印完成行
+    assert mock_print.call_count >= 1, "result 应打印一行"
+    # Live 应被多次创建（thinking + tool）
+    assert mock_live.start.call_count >= 2
 
 
 def test_show_thoughts_no_live():
