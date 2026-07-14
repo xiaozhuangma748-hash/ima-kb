@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 
 from rich.markdown import Markdown
 from rich.live import Live
@@ -15,6 +17,31 @@ from rich.text import Text
 
 from core.llm.client import get_llm, LLMError
 from core.cli.constants import console
+
+
+# Agent 配置持久化路径
+_AGENT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "storage" / "agent_config.json"
+
+
+def _load_agent_config() -> dict:
+    """加载 Agent 配置。"""
+    if not _AGENT_CONFIG_PATH.exists():
+        return {"show_thoughts": False}
+    try:
+        with open(_AGENT_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"show_thoughts": False}
+
+
+def _save_agent_config(config: dict) -> None:
+    """保存 Agent 配置。"""
+    try:
+        _AGENT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_AGENT_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        console.print(f"[yellow]保存 Agent 配置失败: {e}[/yellow]")
 
 
 def _wrap_indented(content: str, indent: int = 4, width: int = 0) -> list[Text]:
@@ -56,10 +83,48 @@ def _wrap_indented(content: str, indent: int = 4, width: int = 0) -> list[Text]:
     return result
 
 
+class _AgentStatus:
+    """Dynamic status renderable for Hide Thoughts mode.
+
+    Implements __rich_console__ so Live's refresh loop creates a fresh
+    Spinner each frame — both the animation frame and the text are
+    always up-to-date. No timer thread needed.
+
+    States:
+    - thinking: shows elapsed seconds (e.g. "Thinking 3s")
+    - static:   shows tool name + optional detail (e.g. "search · 1234 chars")
+    """
+
+    def __init__(self) -> None:
+        self._thinking = True
+        self._label = "Thinking"
+        self._detail = ""
+        self._start = time.time()
+
+    def set_thinking(self) -> None:
+        self._thinking = True
+        self._start = time.time()
+
+    def set_static(self, label: str, detail: str = "") -> None:
+        self._thinking = False
+        self._label = label
+        self._detail = detail
+
+    def __rich_console__(self, console, options):
+        if self._thinking:
+            elapsed = time.time() - self._start
+            desc = f"Thinking {elapsed:.0f}s"
+        else:
+            desc = self._label
+            if self._detail:
+                desc = f"{desc} · {self._detail}"
+        yield Spinner("dots", text=Text(f" {desc}", style="dim"), style="cyan")
+
+
 class AgentMixin:
     """Agent 模式与智能路由。"""
 
-    def _make_agent_on_step(self):
+    def _make_agent_on_step(self, show_thoughts: bool = True):
         """创建 Agent on_step 回调 — Trae 垂直风格。
 
         参考 Trae IDE 的展示方式：
@@ -67,79 +132,120 @@ class AgentMixin:
         - 内容缩进显示在标题下方
         - 无竖线装饰，层次清晰
 
+        Args:
+            show_thoughts: 是否显示 thought 详细内容
+
         返回 (on_step, stop_spinner, t0, step_n) 四元组。
         """
         t0 = time.time()
         llm_start = [0]
         spinner = [None]
+        live = [None]
+        agent_status = _AgentStatus()
         step_n = [0]
         last_tool = [None]
 
-        def _stop():
+        def _stop_spinner():
             if spinner[0]:
                 spinner[0].stop()
                 spinner[0] = None
 
+        def _stop_live():
+            if live[0]:
+                live[0].stop()
+                live[0] = None
+
+        def _stop():
+            _stop_spinner()
+            _stop_live()
+
+        def _ensure_live():
+            if live[0] is None:
+                live[0] = Live(
+                    agent_status, console=console, transient=True,
+                    refresh_per_second=8,
+                )
+                live[0].start()
+
         def on_step(step_type: str, content: str) -> None:
             if step_type == "llm_start":
+                step_n[0] += 1
                 llm_start[0] = time.time()
-                _stop()
-                spinner[0] = Live(
-                    Spinner("dots", text=" [dim]思考中...[/dim]"),
-                    console=console, transient=True, refresh_per_second=10,
-                )
-                spinner[0].start()
+                _stop_spinner()
+                if show_thoughts:
+                    spinner[0] = Live(
+                        Spinner("dots", text=" [dim]Thinking...[/dim]"),
+                        console=console, transient=True, refresh_per_second=10,
+                    )
+                    spinner[0].start()
+                else:
+                    agent_status.set_thinking()
+                    _ensure_live()
 
             elif step_type == "thought":
-                _stop()
-                step_n[0] += 1
-                elapsed = time.time() - llm_start[0]
-                thought = content.replace('\n', ' ').replace('\\n', ' ').strip()
-                if len(thought) > 150:
-                    thought = thought[:150] + "..."
-                # 标题行：图标 + 思考 + 耗时
-                header = Text()
-                header.append("  ", style="bright_black")
-                header.append("[T]", style="bright_black")
-                header.append("  ", style="bright_black")
-                header.append(f"思考  {elapsed:.1f}s", style="bold dim")
-                console.print(header)
-                # 内容缩进（与 [T] 对齐）
-                for line in _wrap_indented(thought, indent=2):
-                    console.print(line)
+                if show_thoughts:
+                    _stop_spinner()
+                    elapsed = time.time() - llm_start[0]
+                    header = Text()
+                    header.append("  ", style="bright_black")
+                    header.append("[T]", style="bright_black")
+                    header.append("  ", style="bright_black")
+                    header.append(f"Thinking  {elapsed:.1f}s", style="bold dim")
+                    thought = content.replace('\n', ' ').replace('\\n', ' ').strip()
+                    if len(thought) > 60:
+                        thought = thought[:60] + "..."
+                    header.append("  ", style="bright_black")
+                    header.append(thought, style="dim")
+                    console.print(header)
 
             elif step_type == "tool":
-                _stop()
                 last_tool[0] = content
-                spinner[0] = Live(
-                    Spinner("dots", text=f" [dim]{content}[/dim]"),
-                    console=console, transient=True, refresh_per_second=10,
-                )
-                spinner[0].start()
+                _stop_spinner()
+                if show_thoughts:
+                    spinner[0] = Live(
+                        Spinner("dots", text=f" [dim]{content}[/dim]"),
+                        console=console, transient=True, refresh_per_second=10,
+                    )
+                    spinner[0].start()
+                else:
+                    # 先停止 Live，否则 print 输出会被吞掉
+                    _stop_live()
+                    tool_name = content.split()[0] if content.split() else content
+                    console.print(f"  [dim]⠋ {tool_name}[/dim]")
 
             elif step_type == "result":
-                _stop()
-                tool = last_tool[0] or "tool"
-                tool_parts = tool.split()
-                tool_name = tool_parts[0] if tool_parts else tool
-                header = Text()
-                header.append("  ", style="bright_black")
-                header.append("[OK]", style="green")
-                header.append("  ", style="bright_black")
-                header.append(f"{tool_name}  ({len(content)} 字符)", style="dim")
-                console.print(header)
+                if show_thoughts:
+                    _stop_spinner()
+                    tool = last_tool[0] or "tool"
+                    tool_parts = tool.split()
+                    tool_name = tool_parts[0] if tool_parts else tool
+                    header = Text()
+                    header.append("  ", style="bright_black")
+                    header.append("[OK]", style="green")
+                    header.append("  ", style="bright_black")
+                    header.append(f"{tool_name}  ({len(content)} chars)", style="dim")
+                    console.print(header)
+                else:
+                    # 先停止 Live，否则 print 输出会被吞掉
+                    _stop_live()
+                    tool = last_tool[0] or "tool"
+                    tool_name = tool.split()[0] if tool.split() else tool
+                    console.print(f"  [dim][OK] {tool_name}  ({len(content)} chars)[/dim]")
 
             elif step_type == "error":
                 _stop()
                 err = content.replace('\n', ' ').strip()
                 if len(err) > 150:
                     err = err[:150] + "..."
-                header = Text()
-                header.append("  ", style="bright_black")
-                header.append("[ERR]", style="red")
-                header.append("  ", style="bright_black")
-                header.append(err, style="red")
-                console.print(header)
+                if show_thoughts:
+                    header = Text()
+                    header.append("  ", style="bright_black")
+                    header.append("[ERR]", style="red")
+                    header.append("  ", style="bright_black")
+                    header.append(err, style="red")
+                    console.print(header)
+                else:
+                    console.print(f"  [red][ERR] {err}[/red]")
 
             elif step_type == "done":
                 _stop()
@@ -150,17 +256,33 @@ class AgentMixin:
         """Agent 模式：/agent <任务描述>
 
         LLM 自主调工具完成复杂任务（搜索、读文档、分析数据等）。
+
+        子命令：
+        - /agent think on     Show thoughts
+        - /agent think off    Hide thoughts (default)
         """
         if not arg:
-            console.print("[yellow]用法: /agent <任务描述>[/yellow]")
+            console.print("[yellow]Usage: /agent <task description>[/yellow]")
+            console.print("  [cyan]/agent think on[/cyan]  · Show thoughts")
+            console.print("  [cyan]/agent think off[/cyan] · Hide thoughts (default)")
             console.print("[dim]示例:[/dim]")
             console.print("  [cyan]/agent 列出所有关于骨灰安置的政策并总结要点[/cyan]")
             console.print("  [cyan]/agent 找到最新政策，阅读第 1 段并解读[/cyan]")
             console.print("  [cyan]/agent 分析 ~/Desktop/数据.xlsx 并跟入库文档对比[/cyan]")
             return
+
+        # 处理子命令 /agent think on|off
+        parts = arg.strip().split(maxsplit=1)
+        if parts and parts[0].lower() == "think":
+            self._cmd_agent_think(parts[1] if len(parts) > 1 else "")
+            return
+
         if not self.llm_available:
             console.print("[red]LLM 未配置，无法使用 Agent 模式[/red]")
             return
+
+        config = _load_agent_config()
+        show_thoughts = bool(config.get("show_thoughts", False))
 
         from core.agent.agent import Agent
         try:
@@ -169,18 +291,19 @@ class AgentMixin:
             console.print(f"[red]初始化失败: {e}[/red]")
             return
 
-        console.print(f"\n[bold magenta]Agent 启动[/bold magenta] · 任务: [cyan]{arg}[/cyan]\n")
+        mode_hint = " · Show Thoughts" if show_thoughts else " · Hide Thoughts"
+        console.print(f"\n[bold magenta]Agent[/bold magenta] · Task: [cyan]{arg}[/cyan][dim]{mode_hint}[/dim]\n")
 
-        on_step, stop_spinner, t0, step_n = self._make_agent_on_step()
+        on_step, stop_spinner, t0, step_n = self._make_agent_on_step(show_thoughts=show_thoughts)
 
         try:
-            result = ag.run(arg, on_step=on_step)
+            result = ag.run(arg, on_step=on_step, show_thoughts=show_thoughts)
             stop_spinner()
-            elapsed = time.time() - t0
-            console.print(f"\n[bold magenta]✓ 完成[/bold magenta] [dim]· {elapsed:.1f}s · 共 {step_n[0]} 步[/dim]\n")
             # 直接 Markdown 输出，不用 Panel 包裹
             console.print(Markdown(result))
             console.print()
+            elapsed = time.time() - t0
+            console.print(f"[bold magenta]✻ ✓ Complete[/bold magenta] [dim]· Brewed for {elapsed:.1f}s · {step_n[0]} Steps[/dim]\n")
             # 宠物经验埋点：agent 行为
             self._pet_gain_exp(15, "agent")
         except LLMError as e:
@@ -212,6 +335,23 @@ class AgentMixin:
                     "  4. 用 [cyan]/stats[/cyan] 查看知识库状态，确认 LLM 在线"
                 )
 
+    def _cmd_agent_think(self, arg: str) -> None:
+        """控制 Agent 思考过程显示：/agent think on|off"""
+        arg = arg.strip().lower()
+        config = _load_agent_config()
+        if arg == "on":
+            config["show_thoughts"] = True
+            _save_agent_config(config)
+            console.print("[green]✅ Thoughts shown[/green]")
+            console.print("[dim]Detailed reasoning will be displayed in next /agent task[/dim]")
+        elif arg == "off" or arg == "":
+            config["show_thoughts"] = False
+            _save_agent_config(config)
+            console.print("[green]✅ Thoughts hidden[/green]")
+            console.print("[dim]Only tool status will be displayed in next /agent task[/dim]")
+        else:
+            console.print(f"[yellow]Usage: /agent think on|off (current: {'on' if config.get('show_thoughts') else 'off'})[/yellow]")
+
     def _cmd_smart(self, arg: str) -> None:
         """智能路由：/smart <自然语言描述> — AI 自主决策执行。
 
@@ -234,16 +374,19 @@ class AgentMixin:
         try:
             from core.agent.agent import Agent
             agent = Agent(storage=self.storage)
-            console.print(f"[bold magenta]Agent 启动[/bold magenta] · 任务: [cyan]{arg}[/cyan]\n")
+            config = _load_agent_config()
+            show_thoughts = bool(config.get("show_thoughts", False))
+            mode_hint = " · Show Thoughts" if show_thoughts else " · Hide Thoughts"
+            console.print(f"[bold magenta]Agent[/bold magenta] · Task: [cyan]{arg}[/cyan][dim]{mode_hint}[/dim]\n")
 
-            on_step, stop_spinner, t0, step_n = self._make_agent_on_step()
-            result = agent.run(arg, on_step=on_step)
+            on_step, stop_spinner, t0, step_n = self._make_agent_on_step(show_thoughts=show_thoughts)
+            result = agent.run(arg, on_step=on_step, show_thoughts=show_thoughts)
             stop_spinner()
-            elapsed = time.time() - t0
-            console.print(f"\n[bold magenta]✓ 完成[/bold magenta] [dim]· {elapsed:.1f}s · 共 {step_n[0]} 步[/dim]\n")
             if result:
                 console.print(Markdown(result))
             console.print()
+            elapsed = time.time() - t0
+            console.print(f"[bold magenta]✻ ✓ Complete[/bold magenta] [dim]· Brewed for {elapsed:.1f}s · {step_n[0]} Steps[/dim]\n")
             # 宠物经验埋点
             self._pet_gain_exp(8, "smart")
             return

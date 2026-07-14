@@ -33,6 +33,13 @@ from rich.table import Table
 from rich.prompt import Prompt
 from rich.live import Live
 from rich.spinner import Spinner
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    BarColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
 
 from config import settings
 from core.ingestion.parser import parse, is_supported, SUPPORTED_EXTENSIONS, ParseError
@@ -173,7 +180,7 @@ class DocsMixin:
         else:
             tag_hint = ""
         console.print(f"\n[bold]找到 {len(results)} 条相关结果[/bold] [dim](BM25)[/dim]{tag_hint}\n")
-        _record_activity("search", keyword[:40])
+        _record_activity("search", keyword[:40], getattr(self, 'active_session_name', None))
         import re as _re
         for i, r in enumerate(results, 1):
             preview = r.content[:200].replace("\n", " ")
@@ -231,7 +238,7 @@ class DocsMixin:
                 self._pet_gain_exp(30, "ingest")
         console.print(f"\n[bold]完成[/bold] · 成功 {success} / 共 {len(files)}\n")
         if success > 0:
-            _record_activity("ingest", f"{success}个文件")
+            _record_activity("ingest", f"{success}个文件", getattr(self, 'active_session_name', None))
 
     def _cmd_note(self, arg: str) -> None:
         """文本直入库：/note 一段文字。"""
@@ -294,40 +301,72 @@ class DocsMixin:
         if not is_supported(file_path):
             return False
         try:
-            parsed = parse(file_path)
-            if not parsed.text.strip():
-                if parsed.meta.get("ocr_unavailable"):
-                    console.print(
-                        f"  [yellow]跳过图片[/yellow]（OCR 未安装）: {file_path.name}  "
-                        f"[dim]用 brew install tesseract tesseract-lang 启用[/dim]"
-                    )
-                else:
-                    console.print(f"  [yellow]跳过空内容[/yellow]: {file_path.name}")
-                return False
-            chunks = chunk_document(
-                parsed,
-                chunk_size=settings.chunk_size,
-                chunk_overlap=settings.chunk_overlap,
-            )
-            # 去重检查
-            import hashlib
-            content_hash = hashlib.sha256(parsed.text.encode("utf-8")).hexdigest()
-            doc_id = content_hash[:32]
-            if self.storage.get_document(doc_id) is not None:
-                console.print(f"  [cyan]已存在（跳过）[/cyan]: {file_path.name}")
-                return False
+            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
-            # 自动打标签
-            tags: list[str] = []
-            if self.llm_available:
-                try:
-                    from core.classify.tagger import Tagger
-                    tagger = Tagger()
-                    tags = tagger.generate_tags_for_document(parsed)
-                except Exception as e:
-                    console.print(f"  [dim]标签生成失败: {type(e).__name__}[/dim]")
+            steps = ["解析", "分块", "去重", "标签", "保存"]
+            with Progress(
+                SpinnerColumn(spinner_name="dots"),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(bar_width=20),
+                TaskProgressColumn(),
+                console=console,
+                transient=True,
+            ) as progress:
+                task = progress.add_task(f"[cyan]{file_path.name}[/cyan]", total=len(steps))
 
-            record = self.storage.save_document(parsed, chunks, copy_file=True, tags=tags)
+                # 1. 解析
+                progress.update(task, description=f"[cyan]解析[/cyan] {file_path.name}")
+                parsed = parse(file_path)
+                progress.advance(task)
+
+                if not parsed.text.strip():
+                    progress.stop()
+                    if parsed.meta.get("ocr_unavailable"):
+                        console.print(
+                            f"  [yellow]跳过图片[/yellow]（OCR 未安装）: {file_path.name}  "
+                            f"[dim]用 brew install tesseract tesseract-lang 启用[/dim]"
+                        )
+                    else:
+                        console.print(f"  [yellow]跳过空内容[/yellow]: {file_path.name}")
+                    return False
+
+                # 2. 分块
+                progress.update(task, description=f"[cyan]分块[/cyan] {file_path.name}")
+                chunks = chunk_document(
+                    parsed,
+                    chunk_size=settings.chunk_size,
+                    chunk_overlap=settings.chunk_overlap,
+                )
+                progress.advance(task)
+
+                # 3. 去重检查
+                progress.update(task, description=f"[cyan]去重[/cyan] {file_path.name}")
+                import hashlib
+                content_hash = hashlib.sha256(parsed.text.encode("utf-8")).hexdigest()
+                doc_id = content_hash[:32]
+                if self.storage.get_document(doc_id) is not None:
+                    progress.stop()
+                    console.print(f"  [cyan]已存在（跳过）[/cyan]: {file_path.name}")
+                    return False
+                progress.advance(task)
+
+                # 4. 自动打标签
+                progress.update(task, description=f"[cyan]标签[/cyan] {file_path.name}")
+                tags: list[str] = []
+                if self.llm_available:
+                    try:
+                        from core.classify.tagger import Tagger
+                        tagger = Tagger()
+                        tags = tagger.generate_tags_for_document(parsed)
+                    except Exception as e:
+                        console.print(f"  [dim]标签生成失败: {type(e).__name__}[/dim]")
+                progress.advance(task)
+
+                # 5. 保存
+                progress.update(task, description=f"[cyan]保存[/cyan] {file_path.name}")
+                record = self.storage.save_document(parsed, chunks, copy_file=True, tags=tags)
+                progress.advance(task)
+
             tag_str = f"  [dim]标签: {', '.join(tags)}[/dim]" if tags else ""
             console.print(
                 f"  [green]✓[/green] {file_path.name}  "
@@ -406,7 +445,7 @@ class DocsMixin:
             az.render(result)
             # 保存到当前分析状态（供追问用）
             self.current_analysis = (az, result)
-            _record_activity("analyze", path.name[:40])
+            _record_activity("analyze", path.name[:40], getattr(self, 'active_session_name', None))
             console.print(
                 "[dim]提示：现在可以直接追问，如「按月份汇总」「哪个最多」「缺失值情况」[/dim]\n"
             )
@@ -570,30 +609,72 @@ class DocsMixin:
             console.print(f"[yellow]未找到源标签: {source_tag}[/yellow]")
 
     def _cmd_delete(self, id_str: str) -> None:
-        """删除文档。"""
+        """删除文档，支持批量: /delete <id1> <id2> <id3>。"""
         if not id_str:
-            console.print("[yellow]用法: /delete <id 前 8 位>[/yellow]")
+            console.print("[yellow]用法: /delete <id 前 8 位> [<id 前 8 位> ...][/yellow]")
+            console.print("[dim]支持一次删除多个文档，用空格分隔[/dim]")
             return
-        doc_id = self._resolve_doc_id(id_str)
-        if not doc_id:
-            console.print(f"[red]未找到文档:[/red] {id_str}")
+
+        id_strs = id_str.split()
+        # 解析所有 id，收集存在的文档
+        targets: list[tuple[str, str, object]] = []  # (原始输入, doc_id, doc)
+        not_found: list[str] = []
+        for s in id_strs:
+            doc_id = self._resolve_doc_id(s)
+            if not doc_id:
+                not_found.append(s)
+                continue
+            doc = self.storage.get_document(doc_id)
+            if not doc:
+                not_found.append(s)
+                continue
+            targets.append((s, doc_id, doc))
+
+        for s in not_found:
+            console.print(f"[red]未找到文档:[/red] {s}")
+
+        if not targets:
             return
-        doc = self.storage.get_document(doc_id)
-        if not doc:
-            console.print("[red]文档不存在[/red]")
+
+        # 列出所有待删除文档
+        if len(targets) == 1:
+            s, doc_id, doc = targets[0]
+            confirm = Prompt.ask(
+                f"确定删除 [cyan]{doc.title}[/cyan]？",
+                choices=["y", "n"], default="n"
+            )
+            if confirm != "y":
+                console.print("[dim]已取消[/dim]")
+                return
+            if self.storage.delete_document(doc_id):
+                console.print(f"[green]✓ 已删除[/green]")
+            else:
+                console.print(f"[red]删除失败[/red]")
             return
-        # 确认
+
+        # 批量：列出所有文档后一次确认
+        console.print(f"\n[bold]将删除以下 {len(targets)} 个文档:[/bold]\n")
+        for i, (s, doc_id, doc) in enumerate(targets, 1):
+            console.print(f"  {i}. [cyan]{doc.title}[/cyan] [dim]({s})[/dim]")
+        console.print()
         confirm = Prompt.ask(
-            f"确定删除 [cyan]{doc.title}[/cyan]？",
+            f"确定删除以上 {len(targets)} 个文档？",
             choices=["y", "n"], default="n"
         )
         if confirm != "y":
             console.print("[dim]已取消[/dim]")
             return
-        if self.storage.delete_document(doc_id):
-            console.print(f"[green]✓ 已删除[/green]")
-        else:
-            console.print(f"[red]删除失败[/red]")
+        ok_count = 0
+        fail_count = 0
+        for s, doc_id, doc in targets:
+            if self.storage.delete_document(doc_id):
+                console.print(f"[green]✓ 已删除[/green] [dim]{doc.title}[/dim]")
+                ok_count += 1
+            else:
+                console.print(f"[red]删除失败[/red] [dim]{doc.title}[/dim]")
+                fail_count += 1
+        console.print(f"[dim]共删除 {ok_count} 个" +
+                      (f"，{fail_count} 个失败" if fail_count else "") + "[/dim]")
 
     def _cmd_reparse(self, id_str: str) -> None:
         """重新解析文档：/reparse <id 前 8 位 | 文件路径>
@@ -752,8 +833,8 @@ class DocsMixin:
         --vector / -v: 同时重建向量索引并热更新到当前会话的检索链路
         """
         vector_flag = "--vector" in arg or "-v" in arg
-        console.print("[bold]重建 BM25 索引...[/bold]")
-        count = self.storage.rebuild_bm25_index()
+        with console.status("[bold yellow]重建 BM25 索引...[/bold yellow]", spinner="dots"):
+            count = self.storage.rebuild_bm25_index()
         info = self.storage.bm25.info()
         console.print(f"[green]✓ BM25 完成[/green] · 索引 {info['chunks']} 块 / 词汇 {info['vocabulary']}")
 
@@ -762,8 +843,8 @@ class DocsMixin:
                 from core.retrieval.vector import VectorIndex
                 vector_index = VectorIndex()
                 if vector_index.is_available():
-                    console.print("[bold]重建向量索引...[/bold]")
-                    v_count = self.storage.rebuild_vector_index(vector_index)
+                    with console.status("[bold yellow]重建向量索引...[/bold yellow]", spinner="dots"):
+                        v_count = self.storage.rebuild_vector_index(vector_index)
                     console.print(f"[green]✓ 向量索引完成[/green] · {v_count} 块")
                     # 热更新：让当前会话的检索链路立即用上新索引
                     self.storage.attach_vector_index(vector_index)
@@ -837,24 +918,37 @@ class DocsMixin:
             return
 
         success, fail = 0, 0
-        for i, doc in enumerate(target_docs, 1):
-            chunks = self.storage.get_chunks(doc.id)
-            content_preview = "\n".join(c.content for c in chunks)
-            console.print(f"[{i}/{len(target_docs)}] [cyan]{doc.title[:50]}[/cyan]")
-            try:
-                tags = tagger.generate_tags(
-                    title=doc.title, file_type=doc.file_type, content=content_preview,
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("[yellow]打标签...[/yellow]", total=len(target_docs))
+            for i, doc in enumerate(target_docs, 1):
+                chunks = self.storage.get_chunks(doc.id)
+                content_preview = "\n".join(c.content for c in chunks)
+                progress.update(
+                    task,
+                    description=f"[{i}/{len(target_docs)}] {doc.title[:50]}",
                 )
-                if tags:
-                    self.storage.update_document_tags(doc.id, tags)
-                    console.print(f"  [green]✓[/green] [dim]{', '.join(tags)}[/dim]")
-                    success += 1
-                else:
-                    console.print("  [yellow]未生成标签[/yellow]")
+                try:
+                    tags = tagger.generate_tags(
+                        title=doc.title, file_type=doc.file_type, content=content_preview,
+                    )
+                    if tags:
+                        self.storage.update_document_tags(doc.id, tags)
+                        console.print(f"  [green]✓[/green] [dim]{', '.join(tags)}[/dim]")
+                        success += 1
+                    else:
+                        console.print("  [yellow]未生成标签[/yellow]")
+                        fail += 1
+                except Exception as e:
+                    console.print(f"  [red]失败: {e}[/red]")
                     fail += 1
-            except Exception as e:
-                console.print(f"  [red]失败: {e}[/red]")
-                fail += 1
+                progress.advance(task)
 
         console.print(f"\n[bold]完成[/bold] · 成功 {success} / 失败 {fail}\n")
 
@@ -936,16 +1030,36 @@ class DocsMixin:
 
         # ---- 停止子命令 ----
         if parts and parts[0] == "stop":
-            if self._web_server is None:
+            port = 8501
+            for i, p in enumerate(parts):
+                if p in ("-p", "--port") and i + 1 < len(parts):
+                    port = int(parts[i + 1])
+
+            stopped = False
+            # 1. 停止当前 REPL 托管的 server
+            if self._web_server is not None:
+                console.print("[yellow]正在停止 Web 服务...[/yellow]")
+                self._web_server.should_exit = True
+                if self._web_thread is not None:
+                    self._web_thread.join(timeout=5)
+                self._web_server = None
+                self._web_thread = None
+                stopped = True
+
+            # 2. 兜底：按端口强制释放（处理 REPL 重启/崩溃后遗留进程）
+            import subprocess
+            try:
+                pids = subprocess.check_output(["lsof", "-ti", f":{port}"], text=True, stderr=subprocess.DEVNULL).strip().splitlines()
+                if pids:
+                    subprocess.run(["kill", "-9"] + pids, check=False)
+                    stopped = True
+            except subprocess.CalledProcessError:
+                pids = []
+
+            if stopped:
+                console.print("[green]✓ Web 服务已停止[/green]")
+            else:
                 console.print("[yellow]Web 服务未在运行[/yellow]")
-                return
-            console.print("[yellow]正在停止 Web 服务...[/yellow]")
-            self._web_server.should_exit = True
-            if self._web_thread is not None:
-                self._web_thread.join(timeout=5)
-            self._web_server = None
-            self._web_thread = None
-            console.print("[green]✓ Web 服务已停止[/green]")
             return
 
         # ---- 已运行时给出提示 ----
@@ -961,16 +1075,33 @@ class DocsMixin:
             elif p in ("-p", "--port") and i + 1 < len(parts):
                 port = int(parts[i + 1])
 
+        # 启动前检查端口占用：如果占用则尝试先释放
+        import subprocess
+        try:
+            pids = subprocess.check_output(["lsof", "-ti", f":{port}"], text=True, stderr=subprocess.DEVNULL).strip().splitlines()
+            if pids:
+                console.print(f"[yellow]端口 {port} 被占用，正在释放...[/yellow]")
+                subprocess.run(["kill", "-9"] + pids, check=False)
+                import time
+                time.sleep(0.5)
+        except subprocess.CalledProcessError:
+            pass
+
         from web.app import create_app
         app = create_app()
         config = uvicorn.Config(app, host=host, port=port, log_level="warning")
         self._web_server = uvicorn.Server(config)
+        self._web_port = port
 
         def _run_server():
             try:
                 self._web_server.run()
             except Exception:
                 pass
+            finally:
+                # 运行结束后自动清理引用
+                self._web_server = None
+                self._web_thread = None
 
         self._web_thread = threading.Thread(target=_run_server, daemon=True)
         self._web_thread.start()

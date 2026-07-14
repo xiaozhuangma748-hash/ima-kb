@@ -76,9 +76,12 @@ class MemoryMixin:
         })
         console.print(f"[green]✓ 已切换主题[/green] [bold]{new_t.label}[/bold]")
         console.print(f"[dim]{new_t.desc}[/dim]\n")
-        # 重新渲染欢迎面板
+        # 重新渲染欢迎面板（传入当前会话名，避免丢失"上次会话"标签）
         stats = self.storage.stats()
-        _render_welcome_panel(stats, self.llm_available, pet=self.pet)
+        _render_welcome_panel(
+            stats, self.llm_available, pet=self.pet,
+            session_name=getattr(self, "active_session_name", None),
+        )
 
     # ---- 记忆管理 ----
 

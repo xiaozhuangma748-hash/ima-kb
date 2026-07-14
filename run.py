@@ -28,6 +28,7 @@ from typing import Optional
 import click
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.table import Table
 
 from config import settings
@@ -60,47 +61,72 @@ def _ingest_one(storage: Storage, file_path: Path, verbose: bool = False, auto_t
         return False
 
     try:
-        # 1. 解析
-        parsed = parse(file_path)
-        if not parsed.text.strip():
-            # 检查是否是 OCR 不可用导致的
-            if parsed.meta.get("ocr_unavailable"):
-                console.print(
-                    f"  [yellow]跳过图片[/yellow]（OCR 未安装）: {file_path.name}  "
-                    f"[dim]用 brew install tesseract tesseract-lang 启用[/dim]"
-                )
-            else:
-                console.print(f"  [yellow]跳过空内容[/yellow]: {file_path.name}")
-            return False
+        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
-        # 2. 分块
-        chunks = chunk_document(
-            parsed,
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-        )
+        steps = ["解析", "分块", "去重", "标签", "保存"]
+        with Progress(
+            SpinnerColumn(spinner_name="dots"),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=20),
+            TaskProgressColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task(f"[cyan]{file_path.name}[/cyan]", total=len(steps))
 
-        # 3. 存储去重检查
-        import hashlib
-        content_hash = hashlib.sha256(parsed.text.encode("utf-8")).hexdigest()
-        doc_id = content_hash[:32]
-        if storage.get_document(doc_id) is not None:
-            console.print(f"  [cyan]已存在（跳过）[/cyan]: {file_path.name}")
-            return False
+            # 1. 解析
+            progress.update(task, description=f"[cyan]解析[/cyan] {file_path.name}")
+            parsed = parse(file_path)
+            progress.advance(task)
 
-        # 4. 自动打标签（可选）
-        tags: list[str] = []
-        if auto_tag and settings.has_llm():
-            try:
-                from core.classify.tagger import Tagger
-                tagger = Tagger()
-                tags = tagger.generate_tags_for_document(parsed)
-            except Exception as e:
-                if verbose:
-                    console.print(f"     [yellow]标签生成失败[/yellow]: {type(e).__name__}: {e}")
+            if not parsed.text.strip():
+                progress.stop()
+                if parsed.meta.get("ocr_unavailable"):
+                    console.print(
+                        f"  [yellow]跳过图片[/yellow]（OCR 未安装）: {file_path.name}  "
+                        f"[dim]用 brew install tesseract tesseract-lang 启用[/dim]"
+                    )
+                else:
+                    console.print(f"  [yellow]跳过空内容[/yellow]: {file_path.name}")
+                return False
 
-        # 5. 保存
-        record = storage.save_document(parsed, chunks, copy_file=True, tags=tags)
+            # 2. 分块
+            progress.update(task, description=f"[cyan]分块[/cyan] {file_path.name}")
+            chunks = chunk_document(
+                parsed,
+                chunk_size=settings.chunk_size,
+                chunk_overlap=settings.chunk_overlap,
+            )
+            progress.advance(task)
+
+            # 3. 存储去重检查
+            progress.update(task, description=f"[cyan]去重[/cyan] {file_path.name}")
+            import hashlib
+            content_hash = hashlib.sha256(parsed.text.encode("utf-8")).hexdigest()
+            doc_id = content_hash[:32]
+            if storage.get_document(doc_id) is not None:
+                progress.stop()
+                console.print(f"  [cyan]已存在（跳过）[/cyan]: {file_path.name}")
+                return False
+            progress.advance(task)
+
+            # 4. 自动打标签（可选）
+            progress.update(task, description=f"[cyan]标签[/cyan] {file_path.name}")
+            tags: list[str] = []
+            if auto_tag and settings.has_llm():
+                try:
+                    from core.classify.tagger import Tagger
+                    tagger = Tagger()
+                    tags = tagger.generate_tags_for_document(parsed)
+                except Exception as e:
+                    if verbose:
+                        console.print(f"     [yellow]标签生成失败[/yellow]: {type(e).__name__}: {e}")
+            progress.advance(task)
+
+            # 5. 保存
+            progress.update(task, description=f"[cyan]保存[/cyan] {file_path.name}")
+            record = storage.save_document(parsed, chunks, copy_file=True, tags=tags)
+            progress.advance(task)
 
         tag_str = f"  [dim]标签: {', '.join(tags)}[/dim]" if tags else ""
         console.print(
@@ -160,7 +186,8 @@ def _run_headless(question: str, output: str = "text") -> None:
         pet=pet, storage=storage, memory_store=memory,
         hybrid_retriever=hybrid, reranker=reranker, llm=llm,
     )
-    result = admin.ask(question)
+    with console.status("[bold yellow]AI 检索 + 思考中...[/bold yellow]", spinner="dots"):
+        result = admin.ask(question)
 
     if output == "json":
         # JSON 输出（便于管道/脚本消费）
@@ -385,7 +412,8 @@ def cli_clip() -> None:
     type_label = {"image": "截图", "text": "文本", "url": "网页"}.get(content_type, "内容")
     console.print(f"[dim]检测到: {type_label}[/dim]")
 
-    parsed = parse(file_path)
+    with console.status("[bold yellow]解析中...[/bold yellow]", spinner="dots"):
+        parsed = parse(file_path)
     if not parsed.text.strip():
         console.print("[yellow]剪贴板内容为空[/yellow]")
         sys.exit(1)
@@ -407,10 +435,12 @@ def cli_url(url: str) -> None:
         url = "https://" + url
 
     console.print(f"[dim]抓取: {url}[/dim]")
-    file_path = save_url(url)
+    with console.status("[bold yellow]抓取网页...[/bold yellow]", spinner="dots"):
+        file_path = save_url(url)
     console.print(f"[dim]已提取正文: {file_path.name}[/dim]")
 
-    parsed = parse(file_path)
+    with console.status("[bold yellow]解析中...[/bold yellow]", spinner="dots"):
+        parsed = parse(file_path)
     chunks = chunk_document(parsed, chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
     record = storage.save_document(parsed, chunks, copy_file=False)
     console.print(f"[green]✓ 网页已入库[/green]  ID: {record.id[:8]}  标题: {record.title}")
@@ -583,7 +613,8 @@ def cli_ask(question: str, model: str = None) -> None:
         pet=pet, storage=storage, memory_store=memory,
         hybrid_retriever=hybrid, reranker=reranker, llm=llm,
     )
-    result = admin.ask(question)
+    with console.status("[bold yellow]AI 检索 + 思考中...[/bold yellow]", spinner="dots"):
+        result = admin.ask(question)
     console.print(Markdown(result.text))
     if result.citations:
         console.print("\n[bold cyan]引用溯源[/bold cyan]")
@@ -597,9 +628,9 @@ def cli_rebuild(vector: bool) -> None:
     """重建索引。"""
     storage = Storage()
     # 重建 BM25
-    console.print("[bold]重建 BM25 索引...[/bold]")
-    count = storage.rebuild_bm25_index()
-    info = storage.bm25.info()
+    with console.status("[bold yellow]重建 BM25 索引...[/bold yellow]", spinner="dots"):
+        count = storage.rebuild_bm25_index()
+        info = storage.bm25.info()
     console.print(f"[green]✓ BM25 索引已重建[/green]")
     console.print(f"  索引分块: {info['chunks']}")
     console.print(f"  词汇量:   {info['vocabulary']}")
@@ -610,8 +641,8 @@ def cli_rebuild(vector: bool) -> None:
             from core.retrieval.vector import VectorIndex
             vector_index = VectorIndex()
             if vector_index.is_available():
-                console.print("[bold]构建向量索引...[/bold]")
-                v_count = storage.rebuild_vector_index(vector_index)
+                with console.status("[bold yellow]构建向量索引...[/bold yellow]", spinner="dots"):
+                    v_count = storage.rebuild_vector_index(vector_index)
                 console.print(f"[green]✓ 向量索引已重建[/green]  [dim]({v_count} 块)[/dim]")
             else:
                 console.print("[yellow]! 向量索引不可用（依赖未安装或模型加载失败）[/yellow]")
@@ -897,9 +928,9 @@ def report(doc_id: str, output: Optional[str]) -> None:
     from pathlib import Path as _Path
     out_path = _Path(output) if output else None
 
-    console.print(f"\n[bold]生成报告...[/bold] [dim]ID: {doc_id}[/dim]")
     try:
-        path = rg.generate(doc_id, output_path=out_path)
+        with console.status("[bold yellow]生成报告...[/bold yellow]", spinner="dots"):
+            path = rg.generate(doc_id, output_path=out_path)
         console.print(f"\n[green]✓ 报告已生成[/green] → [cyan]{path}[/cyan]")
         console.print(f"  [dim]打开: open '{path}'[/dim]\n")
     except FileNotFoundError as e:
@@ -957,9 +988,9 @@ def analyze(path: str, sheet: Optional[str], list_sheets: bool) -> None:
         console.print("[dim]请在 .env 中设置 AGNES_API_KEY[/dim]")
         return
 
-    console.print(f"\n[bold]分析中[/bold] [dim]{target.name}[/dim]...")
     try:
-        result = az.analyze(target, sheet_name=sheet)
+        with console.status("[bold yellow]数据分析中...[/bold yellow]", spinner="dots"):
+            result = az.analyze(target, sheet_name=sheet)
         az.render(result)
         console.print(
             "\n[dim]提示：进 REPL 用 /analyze 还可以继续追问（如「按月份汇总」）[/dim]\n"
@@ -1101,29 +1132,45 @@ def retag(doc_id: Optional[str], force: bool, limit: Optional[int]) -> None:
         return
 
     success, fail = 0, 0
-    for i, doc in enumerate(target_docs, 1):
-        # 从 chunks 拼出内容预览（按顺序）
-        chunks = storage.get_chunks(doc.id)
-        content_preview = "\n".join(c.content for c in chunks)
+    total = len(target_docs)
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+        transient=True,
+    )
+    with progress:
+        task_id = progress.add_task("[yellow]打标签...[/yellow]", total=total)
+        for i, doc in enumerate(target_docs, 1):
+            # 从 chunks 拼出内容预览（按顺序）
+            chunks = storage.get_chunks(doc.id)
+            content_preview = "\n".join(c.content for c in chunks)
 
-        console.print(f"[{i}/{len(target_docs)}] [cyan]{doc.title[:50]}[/cyan]")
-
-        try:
-            tags = tagger.generate_tags(
-                title=doc.title,
-                file_type=doc.file_type,
-                content=content_preview,
+            progress.update(
+                task_id,
+                completed=i - 1,
+                description=f"[{i}/{total}] [cyan]{doc.title[:50]}[/cyan]",
             )
-            if tags:
-                storage.update_document_tags(doc.id, tags)
-                console.print(f"  [green]✓[/green] [dim]{', '.join(tags)}[/dim]")
-                success += 1
-            else:
-                console.print("  [yellow]未生成标签（LLM 返回空）[/yellow]")
+
+            try:
+                tags = tagger.generate_tags(
+                    title=doc.title,
+                    file_type=doc.file_type,
+                    content=content_preview,
+                )
+                if tags:
+                    storage.update_document_tags(doc.id, tags)
+                    progress.console.print(f"  [green]✓[/green] [dim]{', '.join(tags)}[/dim]")
+                    success += 1
+                else:
+                    progress.console.print("  [yellow]未生成标签（LLM 返回空）[/yellow]")
+                    fail += 1
+            except Exception as e:
+                progress.console.print(f"  [red]失败: {type(e).__name__}: {e}[/red]")
                 fail += 1
-        except Exception as e:
-            console.print(f"  [red]失败: {type(e).__name__}: {e}[/red]")
-            fail += 1
+            progress.update(task_id, completed=i)
 
     console.print(f"\n[bold]完成[/bold] · 成功 {success} / 失败 {fail}\n")
 
@@ -1189,37 +1236,53 @@ def build(doc_id: Optional[str], force: bool, limit: Optional[int]) -> None:
         return
 
     success, fail = 0, 0
-    for i, doc in enumerate(target_docs, 1):
-        # 从 chunks 拼出内容
-        chunks = storage.get_chunks(doc.id)
-        content = "\n".join(c.content for c in chunks)
+    total = len(target_docs)
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+        transient=True,
+    )
+    with progress:
+        task_id = progress.add_task("[yellow]构建知识图谱...[/yellow]", total=total)
+        for i, doc in enumerate(target_docs, 1):
+            # 从 chunks 拼出内容
+            chunks = storage.get_chunks(doc.id)
+            content = "\n".join(c.content for c in chunks)
 
-        console.print(f"[{i}/{len(target_docs)}] [cyan]{doc.title[:50]}[/cyan]")
-
-        try:
-            result = extractor.extract_from_document(
-                doc_id=doc.id,
-                doc_title=doc.title,
-                content=content,
+            progress.update(
+                task_id,
+                completed=i - 1,
+                description=f"[{i}/{total}] [cyan]{doc.title[:50]}[/cyan]",
             )
-            if result.entities:
-                graph_store.add_extraction(result)
-                graph_store.save()
-                console.print(
-                    f"  [green]✓[/green] "
-                    f"{len(result.entities)} 实体 · {len(result.relations)} 关系"
+
+            try:
+                result = extractor.extract_from_document(
+                    doc_id=doc.id,
+                    doc_title=doc.title,
+                    content=content,
                 )
-                success += 1
-            else:
-                console.print("  [yellow]未抽取到实体[/yellow]")
+                if result.entities:
+                    graph_store.add_extraction(result)
+                    graph_store.save()
+                    progress.console.print(
+                        f"  [green]✓[/green] "
+                        f"{len(result.entities)} 实体 · {len(result.relations)} 关系"
+                    )
+                    success += 1
+                else:
+                    progress.console.print("  [yellow]未抽取到实体[/yellow]")
+                    fail += 1
+            except Exception as e:
+                progress.console.print(f"  [red]失败: {type(e).__name__}: {e}[/red]")
                 fail += 1
-        except Exception as e:
-            console.print(f"  [red]失败: {type(e).__name__}: {e}[/red]")
-            fail += 1
+            progress.update(task_id, completed=i)
 
     s = graph_store.stats()
     console.print(
-        f"\n[bold]完成[/bold] · 抽取 {success}/{len(target_docs)} 文档 · "
+        f"\n[bold]完成[/bold] · 抽取 {success}/{total} 文档 · "
         f"图谱: {s['nodes']} 节点 / {s['edges']} 边\n"
     )
 
@@ -1386,7 +1449,8 @@ def cli_sync(dir_path: str) -> None:
     tracker = FileTracker(storage_path=settings.storage_path)
 
     console.print(f"[bold]扫描目录:[/bold] {dir_path}")
-    files = tracker.scan_directory(dir_path)
+    with console.status("[bold yellow]扫描目录...[/bold yellow]", spinner="dots"):
+        files = tracker.scan_directory(dir_path)
     console.print(f"发现 {len(files)} 个支持的文件")
 
     def on_progress(action: str, fp: str) -> None:
@@ -1397,7 +1461,8 @@ def cli_sync(dir_path: str) -> None:
         elif action == "deleted":
             console.print(f"  [red]✗ 删除[/red]: {Path(fp).name}")
 
-    result = tracker.sync_directory(dir_path, storage, on_progress=on_progress)
+    with console.status("[bold yellow]同步中...[/bold yellow]", spinner="dots"):
+        result = tracker.sync_directory(dir_path, storage, on_progress=on_progress)
 
     console.print(f"\n[bold]同步完成[/bold]")
     console.print(f"  新增: {len(result.added)}")
@@ -1420,12 +1485,12 @@ def cli_health() -> None:
 
     docs = storage.list_documents(limit=1000)
     all_results = []
-    for doc in docs:
-        chunks = storage.get_chunks(doc.id)
-        results = checker.check_document(chunks)
-        all_results.extend(results)
-
-    report = checker.generate_report(all_results)
+    with console.status("[bold yellow]数据质量检查中...[/bold yellow]", spinner="dots"):
+        for doc in docs:
+            chunks = storage.get_chunks(doc.id)
+            results = checker.check_document(chunks)
+            all_results.extend(results)
+        report = checker.generate_report(all_results)
 
     console.print(f"\n[bold]知识库健康报告[/bold]\n")
     console.print(f"  文档总数: {len(docs)}")
@@ -1452,13 +1517,12 @@ def cli_dedup(dry_run: bool) -> None:
     scanner = DedupScanner(threshold=0.85)
 
     docs = storage.list_documents(limit=1000)
-    for doc in docs:
-        chunks = storage.get_chunks(doc.id)
-        for c in chunks:
-            scanner.add_chunk(c.id, c.doc_id, c.content)
-
-    console.print(f"\n[bold]扫描近似重复...[/bold] ({len(scanner._chunks)} 个 chunk)")
-    results = scanner.scan()
+    with console.status("[bold yellow]扫描近似重复...[/bold yellow]", spinner="dots"):
+        for doc in docs:
+            chunks = storage.get_chunks(doc.id)
+            for c in chunks:
+                scanner.add_chunk(c.id, c.doc_id, c.content)
+        results = scanner.scan()
     duplicates = [r for r in results if r.is_duplicate]
 
     if not duplicates:

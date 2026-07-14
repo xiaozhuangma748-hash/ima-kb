@@ -137,19 +137,28 @@ class SessionMixin:
             console.print("[dim]可用: save / load / list / export / delete[/dim]")
 
     def _cmd_session_delete(self, name: str) -> None:
-        """删除已保存的会话。"""
+        """删除已保存的会话，支持批量: /session delete 王七 王六 王五。"""
         if not name:
-            console.print("[yellow]用法: /session delete <名称>[/yellow]")
+            console.print("[yellow]用法: /session delete <名称> [<名称> ...][/yellow]")
+            console.print("[dim]支持一次删除多个会话，用空格分隔[/dim]")
             console.print("[dim]用 /session list 查看已保存的会话[/dim]")
             return
+        names = name.split()
         try:
             from core.session.store import SessionStore
             ss = SessionStore()
-            deleted = ss.delete(name)
-            if deleted:
-                console.print(f"[green]✓ 已删除会话: [cyan]{name}[/cyan][/green]")
-            else:
-                console.print(f"[yellow]未找到会话: {name}[/yellow]")
+            ok_count = 0
+            fail_count = 0
+            for n in names:
+                if ss.delete(n):
+                    console.print(f"[green]✓ 已删除会话: [cyan]{n}[/cyan][/green]")
+                    ok_count += 1
+                else:
+                    console.print(f"[yellow]未找到会话: {n}[/yellow]")
+                    fail_count += 1
+            if len(names) > 1:
+                console.print(f"[dim]共删除 {ok_count} 个" +
+                              (f"，{fail_count} 个未找到" if fail_count else "") + "[/dim]")
         except Exception as e:
             err_msg = str(e).replace("[", "\\[")
             console.print(f"[red]删除会话失败: {err_msg}[/red]")

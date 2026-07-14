@@ -59,13 +59,19 @@ class Agent:
         )
         self._system_prompt = self._registry.build_system_prompt()
 
-    def run(self, task: str, on_step: Optional[callable] = None) -> str:
+    def run(
+        self,
+        task: str,
+        on_step: Optional[callable] = None,
+        show_thoughts: bool = True,
+    ) -> str:
         """执行任务。
 
         Args:
             task: 用户的任务描述
             on_step: 回调函数（step_type, content）
                 step_type: llm_start / thought / tool / result / error / done
+            show_thoughts: 是否回调 thought 类型内容（False 时只显示工具状态）
         Returns:
             最终答案
         """
@@ -98,8 +104,8 @@ class Agent:
             # 解析工具调用（支持 JSON 和 XML 两种格式）
             tool_name, tool_args = self._parse_tool_call(reply)
 
-            # 提取并显示 Thought
-            if on_step:
+            # 提取并显示 Thought（仅当 show_thoughts=True 时回调）
+            if on_step and show_thoughts:
                 thought = self._extract_thought(reply)
                 if thought:
                     on_step("thought", thought)

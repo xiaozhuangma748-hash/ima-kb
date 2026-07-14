@@ -180,6 +180,7 @@ COMMAND_LIST = [
     ("/h",       "= /help（别名）"),
     ("/pet",     "虚拟宠物（adopt/feed/play/train/wash/sleep/name/tasks/shop/buy/use/style/bag/reset）"),
     ("/memory",  "记忆管理（show/clear/add/tasks）"),
+    ("/todo",    "每日任务（add/done/cancel/history）"),
     ("/cross",   "跨会话记忆（list/add/remove/clear）"),
     ("/exit",    "退出"),
     ("/q",       "= /quit（别名）"),
@@ -214,6 +215,9 @@ _SUB_MENU_NESTED = {
         'stats': None, 'build': None, 'neighbors': None, 'export': None,
         'clear': None, 'delete': None, 'rename': None,
     },
+    '/agent': {
+        'think': {'on': None, 'off': None},
+    },
     '/sync': {'reset': None},
     '/session': {'save': None, 'load': None, 'list': None, 'export': None, 'delete': None},
     '/tag': {'rename': None, 'merge': None},
@@ -227,6 +231,11 @@ _SUB_MENU_NESTED = {
         'add': {'preference': None, 'topic': None, 'question': None, 'fact': None},
         'remove': {'topic': None},
         'clear': None,
+    },
+    '/todo': {
+        'add': None, 'done': None, 'cancel': None, 'reopen': None,
+        'del': None, 'edit': None, 'pri': None,
+        'history': None, 'clear': None, 'carry': None, 'list': None,
     },
 }
 
@@ -295,6 +304,9 @@ _SUB_MENU_DESC = {
     ('/graph', 'clear'): '清空图谱',
     ('/graph', 'delete'): '删除节点',
     ('/graph', 'rename'): '重命名节点',
+    ('/agent', 'think'): '思考过程显示',
+    ('/agent', 'think', 'on'): '显示',
+    ('/agent', 'think', 'off'): '隐藏',
     ('/sync', 'reset'): '清空追踪记录',
     ('/session', 'save'): '保存会话',
     ('/session', 'load'): '加载会话',
@@ -322,6 +334,17 @@ _SUB_MENU_DESC = {
     ('/cross', 'remove'): '移除跨会话记忆 (topic)',
     ('/cross', 'remove', 'topic'): '移除关注主题',
     ('/cross', 'clear'): '清空所有跨会话记忆',
+    ('/todo', 'add'): '添加任务',
+    ('/todo', 'done'): '标记完成',
+    ('/todo', 'cancel'): '取消任务',
+    ('/todo', 'reopen'): '重开任务',
+    ('/todo', 'del'): '彻底删除',
+    ('/todo', 'edit'): '编辑描述',
+    ('/todo', 'pri'): '修改优先级',
+    ('/todo', 'history'): '历史记录',
+    ('/todo', 'clear'): '清空今日',
+    ('/todo', 'carry'): '跨天处理',
+    ('/todo', 'list'): '显示今日任务',
 }
 
 # 别名 → 完整命令（补全器用的小表）
@@ -375,6 +398,7 @@ CMD_ALIASES = {
     "/sm": "/smart",     # 智能路由
     "/d": "/delete",     # 删除文档
     "/ss": "/stats",     # 统计的另一个别名
+    "/td": "/todo",      # 每日任务
 }
 
 # 子命令菜单：主命令 → [(子命令参数, 描述), ...]
@@ -427,6 +451,7 @@ _COMMAND_DISPATCH = {
     "/draw": "_cmd_draw",
     "/daily": "_cmd_daily",
     "/pic": "_cmd_pic",
+    "/todo": "_cmd_todo",
 }
 
 # ============================================================

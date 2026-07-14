@@ -18,6 +18,27 @@ export function showError(containerId, message) {
   }
 }
 
+// 全局 Toast 通知（自动创建容器）
+export function showToast(message, type = 'info', duration = 3500) {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  const icons = { success: '✓', error: '✗', info: 'ℹ' };
+  const colorVar = type === 'error' ? 'var(--accent-red, #ef4444)' : type === 'success' ? 'var(--accent-green, #10b981)' : 'var(--accent-cyan, #06b6d4)';
+  toast.innerHTML = `<span style="font-weight:700;color:${colorVar}">${icons[type] || icons.info}</span><span>${escapeHtml(message)}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('removing');
+    setTimeout(() => toast.remove(), 200);
+  }, duration);
+}
+
 export function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';

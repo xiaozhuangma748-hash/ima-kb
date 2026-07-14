@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import networkx as nx
+from networkx.algorithms.community import greedy_modularity_communities
 
 from config import settings
 from core.graph.extractor import ExtractionResult, Entity, Relation
@@ -302,12 +303,39 @@ class GraphStore:
 
     # ---- 导出 ----
 
+    def get_clusters(self) -> Dict[str, int]:
+        """用贪婪模块度算法检测社区聚类。
+
+        Returns:
+            {node_id: cluster_index} 映射，cluster_index 从 0 开始。
+            节点数 < 2 时返回空 dict。
+        """
+        if self.graph.number_of_nodes() < 2:
+            return {}
+        try:
+            communities = list(greedy_modularity_communities(self.graph))
+        except Exception:
+            logger.warning("社区检测失败，返回空聚类")
+            return {}
+        result = {}
+        for idx, community in enumerate(communities):
+            for node in community:
+                result[node] = idx
+        return result
+
     def to_cytoscape(self) -> Dict[str, Any]:
         """导出为 Cytoscape.js 标准 JSON 格式（前端可视化用）。
 
         返回 ``{elements: {nodes: [...], edges: [...]}}`` 结构，
         可直接喂给 Cytoscape.js / Gephi 等工具。
+
+        节点包含 cluster 字段（社区聚类索引），用于前端按簇着色。
+        节点大小按 degree 对数缩放，标签大小跟随 degree。
         """
+        import math
+
+        clusters = self.get_clusters()
+
         return {
             "elements": {
                 "nodes": [
@@ -319,6 +347,9 @@ class GraphStore:
                             "color": NODE_COLORS.get(d.get("type", "topic"), "#888888"),
                             "doc_count": d.get("doc_count", 0),
                             "degree": self.graph.degree(n),
+                            "cluster": clusters.get(n, -1),
+                            "size": 8 + math.log(self.graph.degree(n) + 1) * 12,
+                            "font_size": min(24, max(10, 10 + int(math.log(self.graph.degree(n) + 1) * 5))),
                         }
                     }
                     for n, d in self.graph.nodes(data=True)

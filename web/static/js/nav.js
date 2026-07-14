@@ -23,6 +23,7 @@ export function switchPage(target) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   const pageEl = document.getElementById('page-' + target);
   if (pageEl) pageEl.classList.add('active');
+  document.querySelector('.main')?.classList.toggle('main-qa-active', target === 'qa');
   const breadcrumb = document.getElementById('breadcrumb-current');
   if (breadcrumb) breadcrumb.textContent = pageNames[target] || '';
 

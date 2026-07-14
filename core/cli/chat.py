@@ -81,17 +81,16 @@ class ChatMixin:
                             if live is not None:
                                 live.stop()
                                 live = None
-                            # 首次 token 到达，计算思考时间
-                            _think_time = _time.time() - _t0
-                            console.print()  # 换行，和阶段提示分开
-                            console.print(f"[dim]思考 {_think_time:.1f}s[/dim]")
+                            # 首次 token 到达，记录思考时间（在答案后显示）
+                            self._first_token_time = _time.time() - _t0
                             self._stream_started = True
-                            # Live + Text 纯文本渲染，手动去掉 ** 标记
-                            # 不用 Markdown 避免动态增长时旧帧残留导致重复
+                            # Live + Text 纯文本渲染，transient=True 停止时清除
+                            # done 后用 Markdown 重新渲染，保证表格等格式正确显示
                             self._stream_live = Live(
                                 Text(""),
                                 console=console,
                                 refresh_per_second=12,
+                                transient=True,
                             )
                             self._stream_live.start()
                             self._stream_text = ""
@@ -117,13 +116,20 @@ class ChatMixin:
                 if getattr(self, "_stream_live", None) is not None:
                     self._stream_live.stop()
                     self._stream_live = None
+                # 用 Markdown 重新渲染最终回答（transient 已清除流式纯文本）
+                # 这样表格、标题、列表等 markdown 格式都能正确显示
+                if result is not None and result.text:
+                    console.print(Markdown(result.text))
                 console.print()  # 流式结束后换行
 
                 if result is not None:
                     # 只渲染引用溯源和宠物事件，不重复渲染正文（正文已流式输出）
                     self._render_citations_and_events(result)
                     _total = _time.time() - _t0
-                    console.print(f"[dim]耗时 {_total:.1f}s[/dim]")
+                    _think_time = getattr(self, "_first_token_time", None)
+                    if _think_time is not None:
+                        console.print(f"[dim]Thinking {_think_time:.1f}s[/dim]")
+                    console.print(f"[dim]Total {_total:.1f}s[/dim]")
                     # token 使用量（非 debug 模式也显示）
                     if hasattr(self, 'administrator') and self.administrator and hasattr(self.administrator.llm, 'last_usage') and self.administrator.llm.last_usage:
                         u = self.administrator.llm.last_usage
@@ -150,7 +156,7 @@ class ChatMixin:
                         except Exception:
                             pass
                     self._record_workflow("qa")
-                    _record_activity("qa", user_input[:40])
+                    _record_activity("qa", user_input[:40], getattr(self, 'active_session_name', None))
                     # 恢复能量
                     if self.pet is not None:
                         self.pet.energy = min(100, self.pet.energy + 2)
@@ -218,7 +224,6 @@ class ChatMixin:
             console.print("[yellow]! 知识库中没有相关资料，尝试基于通用知识回答[/yellow]\n")
             # 退化为纯对话（带多轮上下文）
             try:
-                console.print(f"[dim]思考 {_think_time:.1f}s[/dim]")
                 # 构建带历史的 messages
                 recent_history = (self.history or [])[-10:]
                 messages = list(recent_history) + [{"role": "user", "content": user_input}]
@@ -238,7 +243,7 @@ class ChatMixin:
                 for token in self.rag.llm.chat_stream(messages, temperature=0.5):
                     if first_token:
                         console.print("[bold yellow]>[/bold yellow] [bold cyan]AI[/bold cyan]")
-                        stream_live = Live(Text(""), console=console, refresh_per_second=12)
+                        stream_live = Live(Text(""), console=console, refresh_per_second=12, transient=True)
                         stream_live.start()
                         first_token = False
                     stream_text += token
@@ -246,21 +251,25 @@ class ChatMixin:
                     full_content.append(token)
                 if stream_live is not None:
                     stream_live.stop()
+                # 用 Markdown 重新渲染（transient 已清除流式纯文本）
+                assistant_content = "".join(full_content)
+                if assistant_content:
+                    console.print(Markdown(assistant_content))
                 console.print()
                 _total = _time.time() - _t0
-                console.print(f"[dim]耗时 {_total:.1f}s[/dim]")
-                assistant_content = "".join(full_content)
+                console.print(f"[dim]Thinking {_think_time:.1f}s[/dim]")
+                console.print(f"[dim]Total {_total:.1f}s[/dim]")
             except LLMError:
                 console.print("[yellow]（AI 暂时无法回答）[/yellow]\n")
                 return
         else:
             # 同步模式：RAGChain 已生成完整回答
-            console.print(f"[dim]思考 {_think_time:.1f}s[/dim]")
             console.print("[bold yellow]>[/bold yellow] [bold cyan]AI[/bold cyan]")
-            # 输出回答内容（去掉 ** 标记）
-            console.print(Text(answer.content.replace("**", "")))
+            # 用 Markdown 渲染，支持表格、列表等格式
+            console.print(Markdown(answer.content))
             _total = _time.time() - _t0
-            console.print(f"[dim]耗时 {_total:.1f}s[/dim]")
+            console.print(f"[dim]Thinking {_think_time:.1f}s[/dim]")
+            console.print(f"[dim]Total {_total:.1f}s[/dim]")
             assistant_content = answer.content
 
         # 显示引用来源
@@ -297,7 +306,7 @@ class ChatMixin:
         if self.pet:
             self.pet.energy = min(100, self.pet.energy + 2)
             self.pet_storage.save(self.pet)
-        _record_activity("qa", user_input[:40])
+        _record_activity("qa", user_input[:40], getattr(self, 'active_session_name', None))
         # 自动保存会话
         self._auto_save_session()
         # 跨会话记忆自动提取（每轮都触发，详细反馈）

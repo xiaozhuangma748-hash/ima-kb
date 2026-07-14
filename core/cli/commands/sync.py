@@ -221,12 +221,13 @@ class SyncMixin:
             content = doc.title
 
         # 生成图片
-        console.print(f"[bold yellow]正在为「{doc.title}」生成配图...[/bold yellow] [dim](风格: {style})[/dim]")
+        console.print(f"[dim]开始为「{doc.title}」生成配图 (风格: {style})[/dim]")
         try:
-            url = gen.doc_to_image(doc.title, content, style=style)
+            with console.status("[bold yellow]正在生成配图...[/bold yellow]", spinner="dots"):
+                url = gen.doc_to_image(doc.title, content, style=style)
             console.print(f"\n[green]✓ 配图已生成[/green] [dim]({url})[/dim]")
             console.print("[dim]在浏览器中打开图片 URL 查看[/dim]")
-            _record_activity("draw", doc.title[:40])
+            _record_activity("draw", doc.title[:40], getattr(self, 'active_session_name', None))
             # 尝试打开浏览器
             import webbrowser
             webbrowser.open(url)
@@ -273,11 +274,12 @@ class SyncMixin:
         if not topics:
             topics = [f"2026年7月知识回顾"]
 
-        console.print(f"[bold yellow]正在生成每日知识卡片...[/bold yellow] [dim]({date_str})[/dim]")
+        console.print(f"[dim]开始生成每日知识卡片 ({date_str})[/dim]")
         try:
-            url = gen.daily_card(topics, date_str)
+            with console.status("[bold yellow]正在生成每日知识卡片...[/bold yellow]", spinner="dots"):
+                url = gen.daily_card(topics, date_str)
             console.print(f"\n[green]✓ 知识卡片已生成[/green] [dim]({url})[/dim]")
-            _record_activity("daily", date_str)
+            _record_activity("daily", date_str, getattr(self, 'active_session_name', None))
             import webbrowser
             webbrowser.open(url)
         except ImageError as e:
@@ -298,12 +300,12 @@ class SyncMixin:
             console.print(f"[red]图像生成未配置:[/red] {e}")
             return
 
-        console.print(f"[bold yellow]正在生成图像...[/bold yellow]")
         try:
-            url = gen.text_to_image(arg.strip())
+            with console.status("[bold yellow]正在生成图像...[/bold yellow]", spinner="dots"):
+                url = gen.text_to_image(arg.strip())
             console.print(f"\n[green]✓ 图像已生成[/green] [dim]({url})[/dim]")
             console.print("[dim]正在打开浏览器...[/dim]")
-            _record_activity("pic", arg.strip()[:40])
+            _record_activity("pic", arg.strip()[:40], getattr(self, 'active_session_name', None))
             import webbrowser
             webbrowser.open(url)
         except ImageError as e:

@@ -97,7 +97,7 @@ class AnalyzeMixin:
         console.print(f"\n[bold cyan]进入阅读模式[/bold cyan]")
         console.print(f"  文档: [bold]{state.doc_title}[/bold]")
         console.print(f"  共 {state.total_chunks} 段\n")
-        _record_activity("read", state.doc_title[:40])
+        _record_activity("read", state.doc_title[:40], getattr(self, 'active_session_name', None))
         self._render_read_chunk()
         console.print("[dim]命令: n=下一段 p=上一段 数字=跳段 i=重新解读 q=退出[/dim]")
         # 宠物经验埋点：read 行为
@@ -190,7 +190,7 @@ class AnalyzeMixin:
             ))
             # 宠物经验埋点：compare 行为
             self._pet_gain_exp(10, "compare")
-            _record_activity("compare", f"{a[:15]} vs {b[:15]}")
+            _record_activity("compare", f"{a[:15]} vs {b[:15]}", getattr(self, 'active_session_name', None))
         except FileNotFoundError as e:
             console.print(f"[red]{e}[/red]")
         except Exception as e:

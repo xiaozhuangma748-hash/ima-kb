@@ -2,16 +2,23 @@
 import { state } from './state.js';
 import { escapeHtml } from './utils.js';
 
-export function setSidebarCollapsed(collapsed) {
-  const qaLayout = document.getElementById('qa-layout');
-  const qaSidebar = document.getElementById('qa-sidebar');
-  const sidebarToggle = document.getElementById('sidebar-toggle');
-  if (!qaLayout || !qaSidebar || !sidebarToggle) return;
-  qaSidebar.classList.toggle('collapsed', collapsed);
-  qaLayout.classList.toggle('collapsed-sidebar', collapsed);
-  sidebarToggle.textContent = collapsed ? '▶' : '◀';
-  sidebarToggle.title = collapsed ? '展开引用来源' : '折叠引用来源';
-}
+// 像素机器人 SVG 头像
+const ROBOT_AVATAR_SVG = `<svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="32" height="32" rx="8" fill="#111827"/>
+  <rect x="7" y="5" width="18" height="11" rx="2" fill="#e5e7eb"/>
+  <rect x="10" y="8" width="4" height="5" rx="1" fill="#111827"/>
+  <rect x="18" y="8" width="4" height="5" rx="1" fill="#111827"/>
+  <rect x="13" y="17" width="6" height="3" rx="1" fill="#9ca3af"/>
+  <rect x="9" y="21" width="14" height="3" rx="1" fill="#6b7280"/>
+  <rect x="6" y="25" width="7" height="3" rx="1" fill="#4b5563"/>
+  <rect x="19" y="25" width="7" height="3" rx="1" fill="#4b5563"/>
+</svg>`;
+
+const QA_SUGGESTIONS = [
+  { icon: '🌿', text: '骨灰安置有哪些生态安葬方式？' },
+  { icon: '💰', text: '殡葬服务收费标准是什么？' },
+  { icon: '📰', text: '杭州市殡葬改革最新政策？' },
+];
 
 export function setQuestion(text) {
   const textarea = document.getElementById('chat-textarea');
@@ -22,16 +29,46 @@ export function setQuestion(text) {
   sendMessage();
 }
 
+export function toggleSourcesPanel(show) {
+  const drawer = document.getElementById('qa-drawer');
+  const overlay = document.getElementById('qa-drawer-overlay');
+  if (!drawer || !overlay) return;
+  const isOpen = drawer.classList.contains('open');
+  const shouldOpen = show === undefined ? !isOpen : !!show;
+  drawer.classList.toggle('open', shouldOpen);
+  overlay.classList.toggle('open', shouldOpen);
+}
+
+function buildSuggestionsHtml() {
+  return QA_SUGGESTIONS.map(s =>
+    `<div class="qa-suggestion-chip" onclick="setQuestion('${escapeHtml(s.text)}')">
+       <span class="chip-icon">${s.icon}</span><span>${escapeHtml(s.text)}</span>
+     </div>`
+  ).join('');
+}
+
 export function appendMessage(role, content, streaming = false) {
   const chatMessages = document.getElementById('chat-messages');
-  // 首次发消息时清空空状态
   if (chatMessages.classList.contains('empty')) {
     chatMessages.classList.remove('empty');
     chatMessages.innerHTML = '';
   }
   const div = document.createElement('div');
   div.className = 'msg msg-' + role + (streaming ? ' msg-streaming' : '');
-  div.innerHTML = `<div class="msg-content">${content}</div>`;
+  if (role === 'ai') {
+    div.innerHTML = `
+      <div class="msg-avatar">${ROBOT_AVATAR_SVG}</div>
+      <div class="msg-body">
+        <div class="msg-content">${content}</div>
+      </div>
+    `;
+  } else {
+    div.innerHTML = `
+      <div class="msg-body">
+        <div class="msg-content">${content}</div>
+      </div>
+    `;
+  }
   chatMessages.appendChild(div);
   chatMessages.scrollTop = chatMessages.scrollHeight;
   return div;
@@ -39,16 +76,18 @@ export function appendMessage(role, content, streaming = false) {
 
 export function addSource(citation) {
   const sourcesPanel = document.getElementById('sources-panel');
-  // 首次添加引用时清空提示
-  if (sourcesPanel.querySelector('div:only-child')?.textContent.includes('等待 AI 回答')) {
-    sourcesPanel.innerHTML = '';
-  }
+  if (!sourcesPanel) return;
+  const empty = sourcesPanel.querySelector('.source-empty');
+  if (empty) empty.remove();
   const div = document.createElement('div');
   div.className = 'source-card';
   div.dataset.marker = citation.marker || '';
   div.innerHTML = `
-    <div class="source-card-title">${escapeHtml(citation.marker || '')} ${escapeHtml(citation.title || '未知文档')}</div>
-    <div class="source-card-snippet">${escapeHtml(citation.snippet || '')}</div>
+    <div class="source-card-header">
+      <span class="source-card-marker">${escapeHtml(citation.marker || '')}</span>
+      <span class="source-card-title">${escapeHtml(citation.title || '未知文档')}</span>
+    </div>
+    ${citation.snippet ? `<div class="source-card-snippet">${escapeHtml(citation.snippet)}</div>` : ''}
     <div class="source-card-meta">
       <span>相关度 ${(citation.score * 100).toFixed(0)}%</span>
     </div>
@@ -73,27 +112,32 @@ export function highlightSourceCard(marker) {
 }
 
 export function clearChat() {
-  // 取消正在进行的 SSE 流
   if (state.abortController) {
     state.abortController.abort();
     state.abortController = null;
   }
-  // 重置多轮对话历史
   state.chatHistory = [];
   const chatArea = document.getElementById('chat-messages');
   chatArea.innerHTML = `
     <div class="chat-empty">
       <div class="qa-hero-title">今天有什么想了解的？</div>
-      <div class="qa-suggestions">
-        <div class="qa-suggestion" onclick="setQuestion('骨灰安置有哪些生态安葬方式？')">骨灰安置有哪些生态安葬方式？</div>
-        <div class="qa-suggestion" onclick="setQuestion('殡葬服务收费标准是什么？')">殡葬服务收费标准是什么？</div>
-        <div class="qa-suggestion" onclick="setQuestion('杭州市殡葬改革最新政策？')">杭州市殡葬改革最新政策？</div>
+      <div class="qa-suggestions qa-suggestions-chips">
+        ${buildSuggestionsHtml()}
       </div>
     </div>
   `;
   chatArea.classList.add('empty');
   const sourcesPanel = document.getElementById('sources-panel');
-  if (sourcesPanel) sourcesPanel.innerHTML = '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:20px">等待 AI 回答...</div>';
+  if (sourcesPanel) {
+    sourcesPanel.innerHTML = `
+      <div class="source-empty">
+        <div class="source-empty-icon">🔍</div>
+        <div class="source-empty-title">等待 AI 回答</div>
+        <div class="source-empty-desc">提问后，这里会显示答案引用的文档来源</div>
+      </div>
+    `;
+  }
+  toggleSourcesPanel(false);
 }
 
 export function sendMessage() {
@@ -103,35 +147,57 @@ export function sendMessage() {
   const text = chatInput.value.trim();
   if (!text) return;
 
-  // 如果上一轮还在进行，先取消
   if (state.abortController) {
     state.abortController.abort();
     state.abortController = null;
   }
 
-  // 添加用户消息
   appendMessage('user', text);
   chatInput.value = '';
 
-  // 重置引用面板
-  if (sourcesPanel) sourcesPanel.innerHTML = '<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:20px">正在检索...</div>';
+  if (sourcesPanel) sourcesPanel.innerHTML = '<div class="sources-loading">正在检索引用来源...</div>';
 
-  // 添加 AI 占位
   const aiMsg = appendMessage('ai', '', true);
+  const aiContentEl = aiMsg.querySelector('.msg-content');
 
-  // 获取人格
   const personaChip = document.querySelector('.persona-input-bar .persona-chip.active');
   const persona = personaChip ? (personaChip.dataset.persona || 'auto') : 'auto';
 
-  // 禁用发送按钮，防止重复提交
   if (chatSend) chatSend.disabled = true;
 
-  // 创建 AbortController 用于取消 SSE 流
   state.abortController = new AbortController();
 
-  // SSE 流式请求（POST，带多轮对话历史）
   let fullAnswer = '';
   let completed = false;
+  let tokenStarted = false;
+
+  function setAIThinking(stage, count) {
+    if (!aiContentEl || tokenStarted) return;
+    const steps = [
+      { key: '检索', label: '检索知识库' },
+      { key: '重排', label: '精选参考资料' },
+      { key: '生成', label: '生成回答' },
+    ];
+    let activeIndex = steps.findIndex(s => s.key === stage);
+    if (activeIndex === -1) activeIndex = 0;
+    const current = steps[activeIndex];
+
+    aiContentEl.innerHTML = `
+      <div class="ai-thinking">
+        <span class="ai-step-badge">${activeIndex + 1}/${steps.length}</span>
+        <span class="thinking-dot"></span>
+        <span class="thinking-text">正在${current.label}${count ? ` (${count})` : ''}</span>
+      </div>
+    `;
+
+    if (sourcesPanel) {
+      sourcesPanel.innerHTML = `<div class="sources-loading">正在${current.label} (${count})</div>`;
+    }
+  }
+
+  if (aiContentEl) {
+    setAIThinking('检索', 0);
+  }
 
   fetch('/api/qa/stream', {
     method: 'POST',
@@ -148,7 +214,6 @@ export function sendMessage() {
         if (done) return;
         buffer += decoder.decode(value, { stream: true });
 
-        // 解析 SSE 事件（data-only 格式，type 字段在 JSON 内）
         while (buffer.includes('\n\n')) {
           const idx = buffer.indexOf('\n\n');
           const block = buffer.slice(0, idx);
@@ -165,27 +230,30 @@ export function sendMessage() {
           try {
             const parsed = JSON.parse(data);
             if (parsed.type === 'stage') {
-              // 阶段进度提示
+              setAIThinking(parsed.stage, parsed.count);
               if (sourcesPanel) {
-                sourcesPanel.innerHTML = `<div style="font-size:12px;color:var(--text-muted);text-align:center;padding:20px">${parsed.stage}中... (${parsed.count})</div>`;
+                sourcesPanel.innerHTML = `<div class="sources-loading">${parsed.stage}中... (${parsed.count})</div>`;
               }
             } else if (parsed.type === 'token') {
+              if (!tokenStarted && aiContentEl) {
+                tokenStarted = true;
+                aiContentEl.textContent = '';
+              }
               const contentEl = aiMsg.querySelector('.msg-content');
               contentEl.textContent += parsed.text;
               fullAnswer += parsed.text;
+              const chatMessages = document.getElementById('chat-messages');
+              if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
             } else if (parsed.type === 'done') {
               aiMsg.classList.remove('msg-streaming');
               completed = true;
-              // 优先用 done 事件里的完整答案
               if (parsed.answer) fullAnswer = parsed.answer;
-              // Markdown 渲染 + 引用编号可点击
               const contentEl = aiMsg.querySelector('.msg-content');
               let html = marked.parse(fullAnswer);
               html = html.replace(/\[(\d+)\]\(?(?!\w)/g, (_, n) =>
                 `<span class="citation" data-marker="[${n}]" style="cursor:pointer">[${n}]</span>`
               );
               contentEl.innerHTML = html;
-              // 渲染引用来源
               if (sourcesPanel && parsed.citations) {
                 sourcesPanel.innerHTML = '';
                 const sources = parsed.sources || [];
@@ -212,13 +280,12 @@ export function sendMessage() {
     process();
   }).catch(err => {
     if (err.name === 'AbortError') {
-      // 用户取消，保留已输出内容
       aiMsg.classList.remove('msg-streaming');
       const messages = document.getElementById('chat-messages');
       if (messages) {
         const cancelDiv = document.createElement('div');
         cancelDiv.className = 'msg msg-ai';
-        cancelDiv.innerHTML = '<div class="msg-content" style="color:var(--text-muted)">(已取消)</div>';
+        cancelDiv.innerHTML = `<div class="msg-avatar">${ROBOT_AVATAR_SVG}</div><div class="msg-body"><div class="msg-content" style="color:var(--text-muted)">(已取消)</div></div>`;
         messages.appendChild(cancelDiv);
         messages.scrollTop = messages.scrollHeight;
       }
@@ -232,9 +299,7 @@ export function sendMessage() {
     }
   }).finally(() => {
     state.abortController = null;
-    // 恢复发送按钮状态
     if (chatSend) chatSend.disabled = false;
-    // 多轮对话历史：仅在正常完成时记录，保留最近 10 轮
     if (completed && fullAnswer) {
       state.chatHistory.push({ role: 'user', content: text });
       state.chatHistory.push({ role: 'assistant', content: fullAnswer });
@@ -248,21 +313,33 @@ export function sendMessage() {
 export function initQA() {
   const chatSend = document.getElementById('chat-send');
   const chatInput = document.getElementById('chat-textarea');
-  const sidebarToggle = document.getElementById('sidebar-toggle');
-  const qaLayout = document.getElementById('qa-layout');
-  const qaSidebar = document.getElementById('qa-sidebar');
+  const sourcesToggle = document.getElementById('btn-sources-toggle');
+  const drawerClose = document.getElementById('qa-drawer-close');
+  const drawerOverlay = document.getElementById('qa-drawer-overlay');
 
-  // 侧边栏折叠
-  if (sidebarToggle && qaLayout && qaSidebar) {
-    sidebarToggle.addEventListener('click', () => {
-      setSidebarCollapsed(!qaSidebar.classList.contains('collapsed'));
-    });
+  if (sourcesToggle) {
+    sourcesToggle.addEventListener('click', () => toggleSourcesPanel());
+  }
+  if (drawerClose) {
+    drawerClose.addEventListener('click', () => toggleSourcesPanel(false));
+  }
+  if (drawerOverlay) {
+    drawerOverlay.addEventListener('click', () => toggleSourcesPanel(false));
   }
 
-  // 发送按钮
   if (chatSend) {
     chatSend.addEventListener('click', sendMessage);
   }
+  function updateChatPadding() {
+    const wrapper = document.querySelector('.chat-input-wrapper');
+    const chatArea = document.getElementById('chat-messages');
+    if (wrapper && chatArea) {
+      const height = wrapper.offsetHeight;
+      // 保证底部留白至少能覆盖固定输入框 + 额外间距，且不小于 CSS 默认 220px
+      chatArea.style.paddingBottom = `${Math.max(220, height + 48)}px`;
+    }
+  }
+
   if (chatInput) {
     chatInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -270,16 +347,22 @@ export function initQA() {
         sendMessage();
       }
     });
+    chatInput.addEventListener('input', () => {
+      chatInput.style.height = 'auto';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 200) + 'px';
+      updateChatPadding();
+    });
   }
+  window.addEventListener('resize', updateChatPadding);
+  updateChatPadding();
 
-  // 清空对话
   document.getElementById('btn-clear-chat')?.addEventListener('click', clearChat);
 
-  // 回答中的引用编号点击高亮对应卡片
   document.getElementById('chat-messages')?.addEventListener('click', (e) => {
     const cite = e.target.closest('.citation');
     if (cite) {
       const marker = cite.dataset.marker || cite.textContent.trim();
+      toggleSourcesPanel(true);
       highlightSourceCard(marker);
     }
   });
@@ -292,6 +375,5 @@ export function initQA() {
     }
   });
 
-  // 暴露给 HTML onclick 使用（动态生成的建议项也需要）
   window.setQuestion = setQuestion;
 }

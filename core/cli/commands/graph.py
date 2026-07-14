@@ -14,6 +14,13 @@ from __future__ import annotations
 
 from rich.table import Table
 from rich.prompt import Prompt
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    BarColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
 
 from core.cli.constants import console
 from core.cli.welcome import _record_activity
@@ -167,45 +174,60 @@ class GraphMixin:
             return
 
         success, fail = 0, 0
-        for i, doc in enumerate(target_docs, 1):
-            chunks = self.storage.get_chunks(doc.id)
-            content = "\n".join(c.content for c in chunks)
-            title_display = doc.title[:50]
-            content_preview = content.strip()[:200]
-
-            # 预检：内容过短或无实质信息的文档，跳过 LLM 调用
-            if len(content_preview) < 50:
-                console.print(f"[{i}/{len(target_docs)}] [cyan]{title_display}[/cyan]")
-                console.print(f"  [dim]跳过（内容过短 {len(content)} 字）[/dim]")
-                fail += 1
-                continue
-
-            console.print(f"[{i}/{len(target_docs)}] [cyan]{title_display}[/cyan]")
-            try:
-                result = extractor.extract_from_document(
-                    doc_id=doc.id, doc_title=doc.title, content=content,
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("[yellow]构建图谱...[/yellow]", total=len(target_docs))
+            for i, doc in enumerate(target_docs, 1):
+                chunks = self.storage.get_chunks(doc.id)
+                content = "\n".join(c.content for c in chunks)
+                title_display = doc.title[:50]
+                content_preview = content.strip()[:200]
+                progress.update(
+                    task,
+                    description=f"[{i}/{len(target_docs)}] {title_display}",
                 )
-                if result.entities:
-                    gs.add_extraction(result)
-                    gs.save()
-                    console.print(
-                        f"  [green]✓[/green] {len(result.entities)} 实体 · {len(result.relations)} 关系"
-                    )
-                    success += 1
-                else:
-                    console.print("  [dim]该文档无可抽取的实体（内容可能非政策/无实质信息）[/dim]")
+
+                # 预检：内容过短或无实质信息的文档，跳过 LLM 调用
+                if len(content_preview) < 50:
+                    console.print(f"[{i}/{len(target_docs)}] [cyan]{title_display}[/cyan]")
+                    console.print(f"  [dim]跳过（内容过短 {len(content)} 字）[/dim]")
                     fail += 1
-            except Exception as e:
-                err_msg = str(e).replace("[", "\\[")
-                console.print(f"  [red]失败: {type(e).__name__}: {err_msg}[/red]")
-                fail += 1
+                    progress.advance(task)
+                    continue
+
+                console.print(f"[{i}/{len(target_docs)}] [cyan]{title_display}[/cyan]")
+                try:
+                    result = extractor.extract_from_document(
+                        doc_id=doc.id, doc_title=doc.title, content=content,
+                    )
+                    if result.entities:
+                        gs.add_extraction(result)
+                        gs.save()
+                        console.print(
+                            f"  [green]✓[/green] {len(result.entities)} 实体 · {len(result.relations)} 关系"
+                        )
+                        success += 1
+                    else:
+                        console.print("  [dim]该文档无可抽取的实体（内容可能非政策/无实质信息）[/dim]")
+                        fail += 1
+                except Exception as e:
+                    err_msg = str(e).replace("[", "\\[")
+                    console.print(f"  [red]失败: {type(e).__name__}: {err_msg}[/red]")
+                    fail += 1
+                progress.advance(task)
 
         s = gs.stats()
         console.print(
             f"\n[bold]完成[/bold] · 抽取 {success}/{len(target_docs)} · "
             f"图谱 {s['nodes']} 节点 / {s['edges']} 边\n"
         )
-        _record_activity("graph", f"{s['nodes']}节点/{s['edges']}边")
+        _record_activity("graph", f"{s['nodes']}节点/{s['edges']}边", getattr(self, 'active_session_name', None))
         # 宠物经验埋点：graph_build 行为
         if success > 0:
             self._pet_gain_exp(30, "graph_build")
@@ -274,34 +296,77 @@ class GraphMixin:
         """清空图谱：/graph clear"""
         gs.clear()
         console.print("[green]✓ 已清空知识图谱[/green]")
-        _record_activity("graph", "清空")
+        _record_activity("graph", "清空", getattr(self, 'active_session_name', None))
 
     def _graph_delete_node(self, gs, name: str) -> None:
-        """删除图谱节点：/graph delete <节点名>"""
+        """删除图谱节点，支持批量: /graph delete 节点1 节点2 节点3。"""
         if not name:
-            console.print("[yellow]用法: /graph delete <节点名>[/yellow]")
+            console.print("[yellow]用法: /graph delete <节点名> [<节点名> ...][/yellow]")
+            console.print("[dim]支持一次删除多个节点，用空格分隔[/dim]")
             console.print("[dim]用 /graph neighbors <节点> 查看节点[/dim]")
             return
-        if name not in gs.graph:
-            console.print(f"[red]节点不存在: {name}[/red]")
+
+        names = name.split()
+        # 收集存在的节点
+        targets: list[tuple[str, int, dict]] = []  # (name, degree, node_data)
+        not_found: list[str] = []
+        for n in names:
+            if n not in gs.graph:
+                not_found.append(n)
+                continue
+            node_data = gs.graph.nodes[n]
+            degree = gs.graph.degree(n)
+            targets.append((n, degree, node_data))
+
+        for n in not_found:
+            console.print(f"[red]节点不存在: {n}[/red]")
+
+        if not targets:
             return
-        # 显示节点信息供确认
-        node_data = gs.graph.nodes[name]
-        degree = gs.graph.degree(name)
-        console.print(f"  [dim]类型: {node_data.get('type', '?')} · 连接: {degree}[/dim]")
+
+        if len(targets) == 1:
+            n, degree, node_data = targets[0]
+            console.print(f"  [dim]类型: {node_data.get('type', '?')} · 连接: {degree}[/dim]")
+            confirm = Prompt.ask(
+                f"确定删除节点 [cyan]{n}[/cyan] 及其 {degree} 条连边？",
+                choices=["y", "n"], default="n",
+            )
+            if confirm != "y":
+                console.print("[dim]已取消[/dim]")
+                return
+            ok = gs.delete_node(n)
+            if ok:
+                gs.save()
+                console.print(f"[green]✓ 已删除节点: {n}[/green]")
+            else:
+                console.print(f"[red]删除失败[/red]")
+            return
+
+        # 批量：列出所有节点信息后一次确认
+        console.print(f"\n[bold]将删除以下 {len(targets)} 个节点:[/bold]\n")
+        for i, (n, degree, node_data) in enumerate(targets, 1):
+            console.print(f"  {i}. [cyan]{n}[/cyan] [dim](类型: {node_data.get('type', '?')} · 连接: {degree})[/dim]")
+        console.print()
         confirm = Prompt.ask(
-            f"确定删除节点 [cyan]{name}[/cyan] 及其 {degree} 条连边？",
+            f"确定删除以上 {len(targets)} 个节点？",
             choices=["y", "n"], default="n",
         )
         if confirm != "y":
             console.print("[dim]已取消[/dim]")
             return
-        ok = gs.delete_node(name)
-        if ok:
+        ok_count = 0
+        fail_count = 0
+        for n, degree, node_data in targets:
+            if gs.delete_node(n):
+                console.print(f"[green]✓ 已删除节点: {n}[/green]")
+                ok_count += 1
+            else:
+                console.print(f"[red]删除失败: {n}[/red]")
+                fail_count += 1
+        if ok_count:
             gs.save()
-            console.print(f"[green]✓ 已删除节点: {name}[/green]")
-        else:
-            console.print(f"[red]删除失败[/red]")
+        console.print(f"[dim]共删除 {ok_count} 个" +
+                      (f"，{fail_count} 个失败" if fail_count else "") + "[/dim]")
 
     def _graph_rename_node(self, gs, arg: str) -> None:
         """重命名图谱节点：/graph rename <旧名> <新名>"""

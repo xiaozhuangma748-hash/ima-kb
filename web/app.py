@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 
 WEB_DIR = Path(__file__).resolve().parent
@@ -128,9 +130,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # 静态文件
+    # 静态文件（禁用缓存，确保前端代码更新后立即生效）
     if STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+        class NoCacheStaticFiles(StaticFiles):
+            async def get_response(self, path, scope):
+                response = await super().get_response(path, scope)
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+                return response
+        app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
     # 全局共享组件状态（懒加载）
     app.state.storage = None
@@ -190,6 +199,7 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse("index.html", {
             "request": request,
             "page_title": "IMA 知识库",
+            "static_version": str(int(time.time())),
             "initial_stats": {
                 "documents": s["documents"],
                 "chunks": s["chunks"],

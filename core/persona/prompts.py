@@ -19,6 +19,9 @@ SCHOLAR_SYSTEM = """你是 {pet_name}，一只学者型（scholar）知识库管
 ## 当前任务上下文
 {user_tasks}
 
+## 今日待办
+{user_todos}
+
 ## 检索到的资料（含 doc_id 和段落号）
 {retrieved_context}
 
@@ -43,6 +46,9 @@ WARRIOR_SYSTEM = """你是 {pet_name}，一只战士型（warrior）知识库管
 ## 当前任务上下文
 {user_tasks}
 
+## 今日待办
+{user_todos}
+
 ## 检索到的资料
 {retrieved_context}
 
@@ -66,6 +72,9 @@ ARTISAN_SYSTEM = """你是 {pet_name}，一只工匠型（artisan）知识库管
 ## 当前任务上下文
 {user_tasks}
 
+## 今日待办
+{user_todos}
+
 ## 检索到的资料
 {retrieved_context}
 
@@ -88,6 +97,9 @@ NEUTRAL_SYSTEM = """你是 {pet_name}，一只知识库管理员。
 
 ## 当前任务上下文
 {user_tasks}
+
+## 今日待办
+{user_todos}
 
 ## 检索到的资料
 {retrieved_context}
@@ -128,13 +140,52 @@ def _format_tasks(tasks: list) -> str:
     return "\n".join(lines)
 
 
+def _format_todos(todos: list) -> str:
+    """格式化今日待办为文本。
+
+    Args:
+        todos: TodoItem 列表（或有 description/status/priority/note 字段的 dict）
+
+    当用户询问"今天的任务"、"待办"等问题时，以此上下文作答。
+    """
+    if not todos:
+        return "（今日无待办）"
+    lines = []
+    for i, t in enumerate(todos, 1):
+        # 兼容 TodoItem dataclass 和 dict
+        if hasattr(t, "description"):
+            desc = t.description
+            status = t.status
+            priority = t.priority
+            note = t.note
+        else:
+            desc = t.get("description", "")
+            status = t.get("status", "pending")
+            priority = t.get("priority", "medium")
+            note = t.get("note", "")
+        # 状态标记
+        if status == "done":
+            mark = "[已完成]"
+        elif status == "cancelled":
+            mark = "[已取消]"
+        else:
+            mark = ""
+        # 优先级中文
+        pri_label = {"high": "高", "medium": "中", "low": "低"}.get(priority, priority)
+        line = f"{i}. [{pri_label}级] {desc}{mark}"
+        if note:
+            line += f"  // {note}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _format_sources(sources: list) -> str:
     """格式化检索资料为文本。"""
     if not sources:
         return "（未检索到相关资料）"
     lines = []
     for i, s in enumerate(sources, 1):
-        title = s.get("title", s.get("doc_title", "未知"))
+        title = s.get("title", s.get("doc_id", "未知"))
         para = s.get("paragraph_num", "")
         content = s.get("content", "")[:500]  # 截取前 500 字
         lines.append(f"[{i}] {title} §{para}\n{content}\n")
@@ -159,6 +210,7 @@ def build_system_prompt(
     profile: dict,
     tasks: list,
     sources: list,
+    todos: Optional[list] = None,
 ) -> str:
     """构建 system prompt。
 
@@ -166,8 +218,9 @@ def build_system_prompt(
         style: 风格名（scholar/warrior/artisan/neutral）
         pet: Pet 对象（有 name/level/mood/hunger）
         profile: 用户偏好 dict
-        tasks: 任务列表
+        tasks: 任务列表（跨会话记忆任务）
         sources: 检索资料列表
+        todos: 今日待办列表（TodoItem 或 dict，可选）
 
     Returns:
         完整的 system prompt 字符串
@@ -179,6 +232,7 @@ def build_system_prompt(
         level=pet.level,
         user_profile=_format_profile(profile),
         user_tasks=_format_tasks(tasks),
+        user_todos=_format_todos(todos or []),
         retrieved_context=_format_sources(sources),
     )
 

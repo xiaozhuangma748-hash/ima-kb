@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-12（OCR 双引擎升级 + 引用溯源修复 + 启动流程多会话选择）
+> 最后更新：2026-07-15（Web 全面重构 + REPL 会话选择优化 + 终端标题设置）
 
 ---
 
@@ -370,7 +370,7 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 
 | # | 优化项 | 难度 | 工作量 | 状态 | 核心要点 |
 |---|---|---|---|---|---|
-| 1 | **Embedding 缓存层** | ★ | ~1 小时 | ❌ 未做 | vector.py 加 SQLite 缓存（chunk hash → embedding），处理失效即可 |
+| ✅ | ~~**Embedding 缓存层**~~ | ★ | ~1 小时 | ✅ **已完成** | `vector.py` 已实现 `_EmbeddingCache`（SQLite 持久化 content hash → embedding），见 [vector.py:79](file:///core/retrieval/vector.py) |
 | ✅ | ~~**OCR 优化：PaddleOCR**~~ | ★★ | 1-2 小时 | ✅ **2026-07-12 完成** | PaddleOCR 为主引擎（原图直传，内部自带预处理），Tesseract 降级（外部预处理：灰度+二值化+放大）；DPI 200；见 [parser.py](file:///core/ingestion/parser.py) |
 | 3 | **图谱扩展：人物/时间/金额** | ★★★ | 2-3 小时 | ❌ 未做 | LLM prompt 调优 + 新关系类型 + store/visualizer 适配 + 重建图谱验证 |
 | 4 | **多用户：FastAPI + 隔离** | ★★★★★ | 8-12 小时 | ❌ 未做 | 断层式最难：全栈改造，所有 storage/bm25/vector/graph 加 user_id，认证体系从零写 |
@@ -458,7 +458,7 @@ ima web
 
 ---
 
-**项目状态**：P1-P5 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），323 个测试（319 通过 / 4 失败为已知老问题），可用于日常使用。后续优化方向见上方「后续待办」章节（5 项剩余，无高优先级待办）。
+**项目状态**：P1-P7 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），323 个测试（319 通过 / 4 失败为已知老问题），可用于日常使用。后续优化方向见上方「后续待办」章节（2 项剩余：图谱扩展、多用户隔离）。
 
 ---
 
@@ -522,9 +522,9 @@ ima web
 
 | # | 任务 | 优先级 | 说明 |
 |---|---|---|---|
-| 1 | **Embedding 缓存层** | 🟡 低 | `vector.py` 加 SQLite 缓存（chunk hash → embedding），处理失效即可 |
-| 2 | **图谱扩展** | 🟡 低 | 新增人物/时间/金额等实体类型，需重建图谱验证 |
-| 3 | **多用户隔离** | 🔴 高（仅如需内网多人） | 全栈改造，所有 storage 加 user_id，认证体系从零写 |
+| 1 | **图谱扩展** | 🟡 中 | 新增人物/时间/金额等实体类型，需重建图谱验证 |
+| 2 | **多用户隔离** | 🔴 高（仅如需内网多人） | 全栈改造，所有 storage 加 user_id，认证体系从零写 |
+| ✅ | ~~**Embedding 缓存层**~~ | — | ✅ **已完成**：`vector.py` 实现 `_EmbeddingCache`（SQLite 持久化 content hash → embedding），见 [vector.py:79](file:///core/retrieval/vector.py) |
 | ✅ | ~~**PDF 重新解析**~~ | — | ✅ **2026-07-12 完成**：8 个 PDF 全部用 PaddleOCR 重新入库，39 篇文档 812 chunks |
 | ✅ | ~~**OCR 优化：PaddleOCR**~~ | — | ✅ **2026-07-12 完成**：PaddleOCR 主引擎 + Tesseract 降级，见 [parser.py](file:///core/ingestion/parser.py) |
 

@@ -114,22 +114,22 @@ async def analyze(
         cache_key = str(uuid.uuid4())[:8]
         _cache_put(cache_key, response_data)
 
-        # AI 解读
-        if ai_insight and settings.has_llm() and result.summary:
+        # AI 解读（基于已有的统计摘要再生成一段趋势洞察）
+        if ai_insight and settings.has_llm():
             try:
-                llm = None
                 from core.llm.client import get_llm
+
                 llm = get_llm()
                 insight_resp = llm.chat(
                     messages=[{
                         "role": "user",
-                        "content": f"你是一个数据分析师。请根据以下数据统计结果，用中文生成一段简洁的趋势解读（200字以内）:\n{result.summary}",
+                        "content": f"你是一个数据分析师。请根据以下数据统计结果，用中文生成一段简洁的趋势解读（200字以内）:\n{result.insights}",
                     }],
                     max_tokens=300,
                 )
-                response_data["ai_insight"] = insight_resp.get("content", "")
-            except Exception:
-                response_data["ai_insight"] = "（AI 解读暂时不可用）"
+                response_data["ai_insight"] = insight_resp if isinstance(insight_resp, str) else insight_resp.get("content", "")
+            except Exception as e:
+                response_data["ai_insight"] = f"（AI 解读暂时不可用: {type(e).__name__}）"
 
         response_data["cache_key"] = cache_key
         return response_data

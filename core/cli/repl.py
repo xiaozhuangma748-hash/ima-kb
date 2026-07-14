@@ -57,9 +57,11 @@ from core.cli.commands.memory import MemoryMixin
 from core.cli.commands.graph import GraphMixin
 from core.cli.commands.pet import PetMixin
 from core.cli.commands.pipe import PipeMixin
+from core.cli.commands.todo import TodoMixin
 
 
 class REPL(
+    TodoMixin,
     PipeMixin,
     PetMixin,
     GraphMixin,
@@ -151,6 +153,12 @@ class REPL(
             llm = get_llm() if settings.has_llm() else None
             reranker = Reranker(llm) if llm else None
             if llm and reranker:
+                # 复用 TodoMixin 的 todo_mgr（懒加载的 TodoManager）
+                todo_mgr = getattr(self, "_todo_mgr", None)
+                if todo_mgr is None:
+                    from core.todo.manager import TodoManager
+                    todo_mgr = TodoManager()
+                    self._todo_mgr = todo_mgr
                 self.administrator = PetAdministrator(
                     pet=self.pet,
                     storage=self.storage,
@@ -158,6 +166,7 @@ class REPL(
                     hybrid_retriever=hybrid,
                     reranker=reranker,
                     llm=llm,
+                    todo_manager=todo_mgr,
                 )
         except Exception as e:
             console.print(f"[dim]宠物管理员初始化失败，降级为普通问答: {e}[/dim]")
@@ -198,27 +207,105 @@ class REPL(
         # 2. 会话选择
         sessions = ss.list_sessions()
         if sessions:
-            # 有历史会话：弹出 radiolist_dialog 让用户选择
-            values = []
-            for i, s in enumerate(sessions, 1):
-                time_str = s["saved_at"][:16].replace("T", " ") if s["saved_at"] else ""
-                msg_str = f"{s['message_count']}条" if s["message_count"] else "空"
-                marker = " ← 上次" if s["name"] == active_name else ""
-                values.append((str(i), f"{s['name']}  ({msg_str}, {time_str}){marker}"))
-            values.append(("0", "新建会话"))
+            # 有历史会话：termios raw 模式 + os.read 直接读按键
+            import sys as _sys
+            import os as _os
+            import tty as _tty
+            import termios as _termios
+            import select as _select
 
+            total = len(sessions) + 1  # +1 for "新建会话"
+            selected = 0
+            num_lines = total + 1  # 选项行 + 提示行
+
+            def _build_menu():
+                lines = []
+                for i, s in enumerate(sessions):
+                    time_str = s["saved_at"][:16].replace("T", " ") if s["saved_at"] else ""
+                    msg_str = f"{s['message_count']}条" if s["message_count"] else "空"
+                    marker = " ← 上次" if s["name"] == active_name else ""
+                    arrow = "▶" if selected == i else " "
+                    lines.append(f" {arrow} {i+1}. {s['name']}  ({msg_str}, {time_str}){marker}")
+                arrow = "▶" if selected == len(sessions) else " "
+                lines.append(f" {arrow} 0. 新建会话")
+                lines.append("按 ↑↓ 选择，Enter 确认")
+                return lines
+
+            def _print_menu():
+                out = "\r\n".join(_build_menu()) + "\r\n"
+                _sys.stdout.write(out)
+                _sys.stdout.flush()
+
+            # 首次打印菜单
+            _print_menu()
+
+            fd = _sys.stdin.fileno()
+            old_settings = _termios.tcgetattr(fd)
             try:
-                from prompt_toolkit.shortcuts import radiolist_dialog
-                selected = radiolist_dialog(
-                    title="历史会话",
-                    text="方向键选择，Enter 确认，Esc 取消",
-                    values=values,
-                ).run()
-            except Exception:
-                selected = None
+                _tty.setraw(fd)
+                while True:
+                    ch = _os.read(fd, 1).decode("utf-8", errors="replace")
+                    key = None
+                    if ch == "\x1b":
+                        if _select.select([fd], [], [], 0.2)[0]:
+                            ch2 = _os.read(fd, 1).decode("utf-8", errors="replace")
+                            if ch2 == "[":
+                                if _select.select([fd], [], [], 0.2)[0]:
+                                    ch3 = _os.read(fd, 1).decode("utf-8", errors="replace")
+                                    if ch3 == "A":
+                                        key = "up"
+                                    elif ch3 == "B":
+                                        key = "down"
+                            else:
+                                key = None
+                        else:
+                            key = "esc"
+                    elif ch in ("\r", "\n"):
+                        key = "enter"
+                    elif ch == "\x03":
+                        raise KeyboardInterrupt
+                    else:
+                        key = None
 
-            if selected is None:
-                # 用户取消，回退到上次会话或新建
+                    if key == "up" and selected > 0:
+                        selected -= 1
+                    elif key == "down" and selected < total - 1:
+                        selected += 1
+                    elif key == "enter":
+                        break
+                    else:
+                        continue
+                    # 重绘：上移 + 清除 + 重新打印
+                    _sys.stdout.write(f"\033[{num_lines}A\033[J")
+                    _print_menu()
+            finally:
+                _termios.tcsetattr(fd, _termios.TCSADRAIN, old_settings)
+
+            # 清除菜单行
+            _sys.stdout.write(f"\033[{num_lines}A\033[J")
+            _sys.stdout.flush()
+
+            choice = selected
+
+            if choice == len(sessions):
+                # 新建会话
+                default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+                name = Prompt.ask("[dim]新会话名称[/dim]", default=default_name)
+                ss.create_session(name)
+                self.active_session_name = name
+                self.history = []
+                self._init_session_memory(name)
+            elif 0 <= choice < len(sessions):
+                # 选择历史会话
+                chosen = sessions[choice]
+                name = chosen["name"]
+                history = ss.load(name)
+                if history is not None:
+                    self.history = history
+                self.active_session_name = name
+                self._init_session_memory(name)
+            else:
+                # 回退到上次会话或新建
                 if active_name:
                     history = ss.load(active_name)
                     if history is not None:
@@ -231,28 +318,10 @@ class REPL(
                     self.active_session_name = name
                     self.history = []
                     self._init_session_memory(name)
-            elif selected == "0":
-                # 新建会话
-                default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
-                name = Prompt.ask(f"[dim]新会话名称[/dim]", default=default_name)
-                ss.create_session(name)
-                self.active_session_name = name
-                self.history = []
-                self._init_session_memory(name)
-            else:
-                # 选择历史会话
-                idx = int(selected)
-                chosen = sessions[idx - 1]
-                name = chosen["name"]
-                history = ss.load(name)
-                if history is not None:
-                    self.history = history
-                self.active_session_name = name
-                self._init_session_memory(name)
         else:
             # 无历史会话：直接问新名称
             default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
-            name = Prompt.ask(f"[dim]新会话名称[/dim]", default=default_name)
+            name = Prompt.ask("[dim]新会话名称[/dim]", default=default_name)
             ss.create_session(name)
             self.active_session_name = name
             self.history = []
@@ -299,6 +368,11 @@ class REPL(
         """启动 REPL 主循环。"""
         # 初始化活跃会话（内部已处理启动页渲染 + 会话询问 + 刷新）
         self._init_active_session()
+        # 跨天检查：提示用户处理昨日未完成任务
+        try:
+            self._check_carry_over()
+        except Exception:
+            pass  # 跨天检查失败不影响 REPL 启动
 
         while self.running:
             try:
@@ -363,7 +437,7 @@ class REPL(
                 self._render_read_chunk()
         else:
             # 针对当前段提问
-            with console.status("[bold yellow]AI 思考中...[/bold yellow]", spinner="dots"):
+            with console.status("[bold yellow]AI Thinking...[/bold yellow]", spinner="dots"):
                 answer = self.reader.ask(user_input)
             console.print(Panel(
                 Text(answer),

@@ -41,19 +41,38 @@ def _load_activities() -> list[dict]:
     return []
 
 
-def _record_activity(act_type: str, desc: str) -> None:
-    """记录一条活动（最多保留 50 条，自动清理 7 天前的记录）。"""
+def _record_activity(act_type: str, desc: str, session: Optional[str] = None) -> None:
+    """记录一条活动（最多保留 50 条，自动清理 7 天前的记录，同类型+描述去重）。
+
+    Args:
+        act_type: 活动类型（search/qa/ingest 等）
+        desc: 活动描述
+        session: 所属会话名（用于启动页按会话过滤）
+    """
     from datetime import datetime, timedelta
     import json
     entries = _load_activities()
     # 清理 7 天前的旧记录
     cutoff = (datetime.now() - timedelta(days=7)).strftime("%m-%d")
     entries = [e for e in entries if e.get("time", "") >= cutoff]
-    entries.insert(0, {
+
+    # 去重：同会话 + 同类型 + 同描述只保留最新一条
+    new_entry = {
         "type": act_type,
         "desc": desc,
         "time": datetime.now().strftime("%m-%d %H:%M"),
-    })
+        "session": session or "",
+    }
+    entries = [
+        e for e in entries
+        if not (
+            e.get("session", "") == (session or "")
+            and e.get("type") == act_type
+            and e.get("desc") == desc
+        )
+    ]
+    entries.insert(0, new_entry)
+
     if len(entries) > 50:
         entries = entries[:50]
     try:
@@ -140,7 +159,15 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
     right_rows.append(Text("Recent activity", style=f"bold {t.colors['primary']}"))
     right_rows.append(Text(""))
 
-    recent_entries = _load_activities()
+    all_entries = _load_activities()
+    # 按当前会话过滤（session 为空表示旧记录，也显示）
+    if session_name:
+        recent_entries = [
+            e for e in all_entries
+            if e.get("session", "") == session_name or e.get("session", "") == ""
+        ]
+    else:
+        recent_entries = all_entries
     if recent_entries:
         from datetime import datetime
         today = datetime.now().strftime("%m-%d")

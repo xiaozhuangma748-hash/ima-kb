@@ -34,6 +34,7 @@ async def qa_stream(request: Request):
     from core.memory.store import MemoryStore
     from core.retrieval.hybrid import HybridRetriever
     from core.retrieval.rerank import Reranker
+    from core.todo.manager import TodoManager
 
     body = await request.json()
     question = body.get("question", "").strip()
@@ -67,6 +68,7 @@ async def qa_stream(request: Request):
         hybrid_retriever=hybrid,
         reranker=reranker,
         llm=llm,
+        todo_manager=TodoManager(),
     )
 
     async def event_stream():

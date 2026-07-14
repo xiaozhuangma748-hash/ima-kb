@@ -146,12 +146,29 @@ def _get_paddle_ocr():
     if _paddle_ocr is not None:
         return _paddle_ocr
     try:
-        from paddleocr import PaddleOCR  # type: ignore
-        # 静默 PaddleOCR 的日志
         import logging
-        logging.getLogger("paddleocr").setLevel(logging.WARNING)
-        logging.getLogger("paddle").setLevel(logging.WARNING)
-        _paddle_ocr = PaddleOCR(lang="ch")
+        import os as _os
+        import sys as _sys
+        # 静默 PaddleOCR / PaddleX 的日志（print + logging 双管齐下）
+        logging.getLogger("paddleocr").setLevel(logging.ERROR)
+        logging.getLogger("paddle").setLevel(logging.ERROR)
+        logging.getLogger("paddlex").setLevel(logging.ERROR)
+        logging.getLogger("ppocr").setLevel(logging.ERROR)
+        # PaddleOCR 用 print 输出模型加载信息，重定向 stdout/stderr
+        _devnull_fd = _os.open(_os.devnull, _os.O_WRONLY)
+        _saved_stdout_fd = _os.dup(1)
+        _saved_stderr_fd = _os.dup(2)
+        _os.dup2(_devnull_fd, 1)
+        _os.dup2(_devnull_fd, 2)
+        try:
+            from paddleocr import PaddleOCR  # type: ignore
+            _paddle_ocr = PaddleOCR(lang="ch")
+        finally:
+            _os.dup2(_saved_stdout_fd, 1)
+            _os.dup2(_saved_stderr_fd, 2)
+            _os.close(_devnull_fd)
+            _os.close(_saved_stdout_fd)
+            _os.close(_saved_stderr_fd)
         return _paddle_ocr
     except Exception:
         _paddle_ocr_failed = True

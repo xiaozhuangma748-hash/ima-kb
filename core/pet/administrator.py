@@ -17,6 +17,7 @@ from core.retrieval.citation import Citation, extract_citations
 from core.persona.prompts import build_system_prompt
 from core.llm.client import LLMClient, LLMError
 from core.llm.degrade import get_llm_degrade_message
+from core.todo.manager import TodoManager
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class PetAdministrator:
         hybrid_retriever: HybridRetriever,
         reranker: Reranker,
         llm: LLMClient,
+        todo_manager: Optional[TodoManager] = None,
     ) -> None:
         self.pet = pet
         self.storage = storage
@@ -66,6 +68,8 @@ class PetAdministrator:
         self.profile_mgr = ProfileManager(memory_store)
         self.task_mgr = TaskManager(memory_store)
         self.workflow = WorkflowTracker(memory_store)
+        # 每日待办管理器（可选，未传入时忽略）
+        self.todo_mgr = todo_manager
 
     def ask(self, query: str, style_override: Optional[str] = None,
             history: Optional[List[Dict]] = None,
@@ -83,6 +87,13 @@ class PetAdministrator:
         # 1. 加载记忆
         profile = self.profile_mgr.get_profile()
         active_tasks = self.task_mgr.get_active_tasks()
+        # 加载今日待办（失败静默，不影响问答）
+        today_todos = []
+        if self.todo_mgr is not None:
+            try:
+                today_todos = self.todo_mgr.list_day()
+            except Exception as e:
+                logger.warning(f"加载今日待办失败: {e}")
 
         # 2. 混合检索
         candidates = self.hybrid.search(query, top_k=15)
@@ -128,6 +139,7 @@ class PetAdministrator:
             profile=profile_dict,
             tasks=tasks_dict,
             sources=sources_dict,
+            todos=today_todos,
         )
 
         # 6. LLM 生成（带多轮历史 + 早期摘要）
@@ -202,6 +214,13 @@ class PetAdministrator:
         # 1. 加载记忆
         profile = self.profile_mgr.get_profile()
         active_tasks = self.task_mgr.get_active_tasks()
+        # 加载今日待办（失败静默，不影响问答）
+        today_todos = []
+        if self.todo_mgr is not None:
+            try:
+                today_todos = self.todo_mgr.list_day()
+            except Exception as e:
+                logger.warning(f"加载今日待办失败: {e}")
 
         # 2. 混合检索
         candidates = self.hybrid.search(query, top_k=15)
@@ -249,6 +268,7 @@ class PetAdministrator:
             profile=profile_dict,
             tasks=tasks_dict,
             sources=sources_dict,
+            todos=today_todos,
         )
 
         # 6. LLM 流式生成（带多轮历史 + 早期摘要，chat_stream 不支持重试，首帧失败直接降级）
