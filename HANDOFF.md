@@ -943,3 +943,114 @@ IMAGE_RESPONSE_FORMAT=url
 | `core/cli/welcome.py` | 修改 | "会话:" 改为 "上次会话:" |
 | `core/session/store.py` | 修改 | list_sessions 排除 active_session.json |
 | `run.py` / `web/routes/qa.py` / `web/routes/search.py` | 修改 | HybridRetriever 传 storage |
+
+---
+
+## 🆕 2026-07-15 更新：Agent Hide Thoughts 优化 + 活动记录会话隔离
+
+### 一、Agent Hide Thoughts 模式优化
+
+**之前**：Hide Thoughts 模式下仍会打印工具调用和结果信息，只是隐藏思考过程。
+
+**现在**：
+- **只显示单个动态 spinner**：`⠋ Thinking Xs`，X 从任务开始（t0）持续增长
+- **工具调用和结果完全不打印**：只有 Show Thoughts 模式才显示 `[T] Thinking`、`[OK] tool` 等详细信息
+- **使用 `_AgentStatus` + `Live` 组件**：`refresh_per_second=8` 确保 spinner 动画流畅
+- **计时器从任务开始计时**：不是每次 LLM 调用重置，而是从整个 Agent 任务开始持续增长
+- **Step 计数器修复**：在每次 `llm_start` 回调时递增（而非仅在 thought 时），修复了"0 Steps"的 bug
+- **Tool/result 回调静默**：Hide Thoughts 模式下这些回调不输出任何内容
+
+**技术实现**：
+```python
+class _AgentStatus:
+    """动态状态渲染器，实现 __rich_console__ 协议"""
+    def __init__(self):
+        self._thinking = True
+        self._start = time.time()
+    
+    def __rich_console__(self, console, options):
+        if self._thinking:
+            elapsed = time.time() - self._start
+            desc = f"Thinking {elapsed:.0f}s"
+        yield Spinner("dots", text=Text(f" {desc}", style="dim"), style="cyan")
+```
+
+**回调逻辑**：
+- `llm_start`: 递增 step_n，设置 thinking 状态，启动 Live（如果未启动）
+- `thought`: 仅 Show Thoughts 模式打印 `[T] Thinking Xs`
+- `tool`: 仅 Show Thoughts 模式显示工具名 spinner
+- `result`: 仅 Show Thoughts 模式打印 `[OK] tool (N chars)`
+- `error`: Show Thoughts 打印 `[ERR]`，Hide Thoughts 也打印（错误需要可见）
+
+### 二、活动记录会话隔离
+
+**之前**：Recent activity 显示所有会话的活动记录，混在一起。
+
+**现在**：
+- **活动记录增加 `session` 字段**：`_record_activity` 接受 `session` 参数
+- **启动页按当前会话过滤**：`_render_welcome_panel` 只显示当前会话的活动记录
+- **向后兼容**：旧记录（session 字段为空）也会显示，避免数据丢失
+- **去重逻辑包含 session 维度**：同会话 + 同类型 + 同描述才去重
+
+**实现细节**：
+```python
+def _record_activity(act_type: str, desc: str, session: Optional[str] = None):
+    new_entry = {
+        "type": act_type,
+        "desc": desc,
+        "time": datetime.now().strftime("%m-%d %H:%M"),
+        "session": session or "",
+    }
+    # 去重：同会话 + 同类型 + 同描述
+    entries = [
+        e for e in entries
+        if not (
+            e.get("session", "") == (session or "")
+            and e.get("type") == act_type
+            and e.get("desc") == desc
+        )
+    ]
+
+def _render_welcome_panel(..., session_name: Optional[str] = None):
+    # 按当前会话过滤（session 为空表示旧记录，也显示）
+    if session_name:
+        recent_entries = [
+            e for e in all_entries
+            if e.get("session", "") == session_name or e.get("session", "") == ""
+        ]
+```
+
+### 三、Think toggle 反馈优化
+
+**之前**：`/agent think on|off` 反馈消息使用 `[O]` 符号。
+
+**现在**：改用 `✅` 符号，更直观。
+- `/agent think on` → `✅ Thoughts shown`
+- `/agent think off` → `✅ Thoughts hidden`
+
+### 四、测试更新
+
+**文件**：`tests/test_cli_agent.py`
+
+- `test_hide_thoughts_live_reused`: 验证 Hide Thoughts 模式下 `console.print` 调用次数为 0（不打印任何内容）
+- `test_step_count_hide_thoughts`: 验证 step_n 在 `llm_start` 时正确递增
+- `test_step_count_show_thoughts`: 验证 Show Thoughts 模式下 step_n 也正确递增
+- `test_agent_status_thinking`: 验证 `_AgentStatus` 在 thinking 模式下 yield Spinner 对象
+- `test_agent_status_static`: 验证 `_AgentStatus` 在 static 模式下显示工具名和详情
+
+### 五、改动文件清单
+
+| 文件 | 变更类型 | 说明 |
+|---|---|---|
+| `core/cli/commands/agent.py` | 修改 | `_AgentStatus` 类 + `_make_agent_on_step` 回调逻辑重构 + think toggle 反馈改为 ✅ |
+| `core/cli/welcome.py` | 修改 | `_record_activity` 增加 session 参数 + `_render_welcome_panel` 按会话过滤 |
+| `tests/test_cli_agent.py` | 修改 | 更新测试验证 Hide Thoughts 不打印内容 + 新增 step 计数测试 |
+
+### 六、测试验证
+
+```bash
+python3 -m pytest tests/test_cli_agent.py -v
+# 所有测试通过
+```
+
+---

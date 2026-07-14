@@ -493,7 +493,7 @@ def cli(ctx):
 | [repl.py](core/cli/repl.py) | REPL 主类（命令分发 + AI 对话） |
 | [chat.py](core/cli/chat.py) | AI 对话渲染（Markdown + 引用 + 宠物头像） |
 | [completer.py](core/cli/completer.py) | 命令自动补全（CommandCompleter） |
-| [welcome.py](core/cli/welcome.py) | 启动页渲染 + 活动记录 |
+| [welcome.py](core/cli/welcome.py) | 启动页渲染 + 活动记录（按会话过滤） |
 | [constants.py](core/cli/constants.py) | 常量、命令列表、别名表、console 实例 |
 | [commands/](core/cli/commands) | 各命令处理器（Mixin 模式：agent/docs/graph/memory/pet/pipe/session/sync/analyze） |
 
@@ -515,7 +515,7 @@ def cli(ctx):
 - **流式输出**：橙色 `⏺` 圆点标记 + 首 token Spinner
 - **多轮对话**：保留最近 20 条 history（10 轮）
 - **管道操作**：`/search 骨灰 | ask 差异`
-- **活动记录**：每次操作记录到 `storage/activity.json`，启动页展示英文标签（Search/Ingest/Q&A 等）
+- **活动记录**：每次操作记录到 `storage/activity.json`，启动页展示英文标签（Search/Ingest/Q&A 等）。**2026-07-15 更新**：活动记录增加 `session` 字段，启动页按当前会话过滤（向后兼容旧记录）
 
 ##### `CommandCompleter` 类
 
@@ -1824,22 +1824,57 @@ class Comparator:
 
 ### 6.14 Agent
 
-##### 文件：[core/agent/agent.py](core/agent/agent.py) + [core/agent/tools/](core/agent/tools)
+##### 文件：[core/agent/agent.py](core/agent/agent.py) + [core/agent/tools/](core/agent/tools) + [core/cli/commands/agent.py](core/cli/commands/agent.py)
 
 LLM ReAct 模式工具调用。工具系统已模块化拆分到 `core/agent/tools/`：
 
 - [base.py](core/agent/tools/base.py) — `@register_tool` 装饰器 + `Tool` 基类（name/description/usage/run）
 - [builtin.py](core/agent/tools/builtin.py) — 内置工具集实现
+- [core/cli/commands/agent.py](core/cli/commands/agent.py) — Agent CLI 命令 + 输出渲染
 
 ```python
 class Agent:
-    def run(self, task, on_step=None) -> str:
+    def run(self, task, on_step=None, show_thoughts=False) -> str:
         """
         ReAct 循环：Thought → Action → Observation
         达到 MAX_STEPS 强制总结
         on_step(step_type, content) 回调支持进度上报
+        show_thoughts: 是否显示思考过程（Hide Thoughts 模式只显示 spinner）
         """
 ```
+
+##### Agent 输出模式（2026-07-15 更新）
+
+**Show Thoughts 模式**（`/agent think on`）：
+- 显示完整的思考过程：`[T] Thinking Xs` → `[OK] tool (N chars)` → 循环
+- 每个步骤有图标 + 标题 + 内容缩进
+
+**Hide Thoughts 模式**（`/agent think off`，默认）：
+- **只显示单个动态 spinner**：`⠋ Thinking Xs`，X 从任务开始持续增长
+- **工具调用和结果完全不打印**
+- 使用 `_AgentStatus` + `Live` 组件，`refresh_per_second=8` 确保动画流畅
+- **Step 计数器**：在每次 `llm_start` 回调时递增（修复"0 Steps"bug）
+
+```python
+class _AgentStatus:
+    """动态状态渲染器，实现 __rich_console__ 协议"""
+    def __init__(self):
+        self._thinking = True
+        self._start = time.time()
+    
+    def __rich_console__(self, console, options):
+        if self._thinking:
+            elapsed = time.time() - self._start
+            desc = f"Thinking {elapsed:.0f}s"
+        yield Spinner("dots", text=Text(f" {desc}", style="dim"), style="cyan")
+```
+
+**回调逻辑**：
+- `llm_start`: 递增 step_n，设置 thinking 状态，启动 Live
+- `thought`: 仅 Show Thoughts 模式打印
+- `tool`: 仅 Show Thoughts 模式显示工具名 spinner
+- `result`: 仅 Show Thoughts 模式打印 `[OK] tool (N chars)`
+- `error`: 两种模式都打印（错误需要可见）
 
 ##### 6 个内置工具
 
