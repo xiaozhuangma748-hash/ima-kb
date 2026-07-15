@@ -8,6 +8,8 @@ from typing import List, Optional, Dict
 from core.pet.pet import Pet
 from core.storage import Storage
 from core.memory.store import MemoryStore
+from core.retrieval.router import route_query, should_skip_retrieval
+from core.retrieval.semantic_cache import SemanticCache
 from core.memory.profile import ProfileManager
 from core.memory.tasks import TaskManager
 from core.memory.workflow import WorkflowTracker
@@ -70,6 +72,8 @@ class PetAdministrator:
         self.workflow = WorkflowTracker(memory_store)
         # 每日待办管理器（可选，未传入时忽略）
         self.todo_mgr = todo_manager
+        # 答案级语义缓存（与检索层 hybrid.cache 互补：这里缓存完整 LLM 答案）
+        self._answer_cache = SemanticCache(threshold=0.92, ttl=1800, max_size=200)
 
     def ask(self, query: str, style_override: Optional[str] = None,
             history: Optional[List[Dict]] = None,
@@ -211,6 +215,35 @@ class PetAdministrator:
         步骤 1-5 与 ask() 完全一致；步骤 6 改用 chat_stream()；
         步骤 7-9（引用提取 / 记忆更新 / 宠物经验）在流式结束后执行。
         """
+        # 0. 答案级语义缓存查询（命中则直接流式返回缓存的答案）
+        query_type = route_query(query)
+        if query_type == "knowledge":
+            try:
+                query_emb = None
+                if self.hybrid.vector.is_available():
+                    query_emb = self.hybrid.vector.embed_query(query)
+                if query_emb is not None:
+                    cached = self._answer_cache.get(query, query_emb)
+                    if cached is not None and cached.answer:
+                        logger.info(f"答案缓存命中，跳过检索+LLM: {query[:30]}...")
+                        yield {"type": "stage", "stage": "缓存", "count": 1}
+                        # 逐 token 回放缓存答案
+                        import re as _re
+                        for token in _re.findall(r'\S+|\s+', cached.answer):
+                            yield {"type": "token", "text": token}
+                        yield {
+                            "type": "done",
+                            "result": AnswerResult(
+                                text=cached.answer,
+                                citations=[],
+                                sources=[],
+                                pet_events={},
+                            ),
+                        }
+                        return
+            except Exception as e:
+                logger.warning(f"答案缓存查询失败，继续正常流程: {e}")
+
         # 1. 加载记忆
         profile = self.profile_mgr.get_profile()
         active_tasks = self.task_mgr.get_active_tasks()
@@ -222,12 +255,19 @@ class PetAdministrator:
             except Exception as e:
                 logger.warning(f"加载今日待办失败: {e}")
 
-        # 2. 混合检索
-        candidates = self.hybrid.search(query, top_k=15)
-        yield {"type": "stage", "stage": "检索", "count": len(candidates)}
+        # 2. 混合检索（闲聊跳过检索，直接空候选）
+        if should_skip_retrieval(query):
+            candidates = []
+            yield {"type": "stage", "stage": "检索", "count": 0}
+        else:
+            candidates = self.hybrid.search(query, top_k=15)
+            yield {"type": "stage", "stage": "检索", "count": len(candidates)}
 
-        # 3. LLM 重排
-        top_sources = self.reranker.rerank(query, candidates, top_n=5)
+        # 3. LLM 重排（无候选时跳过）
+        if candidates:
+            top_sources = self.reranker.rerank(query, candidates, top_n=5)
+        else:
+            top_sources = []
         yield {"type": "stage", "stage": "重排", "count": len(top_sources)}
 
         # 4. 确定风格
@@ -322,6 +362,19 @@ class PetAdministrator:
             events = self.pet.gain_exp(EXP_TABLE.get("qa", 10), "qa")
         except Exception as e:
             logger.warning(f"宠物经验更新失败: {e}")
+
+        # 10. 写入答案缓存（知识查询且有完整答案时）
+        if query_type == "knowledge" and answer_text.strip():
+            try:
+                if query_emb is not None:
+                    self._answer_cache.put(
+                        query=query,
+                        query_embedding=query_emb,
+                        answer=answer_text,
+                        citations=[c.__dict__ if hasattr(c, '__dict__') else c for c in citations],
+                    )
+            except Exception as e:
+                logger.warning(f"答案缓存写入失败: {e}")
 
         yield {
             "type": "done",

@@ -306,6 +306,22 @@ class VectorIndex:
             logger.warning(f"向量检索失败: {e}")
             return []
 
+    def embed_query(self, query: str) -> Optional[List[float]]:
+        """计算 query 的 embedding 向量（带缓存）。
+
+        供语义缓存复用，避免重复计算 embedding。
+        Returns:
+            embedding 向量列表，不可用时返回 None。
+        """
+        if not self._available:
+            return None
+        try:
+            embeddings = self._embed_with_cache([query])
+            return embeddings[0] if embeddings else None
+        except Exception as e:
+            logger.warning(f"计算 query embedding 失败: {e}")
+            return None
+
     def cache_stats(self) -> dict:
         """返回 embedding 缓存统计信息。"""
         if not self._cache:
