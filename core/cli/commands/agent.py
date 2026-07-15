@@ -156,6 +156,9 @@ class AgentMixin:
         agent_status = _AgentStatus(t0)
         step_n = [0]
         last_tool = [None]
+        # 流式输出状态
+        stream_live = [None]
+        stream_text = [""]
 
         def _stop_spinner():
             if spinner[0]:
@@ -167,9 +170,15 @@ class AgentMixin:
                 live[0].stop()
                 live[0] = None
 
+        def _stop_stream_live():
+            if stream_live[0]:
+                stream_live[0].stop()
+                stream_live[0] = None
+
         def _stop():
             _stop_spinner()
             _stop_live()
+            _stop_stream_live()
 
         def _ensure_live():
             if live[0] is None:
@@ -230,8 +239,34 @@ class AgentMixin:
                 else:
                     console.print(f"  [red][ERR] {err}[/red]")
 
+            elif step_type == "stream_start":
+                # 流式输出开始：停止 spinner，启动 Live 组件
+                _stop_spinner()
+                _stop_live()
+                stream_text[0] = ""
+                stream_live[0] = Live(
+                    Text(""),
+                    console=console,
+                    refresh_per_second=12,
+                    transient=True,
+                )
+                stream_live[0].start()
+
+            elif step_type == "stream_token":
+                # 流式输出 token：实时更新 Markdown
+                if stream_live[0]:
+                    stream_text[0] += content
+                    # 流式过程中用纯文本渲染（去掉 ** 标记），保证流畅性
+                    clean_text = stream_text[0].replace("**", "")
+                    stream_live[0].update(Text(clean_text))
+
             elif step_type == "done":
                 _stop()
+                # 如果有流式输出，用 Markdown 重新渲染最终结果
+                if stream_text[0]:
+                    _stop_stream_live()
+                    console.print(Markdown(stream_text[0]))
+                    stream_text[0] = ""
 
         return on_step, _stop, t0, step_n
 

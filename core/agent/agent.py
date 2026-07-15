@@ -70,7 +70,7 @@ class Agent:
         Args:
             task: 用户的任务描述
             on_step: 回调函数（step_type, content）
-                step_type: llm_start / thought / tool / result / error / done
+                step_type: llm_start / thought / tool / result / error / done / stream_token
             show_thoughts: 是否回调 thought 类型内容（False 时只显示工具状态）
         Returns:
             最终答案
@@ -115,17 +115,14 @@ class Agent:
                 if "<tool>done" in reply or '"tool": "done"' in reply or "<args>" in reply:
                     extracted = self._extract_truncated_args(reply)
                     if extracted:
-                        if on_step:
-                            on_step("done", extracted)
-                        return extracted
-                if on_step:
-                    on_step("done", reply)
-                return reply
+                        # 流式输出最终答案
+                        return self._stream_final_answer(extracted, on_step, messages)
+                # 流式输出最终答案
+                return self._stream_final_answer(reply, on_step, messages)
 
             if tool_name == "done":
-                if on_step:
-                    on_step("done", tool_args)
-                return tool_args
+                # 流式输出最终答案
+                return self._stream_final_answer(tool_args, on_step, messages)
 
             tool = self._registry.get(tool_name)
             if tool is None:
@@ -191,6 +188,50 @@ class Agent:
         if on_step:
             on_step("done", summary)
         return summary
+
+    def _stream_final_answer(
+        self,
+        initial_content: str,
+        on_step: Optional[callable],
+        messages: list,
+    ) -> str:
+        """流式输出最终答案。
+
+        Args:
+            initial_content: 初始内容（可能是截断的或完整的）
+            on_step: 回调函数
+            messages: 对话历史
+
+        Returns:
+            完整答案文本
+        """
+        # 通知 CLI 层开始流式输出
+        if on_step:
+            on_step("stream_start", "")
+
+        # 构建最终提示，让 LLM 基于已有信息给出完整答案
+        final_messages = messages.copy()
+        final_messages.append({
+            "role": "user",
+            "content": "请基于以上信息，给出完整、详细的最终答案。",
+        })
+
+        full_content = ""
+        try:
+            for token in self.llm.chat_stream(final_messages, temperature=0.3, max_tokens=self.MAX_TOKENS):
+                full_content += token
+                if on_step:
+                    on_step("stream_token", token)
+        except LLMError:
+            # 流式失败时回退到同步调用
+            full_content = self.llm.chat(final_messages, temperature=0.3, max_tokens=self.MAX_TOKENS)
+            if on_step:
+                on_step("done", full_content)
+            return full_content
+
+        if on_step:
+            on_step("done", full_content)
+        return full_content
 
     def _compress_messages(self, messages: list) -> None:
         """压缩上下文：截断过长的 tool result，防止超出 token 限制。"""
