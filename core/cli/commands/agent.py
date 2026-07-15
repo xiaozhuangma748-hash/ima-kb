@@ -205,9 +205,23 @@ class AgentMixin:
                     _ensure_live()
 
             elif step_type == "thought":
-                # Show Thoughts: 保持动态 spinner 不中断，不打印摘要
-                # Hide Thoughts: 保持 Thinking spinner
-                pass
+                if show_thoughts:
+                    # Show Thoughts: 停止 spinner，打印详细思考内容
+                    _stop_spinner()
+                    # 格式化输出 Thought
+                    header = Text()
+                    header.append("  ", style="bright_black")
+                    header.append("[THOUGHT]", style="cyan")
+                    header.append("  ", style="bright_black")
+                    console.print(header)
+                    # 缩进显示思考内容
+                    indented_lines = _wrap_indented(content, indent=4)
+                    for line in indented_lines:
+                        console.print(line)
+                else:
+                    # Hide Thoughts: 只显示思考时间，保持 spinner 继续
+                    elapsed = time.time() - llm_start[0]
+                    console.print(f"  [dim]Thinking {elapsed:.1f}s[/dim]")
 
             elif step_type == "tool":
                 last_tool[0] = content

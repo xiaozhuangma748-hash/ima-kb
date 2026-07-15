@@ -104,8 +104,8 @@ class Agent:
             # 解析工具调用（支持 JSON 和 XML 两种格式）
             tool_name, tool_args = self._parse_tool_call(reply)
 
-            # 提取并显示 Thought（仅当 show_thoughts=True 时回调）
-            if on_step and show_thoughts:
+            # 提取并显示 Thought（始终回调，让 CLI 层决定如何显示）
+            if on_step:
                 thought = self._extract_thought(reply)
                 if thought:
                     on_step("thought", thought)
