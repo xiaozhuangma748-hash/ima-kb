@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-15（Web 全面重构 + REPL 会话选择优化 + 终端标题设置）
+> 最后更新：2026-07-15（检索性能优化：语义缓存 + 查询路由 + 并发检索 + LaTeX 输出清理）
 
 ---
 
@@ -50,6 +50,8 @@
 - ✅ **一键安装**（`install.sh` + `pyproject.toml`，支持 `--ocr` / `--dev` / `--no-venv` / `--vector`）
 - ✅ **宠物管理员 v4.0**（统一 AI 交互入口，4 种人格风格 scholar/warrior/artisan/neutral，像素风 ASCII 艺术）
 - ✅ **混合检索**（BM25 + 向量 bge-small-zh-v1.5 + RRF 融合 k=60 + LLM 重排序，四层流水线）
+- ✅ **检索性能优化**（语义缓存 L1/L2 + 查询路由 + BM25/向量并发检索 + 两级粗排精排）
+- ✅ **输出可读性**（system prompt 禁止 + 流式渲染清理 + 缓存清理，三重防护去除 LaTeX 公式）
 - ✅ **记忆系统**（用户偏好 + 跨会话任务 + jieba 主题提取 + 非重叠 2-gram 工作流识别）
 - ✅ **增量同步**（`ima sync`，文件 mtime/hash 追踪，仅处理变更）
 - ✅ **质量检查**（`ima health`，检测空文档/超长块/低质量内容）
@@ -124,9 +126,11 @@ ima-kb/
 │   ├── search/
 │   │   ├── bm25.py               # BM25 索引 + 检索（P7: 归一化+多模式分词+IDF 截断+b=0.5）
 │   │   └── config.py             # P7: 搜索默认配置（/search config）
-│   ├── retrieval/                # P5 新增：混合检索
+│   ├── retrieval/                # P5 新增：混合检索；P8 新增：性能优化
 │   │   ├── vector.py             # ChromaDB + bge-small-zh-v1.5 向量索引
-│   │   ├── hybrid.py             # BM25 + 向量 + RRF 融合（k=60）
+│   │   ├── hybrid.py             # BM25 + 向量 + RRF 融合（k=60，并发检索 + 两级检索 + 语义缓存集成）
+│   │   ├── semantic_cache.py     # 语义缓存（L1 精确 + L2 embedding 相似度，TTL + LRU）
+│   │   ├── router.py             # 查询路由（闲聊/知识分流）
 │   │   ├── rerank.py             # LLM 重排序
 │   │   └── citation.py           # 引用编号提取
 │   ├── qa/
@@ -190,7 +194,7 @@ ima-kb/
 │   └── static/
 │       └── app.js                # 入口（重定向至模块化 js/ 目录）
 │
-├── tests/                        # 407+ 测试
+├── tests/                        # 433+ 测试
 │   ├── retrieval/                # 混合检索测试
 │   ├── memory/                   # 记忆系统测试
 │   ├── pet/                      # 宠物系统测试
@@ -244,7 +248,7 @@ ima-kb/
   - `ima graph export [-o PATH]`：导出 HTML 可视化
   - `ima graph clear`：清空图谱
 
-### `repl.py` — IMA REPL（v4.0 · Claude Code 风格）
+### `repl.py` / `core/cli/chat.py` — IMA REPL（v4.0 · Claude Code 风格）
 - **欢迎面板**：左窄右宽布局（左 32 列：mascot+宠物信息+状态 / 右：Tips+Recent activity），中间 `│` dim 竖线分隔，顶部标题线 `── IMA v4.0 ──`，输入框前 dim 提示 `/help for shortcuts` / `Ctrl+C to exit`
 - **命令补全**：自定义 `CommandCompleter`（继承 `Completer`）取代旧 `NestedCompleter`
   - 输入 `/` 弹出所有命令 + 中文描述
@@ -252,7 +256,8 @@ ima-kb/
   - 子命令也带中文描述（如 `/memory ` 弹出 clear清空/format格式/style风格...）
   - 支持多级嵌套（如 `/memory format ` → table表格/list列表/prose散文）
   - 别名自动解析（`/m` → `/memory` 子命令）
-- **AI 回答 Markdown 渲染**：`_render_answer()` 用 `rich.Markdown(result.text)` 渲染，**粗体**、列表、标题正确显示
+- **AI 回答 Markdown 渲染**：`core/cli/chat.py` 用 `rich.Markdown` 实时渲染流式输出，**粗体**、列表、表格、标题正确显示
+- **LaTeX 清理**：`ChatMixin._sanitize_latex()` 在流式输出时清理 `$$`、`times`、`mathbf{}` 等 LaTeX 语法，保证终端可读
 - **橙色 `>` 提示符**（Claude Code 风格）
 - **AI 对话**：橙色 `⏺` 圆点标记 + 首 token Spinner + 流式输出
 - **Web 后台**：`/web` 后台线程启动 FastAPI、`/web stop` 关闭；支持 `--host --port` 参数
@@ -289,6 +294,17 @@ ima-kb/
 - vis.js CDN，暗色主题（#1a1a2e 背景）
 - 节点大小基于连接数（10-35 范围）
 - 点击节点显示邻居信息面板
+
+### `core/retrieval/router.py` — 查询路由
+- `route_query(query)`：返回 `chat` / `knowledge` / `greeting`
+- 问候/闲聊/元问题直接走 LLM，跳过检索，省 1-5s
+- 知识查询走完整 RAG + 缓存
+
+### `core/retrieval/semantic_cache.py` — 语义缓存
+- `SemanticCache(threshold=0.92, ttl=1800, max_size=500)`
+- L1 精确缓存（query hash）+ L2 语义缓存（embedding cosine）
+- 线程安全，TTL + LRU 淘汰
+- 用于 `HybridRetriever`（检索层）和 `PetAdministrator`（答案层）
 
 ### `core/qa/chain.py` — RAG 问答
 - `SYSTEM_PROMPT`：严格基于资料回答 + 引用编号 + 不编造
@@ -381,6 +397,8 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 |---|---|---|---|---|---|
 | ✅ | ~~**Embedding 缓存层**~~ | ★ | ~1 小时 | ✅ **已完成** | `vector.py` 已实现 `_EmbeddingCache`（SQLite 持久化 content hash → embedding），见 [vector.py:79](file:///core/retrieval/vector.py) |
 | ✅ | ~~**OCR 优化：PaddleOCR**~~ | ★★ | 1-2 小时 | ✅ **2026-07-12 完成** | PaddleOCR 为主引擎（原图直传，内部自带预处理），Tesseract 降级（外部预处理：灰度+二值化+放大）；DPI 200；见 [parser.py](file:///core/ingestion/parser.py) |
+| ✅ | ~~**检索性能优化**~~ | ★★ | 2-3 小时 | ✅ **2026-07-15 完成** | 语义缓存 + 查询路由 + 并发检索 + 两级检索；见 `core/retrieval/` |
+| ✅ | ~~**LaTeX 输出清理**~~ | ★ | ~1 小时 | ✅ **2026-07-15 完成** | `chat.py` + `administrator.py` 渲染层/缓存层双重清理 |
 | 3 | **图谱扩展：人物/时间/金额** | ★★★ | 2-3 小时 | ❌ 未做 | LLM prompt 调优 + 新关系类型 + store/visualizer 适配 + 重建图谱验证 |
 | 4 | **多用户：FastAPI + 隔离** | ★★★★★ | 8-12 小时 | ❌ 未做 | 断层式最难：全栈改造，所有 storage/bm25/vector/graph 加 user_id，认证体系从零写 |
 | ✅ | ~~**Web 端开发：7 页面 FastAPI + 前端**~~ | — | — | ✅ **P5 已完成** | 7 页面 + 7 API 全部实现，见 web/ 目录；PRD 原定 Streamlit 方案改为 FastAPI 原生方案 |
