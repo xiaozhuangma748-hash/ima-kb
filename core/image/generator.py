@@ -176,6 +176,15 @@ class ImageGenerator:
             except Exception as e:
                 last_err = e
                 err_type = type(e).__name__
+                
+                # 内容策略违规：不重试，直接返回友好提示
+                err_str = str(e)
+                if "content_policy_violation" in err_str or "content policy" in err_str.lower():
+                    raise ImageError(
+                        "提示词触发了内容安全策略，请修改描述后重试。\n"
+                        "建议：避免描述暴力、血腥、灾难场景，使用更温和的词汇。"
+                    ) from e
+                
                 should_retry = (
                     any(t in err_type for t in ("APIConnectionError", "APITimeoutError", "APIStatusError"))
                     and attempt < max_retries
