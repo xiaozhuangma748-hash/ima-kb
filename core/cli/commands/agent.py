@@ -218,10 +218,7 @@ class AgentMixin:
                     indented_lines = _wrap_indented(content, indent=4)
                     for line in indented_lines:
                         console.print(line)
-                else:
-                    # Hide Thoughts: 只显示思考时间，保持 spinner 继续
-                    elapsed = time.time() - llm_start[0]
-                    console.print(f"  [dim]Thinking {elapsed:.1f}s[/dim]")
+                # Hide Thoughts: 不打印任何内容，保持 spinner 继续运行
 
             elif step_type == "tool":
                 last_tool[0] = content
