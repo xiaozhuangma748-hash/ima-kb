@@ -48,8 +48,8 @@ def test_build_neutral_prompt_for_unbranched():
     pet = Pet(name="小白", level=3, branch=None)
     prompt = build_system_prompt("neutral", pet, {}, [], [])
     assert "小白" in prompt
-    # 中性 prompt 较短
-    assert len(prompt) < len(SCHOLAR_SYSTEM)
+    # 中性模板本身较短；最终 prompt 因追加全局输出规范可能比 scholar 模板还长
+    assert len(prompt) > len(NEUTRAL_SYSTEM)
 
 
 def test_build_prompt_with_empty_sources():
