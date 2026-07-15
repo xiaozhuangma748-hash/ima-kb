@@ -60,7 +60,7 @@ def _record_activity(act_type: str, desc: str, session: Optional[str] = None) ->
     new_entry = {
         "type": act_type,
         "desc": desc,
-        "time": datetime.now().strftime("%m-%d %H:%M"),
+        "time": datetime.now().strftime("%m-%d %H:%M:%S"),
         "session": session or "",
     }
     entries = [
