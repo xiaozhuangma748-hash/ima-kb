@@ -247,13 +247,13 @@ class AgentMixin:
                 stream_live[0] = Live(
                     Text(""),
                     console=console,
-                    refresh_per_second=12,
+                    refresh_per_second=30,
                     transient=True,
                 )
                 stream_live[0].start()
 
             elif step_type == "stream_token":
-                # 流式输出 token：实时更新 Markdown
+                # 流式输出 token：实时更新文本
                 if stream_live[0]:
                     stream_text[0] += content
                     # 流式过程中用纯文本渲染（去掉 ** 标记），保证流畅性
@@ -389,6 +389,8 @@ class AgentMixin:
             return
 
         # 优先: Agent ReAct 循环
+        on_step = None
+        stop_spinner = None
         try:
             from core.agent.agent import Agent
             agent = Agent(storage=self.storage)
@@ -409,6 +411,8 @@ class AgentMixin:
             self._pet_gain_exp(8, "smart")
             return
         except Exception as e:
+            if stop_spinner:
+                stop_spinner()
             console.print(f"[dim]Agent 模式失败，回退到命令路由: {e}[/dim]\n")
 
         # 回退: 旧的 LLM 命令路由

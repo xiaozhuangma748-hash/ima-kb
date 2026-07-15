@@ -191,43 +191,38 @@ class Agent:
 
     def _stream_final_answer(
         self,
-        initial_content: str,
+        content: str,
         on_step: Optional[callable],
         messages: list,
     ) -> str:
         """流式输出最终答案。
 
+        按词逐个输出，模拟流式效果，避免一次性显示全部内容。
+
         Args:
-            initial_content: 初始内容（可能是截断的或完整的）
+            content: 已生成的答案内容
             on_step: 回调函数
-            messages: 对话历史
+            messages: 对话历史（保留用于兼容性）
 
         Returns:
             完整答案文本
         """
+        import time
+
         # 通知 CLI 层开始流式输出
         if on_step:
             on_step("stream_start", "")
 
-        # 构建最终提示，让 LLM 基于已有信息给出完整答案
-        final_messages = messages.copy()
-        final_messages.append({
-            "role": "user",
-            "content": "请基于以上信息，给出完整、详细的最终答案。",
-        })
+        # 按词分割，保留空白符
+        import re as _re
+        tokens = _re.findall(r'\S+|\s+', content)
 
         full_content = ""
-        try:
-            for token in self.llm.chat_stream(final_messages, temperature=0.3, max_tokens=self.MAX_TOKENS):
-                full_content += token
-                if on_step:
-                    on_step("stream_token", token)
-        except LLMError:
-            # 流式失败时回退到同步调用
-            full_content = self.llm.chat(final_messages, temperature=0.3, max_tokens=self.MAX_TOKENS)
+        for token in tokens:
+            full_content += token
             if on_step:
-                on_step("done", full_content)
-            return full_content
+                on_step("stream_token", token)
+            time.sleep(0.03)  # 每个词 30ms 延迟
 
         if on_step:
             on_step("done", full_content)

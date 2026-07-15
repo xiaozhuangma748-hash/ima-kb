@@ -95,7 +95,8 @@ def test_step_count_show_thoughts():
 
 def test_agent_status_thinking():
     """_AgentStatus 在 thinking 模式下显示耗时。"""
-    status = _AgentStatus()
+    import time as _time
+    status = _AgentStatus(_time.time())
     status.set_thinking()
     assert status._thinking is True
     # __rich_console__ 应 yield Spinner 对象
@@ -109,7 +110,8 @@ def test_agent_status_thinking():
 
 def test_agent_status_static():
     """_AgentStatus 在 static 模式下显示工具名和详情。"""
-    status = _AgentStatus()
+    import time as _time
+    status = _AgentStatus(_time.time())
     status.set_static("search", "1234 chars")
     assert status._thinking is False
     assert status._label == "search"
