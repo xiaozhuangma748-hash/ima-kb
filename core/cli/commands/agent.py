@@ -137,12 +137,16 @@ class AgentMixin:
     """Agent 模式与智能路由。"""
 
     def _make_agent_on_step(self, show_thoughts: bool = True):
-        """创建 Agent on_step 回调 — Trae 垂直风格。
+        """创建 Agent on_step 回调 — 极简垂直流风格。
 
-        参考 Trae IDE 的展示方式：
-        - 每个步骤有图标 + 标题
-        - 内容缩进显示在标题下方
-        - 无竖线装饰，层次清晰
+        Show Thoughts 模式展示完整的 ReAct 链路：
+          Thinking 2.3s
+            用户在问爱情的定义，我需要从多个角度...
+          > search "爱情 定义"
+            10 results · top 4.85
+
+        Hide Thoughts 模式只显示动态 spinner：
+          Thinking 12.4s
 
         Args:
             show_thoughts: 是否显示 thought 详细内容
@@ -194,6 +198,10 @@ class AgentMixin:
                 llm_start[0] = time.time()
                 _stop_spinner()
                 if show_thoughts:
+                    # Show Thoughts: 步骤间用细线分隔（第一步除外）
+                    if step_n[0] > 1:
+                        console.print(Text("  " + "─" * 40, style="bright_black"))
+                    # 启动 Thinking spinner
                     thinking_status = _ThinkingStatus(llm_start[0])
                     spinner[0] = Live(
                         thinking_status, console=console, transient=True,
@@ -206,34 +214,42 @@ class AgentMixin:
 
             elif step_type == "thought":
                 if show_thoughts:
-                    # Show Thoughts: 停止 spinner，打印详细思考内容
+                    # Show Thoughts: 停止 spinner，打印思考时间和内容
                     _stop_spinner()
-                    # 格式化输出 Thought
-                    header = Text()
-                    header.append("  ", style="bright_black")
-                    header.append("[THOUGHT]", style="cyan")
-                    header.append("  ", style="bright_black")
-                    console.print(header)
-                    # 缩进显示思考内容
-                    indented_lines = _wrap_indented(content, indent=4)
-                    for line in indented_lines:
-                        console.print(line)
+                    elapsed = time.time() - llm_start[0]
+                    # 打印思考时间
+                    console.print(f"  [dim]Thinking {elapsed:.1f}s[/dim]")
+                    # 缩进显示思考内容（dim 风格，4 空格缩进）
+                    if content.strip():
+                        indented_lines = _wrap_indented(content, indent=4)
+                        for line in indented_lines:
+                            console.print(line)
                 # Hide Thoughts: 不打印任何内容，保持 spinner 继续运行
 
             elif step_type == "tool":
                 last_tool[0] = content
                 _stop_spinner()
                 if show_thoughts:
+                    # Show Thoughts: 用箭头前缀显示工具调用
+                    console.print(f"  [bold yellow]→[/bold yellow] [cyan]{content}[/cyan]")
+                    # 启动工具执行 spinner
                     spinner[0] = Live(
-                        Spinner("dots", text=f" [dim]{content}[/dim]"),
+                        Spinner("dots", text=Text("    executing...", style="dim")),
                         console=console, transient=True, refresh_per_second=10,
                     )
                     spinner[0].start()
                 # Hide Thoughts: 不显示工具调用，保持 Thinking spinner 即可
 
             elif step_type == "result":
-                # Show/Hide Thoughts: 都不打印工具结果，保持 spinner
-                pass
+                _stop_spinner()
+                if show_thoughts:
+                    # Show Thoughts: 显示工具结果摘要
+                    summary = content.replace('\n', ' ').strip()
+                    if len(summary) > 120:
+                        summary = summary[:120] + "..."
+                    console.print(f"    [dim]{summary}[/dim]")
+                    console.print()  # 空行分隔
+                # Hide Thoughts: 不打印工具结果
 
             elif step_type == "error":
                 _stop()
@@ -241,12 +257,8 @@ class AgentMixin:
                 if len(err) > 150:
                     err = err[:150] + "..."
                 if show_thoughts:
-                    header = Text()
-                    header.append("  ", style="bright_black")
-                    header.append("[ERR]", style="red")
-                    header.append("  ", style="bright_black")
-                    header.append(err, style="red")
-                    console.print(header)
+                    console.print(f"  [red]✗ {err}[/red]")
+                    console.print()
                 else:
                     console.print(f"  [red][ERR] {err}[/red]")
 
