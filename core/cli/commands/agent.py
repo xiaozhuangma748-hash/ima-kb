@@ -163,6 +163,7 @@ class AgentMixin:
         # 流式输出状态
         stream_live = [None]
         stream_text = [""]
+        final_displayed = [False]  # 最终答案是否已在 done 事件中输出
 
         def _stop_spinner():
             if spinner[0]:
@@ -285,13 +286,17 @@ class AgentMixin:
 
             elif step_type == "done":
                 _stop()
-                # 如果有流式输出，用 Markdown 重新渲染最终结果
+                # 如果有流式输出，用 Markdown 重新渲染最终结果，并加"总结"标题
                 if stream_text[0]:
                     _stop_stream_live()
+                    console.print()
+                    console.print("[bold green]总结[/bold green]")
+                    console.print()
                     console.print(Markdown(stream_text[0]))
                     stream_text[0] = ""
+                    final_displayed[0] = True
 
-        return on_step, _stop, t0, step_n
+        return on_step, _stop, t0, step_n, final_displayed
 
     def _cmd_agent(self, arg: str) -> None:
         """Agent 模式：/agent <任务描述>
@@ -335,13 +340,17 @@ class AgentMixin:
         mode_hint = " · Show Thoughts" if show_thoughts else " · Hide Thoughts"
         console.print(f"\n[bold magenta]Agent[/bold magenta] · Task: [cyan]{arg}[/cyan][dim]{mode_hint}[/dim]\n")
 
-        on_step, stop_spinner, t0, step_n = self._make_agent_on_step(show_thoughts=show_thoughts)
+        on_step, stop_spinner, t0, step_n, final_displayed = self._make_agent_on_step(show_thoughts=show_thoughts)
 
         try:
             result = ag.run(arg, on_step=on_step, show_thoughts=show_thoughts)
             stop_spinner()
-            # 直接 Markdown 输出，不用 Panel 包裹
-            console.print(Markdown(result))
+            # 如果 done 事件已经输出了最终答案，不再重复输出
+            if not final_displayed[0]:
+                console.print()
+                console.print("[bold green]总结[/bold green]")
+                console.print()
+                console.print(Markdown(result))
             console.print()
             elapsed = time.time() - t0
             console.print(f"[bold magenta]✻ ✓ Complete[/bold magenta] [dim]· Brewed for {elapsed:.1f}s · {step_n[0]} Steps[/dim]\n")
@@ -422,10 +431,14 @@ class AgentMixin:
             mode_hint = " · Show Thoughts" if show_thoughts else " · Hide Thoughts"
             console.print(f"[bold magenta]Agent[/bold magenta] · Task: [cyan]{arg}[/cyan][dim]{mode_hint}[/dim]\n")
 
-            on_step, stop_spinner, t0, step_n = self._make_agent_on_step(show_thoughts=show_thoughts)
+            on_step, stop_spinner, t0, step_n, final_displayed = self._make_agent_on_step(show_thoughts=show_thoughts)
             result = agent.run(arg, on_step=on_step, show_thoughts=show_thoughts)
             stop_spinner()
-            if result:
+            # 如果 done 事件已经输出了最终答案，不再重复输出
+            if not final_displayed[0] and result:
+                console.print()
+                console.print("[bold green]总结[/bold green]")
+                console.print()
                 console.print(Markdown(result))
             console.print()
             elapsed = time.time() - t0

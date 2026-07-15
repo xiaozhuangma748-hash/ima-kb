@@ -15,7 +15,7 @@ def test_hide_thoughts_live_reused():
 
     with patch("core.cli.commands.agent.Live", return_value=mock_live), \
          patch("core.cli.commands.agent.console.print") as mock_print:
-        on_step, stop, t0, step_n = repl._make_agent_on_step(show_thoughts=False)
+        on_step, stop, t0, step_n, _ = repl._make_agent_on_step(show_thoughts=False)
 
         on_step("llm_start", "Step 1")
         on_step("tool", "search 生态安葬")
@@ -59,7 +59,7 @@ def test_step_count_hide_thoughts():
     repl = _DummyREPL()
 
     with patch("core.cli.commands.agent.Live"):
-        on_step, stop, t0, step_n = repl._make_agent_on_step(show_thoughts=False)
+        on_step, stop, t0, step_n, _ = repl._make_agent_on_step(show_thoughts=False)
 
         on_step("llm_start", "Step 1")
         on_step("tool", "search test")
@@ -80,7 +80,7 @@ def test_step_count_show_thoughts():
 
     with patch("core.cli.commands.agent.Live"), \
          patch("core.cli.commands.agent.console.print"):
-        on_step, stop, t0, step_n = repl._make_agent_on_step(show_thoughts=True)
+        on_step, stop, t0, step_n, _ = repl._make_agent_on_step(show_thoughts=True)
 
         on_step("llm_start", "Step 1")
         on_step("thought", "thinking 1")
