@@ -278,11 +278,17 @@ class Storage:
     # ---- 查询 ----
 
     def get_document(self, doc_id: str) -> Optional[DocumentRecord]:
-        """按 ID 查文档。"""
+        """按 ID 查文档（支持前缀匹配）。"""
         with self._conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM documents WHERE id = ?", (doc_id,)
-            ).fetchone()
+            # 如果输入长度小于 32 位，使用前缀匹配
+            if len(doc_id) < 32:
+                row = conn.execute(
+                    "SELECT * FROM documents WHERE id LIKE ?", (doc_id + "%",)
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM documents WHERE id = ?", (doc_id,)
+                ).fetchone()
         return self._row_to_doc(row) if row else None
 
     def list_documents(self, limit: int = 100, offset: int = 0) -> List[DocumentRecord]:
