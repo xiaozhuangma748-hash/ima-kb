@@ -83,6 +83,18 @@ def _wrap_indented(content: str, indent: int = 4, width: int = 0) -> list[Text]:
     return result
 
 
+class _ThinkingStatus:
+    """Show Thoughts 模式下的动态 Thinking 显示。"""
+
+    def __init__(self, start_time: float) -> None:
+        self._start = start_time
+
+    def __rich_console__(self, console, options):
+        elapsed = time.time() - self._start
+        desc = f"Thinking {elapsed:.1f}s"
+        yield Spinner("dots", text=Text(f" {desc}", style="dim"), style="cyan")
+
+
 class _AgentStatus:
     """Dynamic status renderable for Hide Thoughts mode.
 
@@ -173,9 +185,10 @@ class AgentMixin:
                 llm_start[0] = time.time()
                 _stop_spinner()
                 if show_thoughts:
+                    thinking_status = _ThinkingStatus(llm_start[0])
                     spinner[0] = Live(
-                        Spinner("dots", text=" [dim]Thinking...[/dim]"),
-                        console=console, transient=True, refresh_per_second=10,
+                        thinking_status, console=console, transient=True,
+                        refresh_per_second=8,
                     )
                     spinner[0].start()
                 else:
@@ -183,20 +196,9 @@ class AgentMixin:
                     _ensure_live()
 
             elif step_type == "thought":
-                if show_thoughts:
-                    _stop_spinner()
-                    elapsed = time.time() - llm_start[0]
-                    header = Text()
-                    header.append("  ", style="bright_black")
-                    header.append("[T]", style="bright_black")
-                    header.append("  ", style="bright_black")
-                    header.append(f"Thinking  {elapsed:.1f}s", style="bold dim")
-                    thought = content.replace('\n', ' ').replace('\\n', ' ').strip()
-                    if len(thought) > 60:
-                        thought = thought[:60] + "..."
-                    header.append("  ", style="bright_black")
-                    header.append(thought, style="dim")
-                    console.print(header)
+                # Show Thoughts: 保持动态 spinner 不中断，不打印摘要
+                # Hide Thoughts: 保持 Thinking spinner
+                pass
 
             elif step_type == "tool":
                 last_tool[0] = content
