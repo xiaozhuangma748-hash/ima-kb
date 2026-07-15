@@ -84,20 +84,28 @@ class ChatMixin:
                             # 首次 token 到达，记录思考时间（在答案后显示）
                             self._first_token_time = _time.time() - _t0
                             self._stream_started = True
-                            # Live + Text 纯文本渲染，transient=True 停止时清除
-                            # done 后用 Markdown 重新渲染，保证表格等格式正确显示
+                            # 打印 AI 标识行（与降级路径一致，避免用户输入和回答紧贴）
+                            if self.pet is not None:
+                                avatar = {"scholar": "[O]", "warrior": "[W]", "artisan": "[A]"}.get(self.pet.branch, "[?]")
+                                color = {"scholar": "cyan", "warrior": "red", "artisan": "yellow"}.get(self.pet.branch, "white")
+                                console.print(f"[{color}]{avatar}[/{color}] [bold magenta]{self.pet.name}[/bold magenta]")
+                            else:
+                                console.print("[bold yellow]>[/bold yellow] [bold cyan]AI[/bold cyan]")
+                            console.print()  # 标识行与回答正文之间空一行
+                            # Live + Markdown 实时渲染：流式过程中直接渲染 markdown
+                            # 避免流式纯文本 + done 后 Markdown 重新渲染导致的重复输出
+                            # （transient=True 在内容超出一屏时无法清除已滚动内容）
                             self._stream_live = Live(
-                                Text(""),
+                                Markdown(""),
                                 console=console,
                                 refresh_per_second=12,
-                                transient=True,
+                                transient=False,
                             )
                             self._stream_live.start()
                             self._stream_text = ""
                         self._stream_text += event["text"]
-                        # 去掉 ** 标记，保留文字内容
-                        clean_text = self._stream_text.replace("**", "")
-                        self._stream_live.update(Text(clean_text))
+                        # 用 Markdown 实时渲染（表格、标题、列表等格式正确显示）
+                        self._stream_live.update(Markdown(self._stream_text))
                     elif event["type"] == "done":
                         # 收尾：停掉残留 spinner 和 Live（无 token 的极端情况）
                         if live is not None:
@@ -116,10 +124,8 @@ class ChatMixin:
                 if getattr(self, "_stream_live", None) is not None:
                     self._stream_live.stop()
                     self._stream_live = None
-                # 用 Markdown 重新渲染最终回答（transient 已清除流式纯文本）
-                # 这样表格、标题、列表等 markdown 格式都能正确显示
-                if result is not None and result.text:
-                    console.print(Markdown(result.text))
+                # 不再重新渲染：Live + Markdown 已在流式过程中完成渲染
+                # （避免流式纯文本 + done 后 Markdown 重新渲染导致的重复输出）
                 console.print()  # 流式结束后换行
 
                 if result is not None:
