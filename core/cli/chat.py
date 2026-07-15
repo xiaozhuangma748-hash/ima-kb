@@ -28,6 +28,55 @@ from core.cli.welcome import _record_activity
 class ChatMixin:
     """AI 对话相关方法。"""
 
+    @staticmethod
+    def _sanitize_latex(text: str) -> str:
+        """清理 LLM 输出的 LaTeX 数学公式，使其在 Markdown 中可读。
+
+        处理规则：
+        - $$...$$ / $...$  → 去掉 $ 符号，保留内容
+        - \\times          → ×
+        - \\div            → ÷
+        - \\approx         → ≈
+        - \\leq / \\le     → ≤
+        - \\geq / \\ge     → ≥
+        - \\mathbf{...}    → 只保留花括号内容
+        - \\text{...}      → 只保留花括号内容
+        """
+        import re
+
+        # 1. 去掉 $$...$$ 和 $...$ 的外层符号（保留内容）
+        text = re.sub(r"\$\$(.*?)\$\$", r"\1", text, flags=re.DOTALL)
+        text = re.sub(r"\$(.*?)\$", r"\1", text, flags=re.DOTALL)
+
+        # 2. 常见 LaTeX 命令替换
+        replacements = {
+            r"\times": "×",
+            r"\div": "÷",
+            r"\approx": "≈",
+            r"\leq": "≤",
+            r"\le": "≤",
+            r"\geq": "≥",
+            r"\ge": "≥",
+            r"\neq": "≠",
+            r"\equiv": "≡",
+            r"\pm": "±",
+            r"\cdot": "·",
+        }
+        for latex, char in replacements.items():
+            text = text.replace(latex, char)
+
+        # 3. \\mathbf{...} / \\text{...} → 只保留花括号内容
+        text = re.sub(r"\\mathbf\{(.*?)\}", r"\1", text, flags=re.DOTALL)
+        text = re.sub(r"\\text\{(.*?)\}", r"\1", text, flags=re.DOTALL)
+
+        # 4. LaTeX 换行 \\ → 换行符
+        text = text.replace("\\\\", "\n")
+
+        # 5. 清理因去掉 $ 后可能残留的换行空格
+        text = text.replace("  ", " ")
+
+        return text
+
     def _handle_chat(self, user_input: str) -> None:
         """AI 对话（带多轮历史 + RAG 检索 + Spinner 动画）。"""
         if not self.llm_available:
@@ -105,7 +154,9 @@ class ChatMixin:
                             self._stream_text = ""
                         self._stream_text += event["text"]
                         # 用 Markdown 实时渲染（表格、标题、列表等格式正确显示）
-                        self._stream_live.update(Markdown(self._stream_text))
+                        # 同时清理 LLM 可能生成的 LaTeX 公式语法，保证终端可读
+                        sanitized = self._sanitize_latex(self._stream_text)
+                        self._stream_live.update(Markdown(sanitized))
                     elif event["type"] == "done":
                         # 收尾：停掉残留 spinner 和 Live（无 token 的极端情况）
                         if live is not None:

@@ -8,11 +8,11 @@ from typing import List, Optional, Dict
 from core.pet.pet import Pet
 from core.storage import Storage
 from core.memory.store import MemoryStore
-from core.retrieval.router import route_query, should_skip_retrieval
-from core.retrieval.semantic_cache import SemanticCache
 from core.memory.profile import ProfileManager
 from core.memory.tasks import TaskManager
 from core.memory.workflow import WorkflowTracker
+from core.retrieval.router import route_query, should_skip_retrieval
+from core.retrieval.semantic_cache import SemanticCache
 from core.retrieval.hybrid import HybridRetriever, HybridResult
 from core.retrieval.rerank import Reranker, RerankResult
 from core.retrieval.citation import Citation, extract_citations
@@ -22,6 +22,32 @@ from core.llm.degrade import get_llm_degrade_message
 from core.todo.manager import TodoManager
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_latex(text: str) -> str:
+    """清理 LaTeX 数学公式语法（与 core.cli.chat.ChatMixin._sanitize_latex 保持一致）。"""
+    import re
+    text = re.sub(r"\$\$(.*?)\$\$", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"\$(.*?)\$", r"\1", text, flags=re.DOTALL)
+    replacements = {
+        r"\times": "×",
+        r"\div": "÷",
+        r"\approx": "≈",
+        r"\leq": "≤",
+        r"\le": "≤",
+        r"\geq": "≥",
+        r"\ge": "≥",
+        r"\neq": "≠",
+        r"\equiv": "≡",
+        r"\pm": "±",
+        r"\cdot": "·",
+    }
+    for latex, char in replacements.items():
+        text = text.replace(latex, char)
+    text = re.sub(r"\\mathbf\{(.*?)\}", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"\\text\{(.*?)\}", r"\1", text, flags=re.DOTALL)
+    text = text.replace("\\\\", "\n")
+    return text.replace("  ", " ")
 
 
 # 经验值表
@@ -226,15 +252,17 @@ class PetAdministrator:
                     cached = self._answer_cache.get(query, query_emb)
                     if cached is not None and cached.answer:
                         logger.info(f"答案缓存命中，跳过检索+LLM: {query[:30]}...")
+                        # 清理缓存中可能遗留的 LaTeX 公式
+                        clean_answer = _sanitize_latex(cached.answer)
                         yield {"type": "stage", "stage": "缓存", "count": 1}
                         # 逐 token 回放缓存答案
                         import re as _re
-                        for token in _re.findall(r'\S+|\s+', cached.answer):
+                        for token in _re.findall(r'\S+|\s+', clean_answer):
                             yield {"type": "token", "text": token}
                         yield {
                             "type": "done",
                             "result": AnswerResult(
-                                text=cached.answer,
+                                text=clean_answer,
                                 citations=[],
                                 sources=[],
                                 pet_events={},
@@ -367,10 +395,12 @@ class PetAdministrator:
         if query_type == "knowledge" and answer_text.strip():
             try:
                 if query_emb is not None:
+                    # 缓存前清理 LaTeX，保证缓存内容也是干净的
+                    clean_answer_for_cache = _sanitize_latex(answer_text)
                     self._answer_cache.put(
                         query=query,
                         query_embedding=query_emb,
-                        answer=answer_text,
+                        answer=clean_answer_for_cache,
                         citations=[c.__dict__ if hasattr(c, '__dict__') else c for c in citations],
                     )
             except Exception as e:
