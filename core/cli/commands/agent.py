@@ -125,7 +125,7 @@ class _AgentStatus:
     def __rich_console__(self, console, options):
         if self._thinking:
             elapsed = time.time() - self._start
-            desc = f"Thinking {elapsed:.0f}s"
+            desc = f"Thinking {elapsed:.1f}s"
         else:
             desc = self._label
             if self._detail:
