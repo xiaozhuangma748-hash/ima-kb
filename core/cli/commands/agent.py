@@ -95,15 +95,15 @@ class _AgentStatus:
     - static:   shows tool name + optional detail (e.g. "search · 1234 chars")
     """
 
-    def __init__(self) -> None:
+    def __init__(self, task_start: float) -> None:
         self._thinking = True
         self._label = "Thinking"
         self._detail = ""
-        self._start = time.time()
+        self._start = task_start
 
     def set_thinking(self) -> None:
         self._thinking = True
-        self._start = time.time()
+        # 不重置 _start，让计时器从任务开始持续增长
 
     def set_static(self, label: str, detail: str = "") -> None:
         self._thinking = False
@@ -141,7 +141,7 @@ class AgentMixin:
         llm_start = [0]
         spinner = [None]
         live = [None]
-        agent_status = _AgentStatus()
+        agent_status = _AgentStatus(t0)
         step_n = [0]
         last_tool = [None]
 
