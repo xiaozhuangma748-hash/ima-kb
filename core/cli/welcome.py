@@ -225,7 +225,7 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
         welcome_pad = 0
     welcome_row = Text()
     welcome_row.append(" " * welcome_pad)
-    welcome_row.append(welcome_text, style="bold white")
+    welcome_row.append(welcome_text, style=f"bold {t.colors['primary']}")
     left_content.append(_pad_to_width(welcome_row, left_w))
 
     left_content.append(Text(" " * left_w))

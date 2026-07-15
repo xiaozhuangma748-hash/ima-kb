@@ -125,7 +125,7 @@ def get_theme(name: Optional[str] = None) -> Theme:
     """获取主题。不传名返回当前主题。"""
     if name is None:
         name = _load_current()
-    return THEMES.get(name, THEMES["claude"])
+    return THEMES.get(name, THEMES["minimal"])
 
 
 def set_theme(name: str) -> Theme:
@@ -141,10 +141,10 @@ def _load_current() -> str:
     try:
         if _CONFIG_PATH.exists():
             data = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-            return data.get("theme", "claude")
+            return data.get("theme", "minimal")
     except Exception:
         pass
-    return "claude"
+    return "minimal"
 
 
 def _save_current(name: str) -> None:
