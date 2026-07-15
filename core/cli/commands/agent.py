@@ -212,18 +212,8 @@ class AgentMixin:
                 # Hide Thoughts: 不显示工具调用，保持 Thinking spinner 即可
 
             elif step_type == "result":
-                if show_thoughts:
-                    _stop_spinner()
-                    tool = last_tool[0] or "tool"
-                    tool_parts = tool.split()
-                    tool_name = tool_parts[0] if tool_parts else tool
-                    header = Text()
-                    header.append("  ", style="bright_black")
-                    header.append("[OK]", style="green")
-                    header.append("  ", style="bright_black")
-                    header.append(f"{tool_name}  ({len(content)} chars)", style="dim")
-                    console.print(header)
-                # Hide Thoughts: 不显示工具结果，保持 Thinking spinner 即可
+                # Show/Hide Thoughts: 都不打印工具结果，保持 spinner
+                pass
 
             elif step_type == "error":
                 _stop()
