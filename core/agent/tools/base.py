@@ -67,6 +67,21 @@ _PROMPT_FOOTER = (
     "- 信息足够时就用 done 给答案，不要过度调用工具\n"
     "- Thought 和 JSON 之间可以有换行\n"
     "- 用中文回复用户\n"
+    "\n"
+    "# 引用规范（重要！）\n"
+    "\n"
+    "最终答案中**不要使用 [n] 形式的引用标记**（如 [1]、[2]），原因：\n"
+    "- 每次工具调用（如 search）各自独立编号，[1] 在不同调用中指向不同内容\n"
+    "- 多次调用后 [n] 的指向不唯一，用户无法准确追溯\n"
+    "\n"
+    "正确做法（用文档标题或 ID 标注来源）：\n"
+    '- 「根据《海葬政策》第 3 段所述...」\n'
+    '- 「如文档 862e0973 所述...」\n'
+    '- 「《骨灰安置办法》中提到...」\n'
+    "\n"
+    "错误做法（避免）：\n"
+    '- 「根据[1]所述...」（[1] 指向不明）\n'
+    '- 「如[3]所述...」（[3] 可能是任一次 search 的结果）\n'
 )
 
 
@@ -82,10 +97,18 @@ class ToolContext:
         storage: Any = None,
         llm: Any = None,
         chunker: Any = None,
+        hybrid_retriever: Any = None,
     ) -> None:
         self.storage = storage
         self.llm = llm
         self.chunker = chunker
+        # P0-P5 工业级 RAG 流水线（BM25+向量+RRF+Cross-Encoder+HyDE+缓存）
+        # 优先使用注入的 retriever；为 None 时工具回退到旧 BM25 路径
+        self.hybrid_retriever = hybrid_retriever
+        # SmartReader 缓存：连续读同一文档时复用实例，避免重复 open
+        # key = doc_id（前 8 位前缀），value = (reader, opened_doc_id)
+        self._reader_cache: Dict[str, Tuple[Any, str]] = {}
+        self._reader_cache_max = 4  # 最多缓存 4 个文档的 reader
 
 
 # ============================================================

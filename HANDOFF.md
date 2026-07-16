@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-15（检索性能优化：语义缓存 + 查询路由 + 并发检索 + LaTeX 输出清理）
+> 最后更新：2026-07-17（Agent 后处理补全：LaTeX 清理 + 语义缓存 + 引用规范）
 
 ---
 
@@ -72,6 +72,9 @@
 - ✅ **会话管理系统**（启动时命名会话，每个会话独立记忆文件，自动保存 + 跨会话恢复）
 - ✅ **启动页优化**（左区顺序：Welcome → 宠物 → 会话名 → 模型 → 路径；活动记录上限 50 条 + 7 天自动清理）
 - ✅ **命令补全完善**（/cross 加入 COMMAND_LIST，/search config 三级补全，/cross add 三级补全）
+- ✅ **Agent 工具系统优化**（search 接入 HybridRetriever 复用 P0-P5 全套 RAG；SmartReader FIFO 缓存；list_docs tag 筛选+分页；get_doc 前缀匹配；read_multi 1000 字；Tool Registry + Schema 校验）
+- ✅ **Agent 后处理补全**（最终答案 LaTeX 清理 + 答案级语义缓存独立 agent_cache.db + 引用规范禁止 [n] 标记 + 引用检测警告）
+- ✅ **Show Thoughts 打字机效果**（thought 内容逐字显示 15ms/字符 + spinner 持续动画 + L 形树状连接符）
 
 ---
 
@@ -174,7 +177,10 @@ ima-kb/
 │   │   ├── reader.py             # 文档阅读器
 │   │   └── comparator.py         # 文档对比
 │   ├── agent/                    # P5 新增：Agent 工具调用
-│   │   └── agent.py              # LLM Agent（12 步工具调用）
+│   │   ├── agent.py              # LLM Agent（12 步 ReAct + LaTeX 清理 + 语义缓存 + 引用检测）
+│   │   └── tools/                # Tool Registry + Schema 校验
+│   │       ├── base.py           # Tool 基类 + ToolContext + 系统提示生成（含引用规范）
+│   │       └── builtin.py        # 6 个内置工具（search/list_docs/get_doc/read/read_multi/analyze）
 │   ├── ui/
 │   │   └── theme.py              # 终端主题
 │   └── storage.py                # SQLite 存储（documents/chunks 表 + tags + 向量同步）
@@ -194,7 +200,7 @@ ima-kb/
 │   └── static/
 │       └── app.js                # 入口（重定向至模块化 js/ 目录）
 │
-├── tests/                        # 433+ 测试
+├── tests/                        # 568 测试（568 passed）
 │   ├── retrieval/                # 混合检索测试
 │   ├── memory/                   # 记忆系统测试
 │   ├── pet/                      # 宠物系统测试
@@ -217,6 +223,8 @@ ima-kb/
     ├── todo.json                 # 每日任务数据
     ├── cmd_history               # 命令历史记录
     ├── embedding_cache.db        # 向量缓存（SQLite WAL 模式）
+    ├── semantic_cache.db         # 直接对话答案语义缓存（LRU + SQLite）
+    ├── agent_cache.db            # Agent 答案语义缓存（独立，避免与直接对话混用）
     ├── file_tracker.db           # 增量同步文件追踪数据库
     ├── memory/                   # 跨会话记忆（按会话名隔离）
     ├── sessions/                 # 会话历史
@@ -1084,6 +1092,105 @@ def _render_welcome_panel(..., session_name: Optional[str] = None):
 ```bash
 python3 -m pytest tests/test_cli_agent.py -v
 # 所有测试通过
+```
+
+---
+
+## 🆕 2026-07-16 更新：Agent 工具系统优化 + Show Thoughts 打字机效果
+
+### 一、Agent 工具系统优化（7 项）
+
+将 Agent 的 `search` 工具接入 HybridRetriever，复用 P0-P5 全套工业级 RAG 流水线（BM25+向量+RRF+Cross-Encoder+HyDE+语义缓存）。
+
+**优化内容**：
+1. **SearchTool → HybridRetriever**：search 优先用混合检索，降级用 BM25
+2. **search 返回 doc_id+chunk_num**：支持后续 read 精读对应段落
+3. **SmartReader FIFO 缓存**：连续读同一文档复用 reader 实例（4 个文档上限）
+4. **read_multi 500→1000 字**：单段返回内容加倍
+5. **list_docs tag 筛选+分页**：支持按 tag 过滤 + 30 条/页翻页
+6. **get_doc 去硬截断**：支持 8 位前缀和完整 UUID 两种格式
+7. **Tool Registry + Schema 校验**：`@register_tool` 装饰器自动注册，pydantic 参数校验
+
+**文件变更**：
+| 文件 | 变更 | 说明 |
+|---|---|---|
+| `core/agent/tools/base.py` | 新增 | Tool 基类 + ToolContext + ToolRegistry + 系统提示生成 |
+| `core/agent/tools/builtin.py` | 新增 | 6 个内置工具实现 |
+| `core/agent/tools/__init__.py` | 新增 | 模块入口 |
+| `core/agent/agent.py` | 重写 | 使用 Tool Registry + ToolContext 注入 |
+
+### 二、Show Thoughts 打字机效果
+
+thought 内容以打字机效果逐字显示（15ms/字符），spinner 持续动画不停。
+
+**实现**：
+- `_ThinkingStatus` 类：后台线程逐字增加 `_displayed_len`，`__rich_console__` 每帧渲染当前已显示部分
+- spinner 与步骤竖线对齐（左缩进 2 空格）
+- thought 事件到来时不停 spinner，通过 `set_thought()` 更新内容
+
+**文件**：`core/cli/commands/agent.py`
+
+---
+
+## 🆕 2026-07-17 更新：Agent 后处理补全（P1+P2）
+
+### 背景
+
+对比直接对话和 Agent 的架构覆盖，发现 Agent 最终答案的后处理是空白：
+- 直接对话：LaTeX 清理 ✅ + 语义缓存 ✅ + 引用规范 ✅ + 引用校验 ✅
+- Agent：缺失以上全部 4 项
+
+本次补全 P1（LaTeX 清理 + 语义缓存）和 P2（引用规范 + 引用校验），拉齐两条路径。
+
+### P1-1：Agent 最终答案 LaTeX 清理
+
+**问题**：Agent 最终答案可能含 `$$...$$`、`\times`、`\mathbf{}` 等 LaTeX 语法，终端 Markdown 无法渲染。
+
+**方案**：在 `core/agent/agent.py` 添加模块级 `_sanitize_latex` 函数（与 `core.pet.administrator._sanitize_latex` 保持一致），在 `_stream_final_answer` 流式输出前调用。缓存命中时跳过（因写入前已清理）。
+
+### P1-2：Agent 最终答案写入语义缓存
+
+**问题**：相同或语义相近的 Agent 任务每次都重新跑 ReAct 循环（12 步 LLM+工具），耗时 10-60 秒。
+
+**方案**：
+- `Agent.__init__` 初始化 `SemanticCache`（独立 `agent_cache.db`，避免与直接对话缓存混用）
+- `run()` 开头调 `_check_answer_cache(task)`：命中则直接流式返回缓存答案
+- 4 个返回点调 `_write_answer_cache(task, answer)`：写入清理后的答案
+- **缓存策略**：仅知识查询类任务缓存（`should_use_cache`），数据分析类任务（含 `.xlsx/.csv` 等文件路径）跳过
+
+### P2-1：Agent system prompt 加引用规范
+
+**问题**：Agent 多次工具调用各自独立编号（每次 search 都从 [1] 开始），最终答案中的 [n] 标记指向不唯一。
+
+**方案**：在 `_PROMPT_FOOTER` 添加「引用规范」章节：
+- 禁止使用 `[n]` 形式的引用标记
+- 要求用文档标题或 ID 标注来源（如「根据《海葬政策》第 3 段所述」）
+- 给出正确/错误示例对比
+
+### P2-2：Agent 工具结果引用校验
+
+**问题**：LLM 可能违反引用规范，仍在最终答案中使用 [n] 标记。
+
+**方案**：添加 `_check_citation_markers(text)` 函数，在 `_stream_final_answer` 和强制总结中检测 [n] 标记。检测到时追加警告说明：
+```
+> ⚠️ 引用说明：以上答案包含 [n] 形式的引用标记。
+> 由于 Agent 在多次工具调用中各自独立编号，这些标记的指向可能不唯一，
+> 建议结合上下文或文档标题核对来源。
+```
+
+### 文件变更
+
+| 文件 | 变更 | 说明 |
+|---|---|---|
+| `core/agent/agent.py` | 修改 | 新增 `_sanitize_latex` + `_check_citation_markers` 模块级函数；`__init__` 初始化语义缓存；`run()` 查/写缓存；`_stream_final_answer` 清理 LaTeX + 引用检测 |
+| `core/agent/tools/base.py` | 修改 | `_PROMPT_FOOTER` 添加引用规范章节 |
+| `tests/test_sanitize_latex.py` | 修改 | 新增 4 个 `_check_citation_markers` 测试 + Agent 的 `_sanitize_latex` 一致性断言 |
+
+### 测试验证
+
+```bash
+python3 -m pytest tests/ -q
+# 568 passed, 6 warnings in 11.60s
 ```
 
 ---

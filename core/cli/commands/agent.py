@@ -7,11 +7,14 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 
+from rich.console import Group
 from rich.markdown import Markdown
 from rich.live import Live
+from rich.padding import Padding
 from rich.spinner import Spinner
 from rich.text import Text
 
@@ -84,15 +87,64 @@ def _wrap_indented(content: str, indent: int = 4, width: int = 0) -> list[Text]:
 
 
 class _ThinkingStatus:
-    """Show Thoughts 模式下的动态 Thinking 显示。"""
+    """Show Thoughts 模式下的动态 Thinking 显示。
+
+    动态图标 + 空格 + Thinking X.Xs，整体左缩进 2 空格与步骤竖线对齐。
+    thought 内容以打字机效果逐字显示，让 Agent 思考过程更像对话。
+    """
+
+    TYPING_DELAY = 0.015  # 每个字符 15ms，约 67 字/秒
+    MAX_CHARS = 300
 
     def __init__(self, start_time: float) -> None:
         self._start = start_time
+        self._thought = ""
+        self._displayed_len = 0
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def set_thought(self, thought: str) -> None:
+        """设置 thought 内容并启动打字机效果。"""
+        self.stop()
+        with self._lock:
+            self._thought = thought[: self.MAX_CHARS]
+            self._displayed_len = 0
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._typewriter, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        """停止打字机线程。"""
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=0.5)
+
+    def _typewriter(self) -> None:
+        """后台线程：逐字增加已显示长度。"""
+        while True:
+            with self._lock:
+                if self._displayed_len >= len(self._thought):
+                    break
+            if self._stop_event.is_set():
+                break
+            with self._lock:
+                self._displayed_len += 1
+            time.sleep(self.TYPING_DELAY)
 
     def __rich_console__(self, console, options):
         elapsed = time.time() - self._start
         desc = f"Thinking {elapsed:.1f}s"
-        yield Spinner("dots", text=Text(f" {desc}", style="dim"), style="cyan")
+        # 动态图标 + 1 空格 + Thinking X.Xs
+        spinner = Spinner("dots", text=Text(f" {desc}", style="dim"), style="cyan")
+        # 整体左缩进 2 空格，使 spinner 与步骤竖线对齐
+        lines = [Padding(spinner, (0, 0, 0, 2))]
+        with self._lock:
+            displayed = self._thought[: self._displayed_len]
+        if displayed:
+            for line in _wrap_indented(displayed, indent=4):
+                lines.append(line)
+        yield Group(*lines)
 
 
 class _AgentStatus:
@@ -103,8 +155,9 @@ class _AgentStatus:
     always up-to-date. No timer thread needed.
 
     States:
-    - thinking: shows elapsed seconds (e.g. "Thinking 3s")
+    - thinking: shows elapsed seconds (e.g. "Thinking 3.0s")
     - static:   shows tool name + optional detail (e.g. "search · 1234 chars")
+    - generating: shows "Generating..." (final answer streaming)
     """
 
     def __init__(self, task_start: float) -> None:
@@ -121,6 +174,12 @@ class _AgentStatus:
         self._thinking = False
         self._label = label
         self._detail = detail
+
+    def set_generating(self) -> None:
+        """流式生成最终答案时的状态。"""
+        self._thinking = False
+        self._label = "Generating"
+        self._detail = ""
 
     def __rich_console__(self, console, options):
         if self._thinking:
@@ -167,6 +226,10 @@ class AgentMixin:
 
         def _stop_spinner():
             if spinner[0]:
+                # 先停止打字机线程，避免 Live 停止后线程仍在运行
+                renderable = getattr(spinner[0], "renderable", None)
+                if isinstance(renderable, _ThinkingStatus):
+                    renderable.stop()
                 spinner[0].stop()
                 spinner[0] = None
 
@@ -199,14 +262,15 @@ class AgentMixin:
                 llm_start[0] = time.time()
                 _stop_spinner()
                 if show_thoughts:
-                    # Show Thoughts: 步骤间用细线分隔（第一步除外）
+                    # Show Thoughts: 用左侧竖线标识步骤边界（第一步除外）
                     if step_n[0] > 1:
-                        console.print(Text("  " + "─" * 40, style="bright_black"))
-                    # 启动 Thinking spinner
+                        console.print()  # 步骤间空行
+                    console.print(f"  [bright_black]│[/bright_black] [dim]Step {step_n[0]}[/dim]")
+                    # 启动 Thinking spinner（高刷新率支持打字机效果）
                     thinking_status = _ThinkingStatus(llm_start[0])
                     spinner[0] = Live(
                         thinking_status, console=console, transient=True,
-                        refresh_per_second=8,
+                        refresh_per_second=30,
                     )
                     spinner[0].start()
                 else:
@@ -215,12 +279,17 @@ class AgentMixin:
 
             elif step_type == "thought":
                 if show_thoughts:
-                    # Show Thoughts: 停止 spinner，打印思考时间和内容
+                    # Show Thoughts: 更新动态 Thinking 显示中的 thought 内容，
+                    # 保持 spinner 持续转动，动态图标与步骤竖线对齐
+                    if spinner[0]:
+                        renderable = getattr(spinner[0], "renderable", None)
+                        if isinstance(renderable, _ThinkingStatus):
+                            renderable.set_thought(content)
+                            return
+                    # fallback：停止 spinner 后静态打印
                     _stop_spinner()
                     elapsed = time.time() - llm_start[0]
-                    # 打印思考时间
-                    console.print(f"  [dim]Thinking {elapsed:.1f}s[/dim]")
-                    # 缩进显示思考内容（dim 风格，4 空格缩进）
+                    console.print(f"  [dim]◷ Thinking {elapsed:.1f}s[/dim]")
                     if content.strip():
                         indented_lines = _wrap_indented(content, indent=4)
                         for line in indented_lines:
@@ -231,26 +300,40 @@ class AgentMixin:
                 last_tool[0] = content
                 _stop_spinner()
                 if show_thoughts:
-                    # Show Thoughts: 用箭头前缀显示工具调用
-                    console.print(f"  [bold yellow]→[/bold yellow] [cyan]{content}[/cyan]")
+                    # Show Thoughts: 用 ⏺ 图标显示工具调用，提取工具名和参数
+                    parts = content.split(None, 1)
+                    tool_name = parts[0] if parts else content
+                    tool_args = parts[1] if len(parts) > 1 else ""
+                    args_short = tool_args[:60] + ("..." if len(tool_args) > 60 else "")
+                    console.print(
+                        f"  [bold cyan]⏺[/bold cyan] [yellow]{tool_name}[/yellow]"
+                        + (f"  [dim]{args_short}[/dim]" if args_short else "")
+                    )
                     # 启动工具执行 spinner
                     spinner[0] = Live(
                         Spinner("dots", text=Text("    executing...", style="dim")),
                         console=console, transient=True, refresh_per_second=10,
                     )
                     spinner[0].start()
-                # Hide Thoughts: 不显示工具调用，保持 Thinking spinner 即可
+                else:
+                    # Hide Thoughts: 在 spinner 上显示当前工具名（不调 console.print）
+                    parts = content.split(None, 1)
+                    tool_name = parts[0] if parts else content
+                    tool_args = parts[1] if len(parts) > 1 else ""
+                    args_short = tool_args[:40] + ("..." if len(tool_args) > 40 else "")
+                    agent_status.set_static(tool_name, args_short)
+                    _ensure_live()
 
             elif step_type == "result":
                 _stop_spinner()
                 if show_thoughts:
-                    # Show Thoughts: 显示工具结果摘要
+                    # Show Thoughts: 单行显示结果摘要，用 → 前缀
                     summary = content.replace('\n', ' ').strip()
                     if len(summary) > 120:
                         summary = summary[:120] + "..."
-                    console.print(f"    [dim]{summary}[/dim]")
+                    console.print(f"    [dim]→ {summary}[/dim]")
                     console.print()  # 空行分隔
-                # Hide Thoughts: 不打印工具结果
+                # Hide Thoughts: 不打印工具结果，保持 spinner（下次 llm_start 会切回 thinking）
 
             elif step_type == "error":
                 _stop()
@@ -258,18 +341,22 @@ class AgentMixin:
                 if len(err) > 150:
                     err = err[:150] + "..."
                 if show_thoughts:
-                    console.print(f"  [red]✗ {err}[/red]")
+                    console.print(f"  [red]⚠ {err}[/red]")
                     console.print()
                 else:
                     console.print(f"  [red][ERR] {err}[/red]")
 
             elif step_type == "stream_start":
-                # 流式输出开始：停止 spinner，启动 Live 组件
+                # 流式输出开始：停止其他 spinner/live，启动带 spinner 的 Live
                 _stop_spinner()
                 _stop_live()
                 stream_text[0] = ""
+                # 流式期间持续显示 spinner（"Generating..."），下方实时渲染 Markdown
+                gen_spinner = Spinner(
+                    "dots", text=Text(" Generating...", style="dim"), style="cyan",
+                )
                 stream_live[0] = Live(
-                    Text(""),
+                    Group(gen_spinner, Text("")),
                     console=console,
                     refresh_per_second=30,
                     transient=True,
@@ -277,12 +364,18 @@ class AgentMixin:
                 stream_live[0].start()
 
             elif step_type == "stream_token":
-                # 流式输出 token：实时更新文本
+                # 流式输出 token：实时更新 Markdown（不降级纯文本）
                 if stream_live[0]:
                     stream_text[0] += content
-                    # 流式过程中用纯文本渲染（去掉 ** 标记），保证流畅性
-                    clean_text = stream_text[0].replace("**", "")
-                    stream_live[0].update(Text(clean_text))
+                    gen_spinner = Spinner(
+                        "dots", text=Text(" Generating...", style="dim"), style="cyan",
+                    )
+                    # 用 Markdown 实时渲染，保持格式一致性（不再先纯文本后 Markdown 跳变）
+                    try:
+                        md = Markdown(stream_text[0])
+                    except Exception:
+                        md = Text(stream_text[0])
+                    stream_live[0].update(Group(gen_spinner, md))
 
             elif step_type == "done":
                 _stop()

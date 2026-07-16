@@ -26,14 +26,58 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 from config import settings
 from core.llm.client import get_llm, LLMError
 from core.storage import Storage
 from core.agent.tools import get_registry
 from core.agent.tools.base import ToolContext
+
+logger = logging.getLogger(__name__)
+
+
+def _sanitize_latex(text: str) -> str:
+    """清理 LaTeX 数学公式语法（与 core.pet.administrator._sanitize_latex 保持一致）。
+
+    Agent 最终答案流式输出前调用，确保 LaTeX 公式在终端 Markdown 中可读。
+    """
+    text = re.sub(r"\$\$(.*?)\$\$", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"\$(.*?)\$", r"\1", text, flags=re.DOTALL)
+    replacements = {
+        r"\times": "×", r"\div": "÷", r"\approx": "≈",
+        r"\leq": "≤", r"\le": "≤", r"\geq": "≥", r"\ge": "≥",
+        r"\neq": "≠", r"\equiv": "≡", r"\pm": "±", r"\cdot": "·",
+    }
+    for latex, char in replacements.items():
+        text = text.replace(latex, char)
+    text = re.sub(r"\\mathbf\{(.*?)\}", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"\\text\{(.*?)\}", r"\1", text, flags=re.DOTALL)
+    text = text.replace("\\\\", "\n")
+    return text.replace("  ", " ")
+
+
+def _check_citation_markers(text: str) -> str:
+    """检测最终答案中的 [n] 引用标记。
+
+    Agent 多次工具调用各自独立编号（每次 search 都从 [1] 开始），
+    因此最终答案中的 [n] 标记指向不唯一。检测到此情况时返回警告文本，
+    无 [n] 标记时返回空字符串。
+
+    Returns:
+        警告文本（追加到答案末尾），或空字符串
+    """
+    indices = re.findall(r"\[(\d{1,3})\]", text or "")
+    if not indices:
+        return ""
+    return (
+        "\n\n---\n"
+        "> ⚠️ **引用说明**：以上答案包含 [n] 形式的引用标记。"
+        "由于 Agent 在多次工具调用中各自独立编号，这些标记的指向可能不唯一，"
+        "建议结合上下文或文档标题核对来源。"
+    )
 
 
 class Agent:
@@ -53,11 +97,137 @@ class Agent:
 
         # 工具依赖通过 ToolContext 注入；系统提示由 Registry 生成
         self._registry = get_registry()
+        # 构造 HybridRetriever：让 Agent 的 search 工具复用 P0-P5 全套优化
+        # （BM25+向量+RRF+Cross-Encoder+HyDE+语义缓存）
+        hybrid = self._build_hybrid_retriever()
         self._tool_context = ToolContext(
             storage=self.storage,
             llm=self.llm,
+            hybrid_retriever=hybrid,
         )
         self._system_prompt = self._registry.build_system_prompt()
+
+        # 答案级语义缓存（与 PetAdministrator 的 _answer_cache 互补：
+        # 这里缓存 Agent ReAct 完整答案，使用独立 SQLite 文件避免与直接对话缓存混用）
+        self._answer_cache = None
+        try:
+            from core.retrieval.semantic_cache import SemanticCache
+            self._answer_cache = SemanticCache(
+                threshold=0.92, ttl=1800, max_size=200,
+                db_path=settings.storage_path / "agent_cache.db",
+            )
+        except Exception as e:
+            logger.warning(f"Agent 语义缓存初始化失败，跳过缓存: {e}")
+            self._answer_cache = None
+
+    def _build_hybrid_retriever(self):
+        """构造 HybridRetriever，失败时回退到 None（search 工具降级用 BM25）。"""
+        try:
+            from core.retrieval.hybrid import HybridRetriever
+            from core.retrieval.vector import VectorIndex
+            vector_index = None
+            try:
+                vector_index = VectorIndex()
+            except Exception:
+                pass  # 向量模型不可用，纯 BM25
+            return HybridRetriever(
+                bm25_index=self.storage.bm25,
+                vector_index=vector_index,
+                storage=self.storage,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Agent HybridRetriever 构造失败，search 工具将降级用 BM25: {e}"
+            )
+            return None
+
+    # ============================================================
+    # P1-2: 答案级语义缓存（与 PetAdministrator 的 _answer_cache 互补）
+    # ============================================================
+
+    def _check_answer_cache(self, task: str) -> Optional[str]:
+        """查询答案缓存，命中则返回缓存的最终答案。
+
+        仅对知识查询类任务启用缓存（含政策/流程/费用等关键词），
+        数据分析类任务（含文件路径）跳过缓存。
+
+        Args:
+            task: 用户任务描述
+
+        Returns:
+            缓存的答案文本（命中），或 None（未命中/缓存不可用）
+        """
+        if self._answer_cache is None:
+            return None
+
+        # 仅缓存知识查询类任务，跳过数据分析（含文件路径）
+        from core.retrieval.router import should_use_cache
+        if not should_use_cache(task):
+            return None
+
+        # 跳过含文件路径的任务（分析 xlsx/csv 等不应缓存）
+        if any(kw in task.lower() for kw in (".xlsx", ".csv", ".json", "~/", "/users/", ".xls")):
+            return None
+
+        try:
+            hybrid = self._tool_context.hybrid_retriever
+            if hybrid is None:
+                return None
+            vector = getattr(hybrid, "vector", None)
+            if vector is None or not vector.is_available():
+                return None
+            query_emb = vector.embed_query(task)
+            if query_emb is None:
+                return None
+            cached = self._answer_cache.get(task, query_emb)
+            if cached is not None and cached.answer:
+                logger.info(f"Agent 答案缓存命中，跳过 ReAct 循环: {task[:30]}...")
+                return cached.answer
+        except Exception as e:
+            logger.warning(f"Agent 答案缓存查询失败，继续正常流程: {e}")
+
+        return None
+
+    def _write_answer_cache(self, task: str, answer: str) -> None:
+        """写入答案缓存。
+
+        Args:
+            task: 用户任务描述
+            answer: 最终答案（已清理 LaTeX 和引用检测）
+        """
+        if self._answer_cache is None:
+            return
+        if not answer or not answer.strip():
+            return
+
+        # 仅缓存知识查询类任务
+        from core.retrieval.router import should_use_cache
+        if not should_use_cache(task):
+            return
+
+        # 跳过含文件路径的任务
+        if any(kw in task.lower() for kw in (".xlsx", ".csv", ".json", "~/", "/users/", ".xls")):
+            return
+
+        try:
+            hybrid = self._tool_context.hybrid_retriever
+            if hybrid is None:
+                return
+            vector = getattr(hybrid, "vector", None)
+            if vector is None or not vector.is_available():
+                return
+            query_emb = vector.embed_query(task)
+            if query_emb is None:
+                return
+            self._answer_cache.put(
+                query=task,
+                query_embedding=query_emb,
+                answer=answer,
+            )
+            logger.debug(f"Agent 答案缓存写入: {task[:30]}...")
+        except Exception as e:
+            logger.warning(f"Agent 答案缓存写入失败: {e}")
 
     def run(
         self,
@@ -75,6 +245,11 @@ class Agent:
         Returns:
             最终答案
         """
+        # P1-2: 答案级语义缓存查询（命中则直接流式返回缓存的 ReAct 最终答案）
+        cached_answer = self._check_answer_cache(task)
+        if cached_answer is not None:
+            return self._stream_final_answer(cached_answer, on_step, messages=None, cache_hit=True)
+
         messages = [
             {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": task},
@@ -115,14 +290,20 @@ class Agent:
                 if "<tool>done" in reply or '"tool": "done"' in reply or "<args>" in reply:
                     extracted = self._extract_truncated_args(reply)
                     if extracted:
-                        # 流式输出最终答案
-                        return self._stream_final_answer(extracted, on_step, messages)
-                # 流式输出最终答案
-                return self._stream_final_answer(reply, on_step, messages)
+                        # 流式输出最终答案，并写入语义缓存
+                        answer = self._stream_final_answer(extracted, on_step, messages)
+                        self._write_answer_cache(task, answer)
+                        return answer
+                # 流式输出最终答案，并写入语义缓存
+                answer = self._stream_final_answer(reply, on_step, messages)
+                self._write_answer_cache(task, answer)
+                return answer
 
             if tool_name == "done":
-                # 流式输出最终答案
-                return self._stream_final_answer(tool_args, on_step, messages)
+                # 流式输出最终答案，并写入语义缓存
+                answer = self._stream_final_answer(tool_args, on_step, messages)
+                self._write_answer_cache(task, answer)
+                return answer
 
             tool = self._registry.get(tool_name)
             if tool is None:
@@ -185,37 +366,49 @@ class Agent:
             ),
         })
         summary = self.llm.chat(messages, temperature=0.3, max_tokens=self.MAX_TOKENS)
+        # P1-1: LaTeX 清理 + P2-2: 引用标记检测
+        summary = _sanitize_latex(summary)
+        summary += _check_citation_markers(summary)
         if on_step:
             on_step("done", summary)
+        # P1-2: 写入语义缓存
+        self._write_answer_cache(task, summary)
         return summary
 
     def _stream_final_answer(
         self,
         content: str,
         on_step: Optional[callable],
-        messages: list,
+        messages: Optional[list] = None,
+        cache_hit: bool = False,
     ) -> str:
         """流式输出最终答案。
 
         按词逐个输出，模拟流式效果，避免一次性显示全部内容。
+        流式输出前完成 LaTeX 清理和引用标记检测（缓存命中时跳过，因已清理过）。
 
         Args:
             content: 已生成的答案内容
             on_step: 回调函数
-            messages: 对话历史（保留用于兼容性）
+            messages: 对话历史（保留用于兼容性，缓存命中时可为 None）
+            cache_hit: 是否为缓存命中（True 时跳过 LaTeX 清理和引用检测）
 
         Returns:
             完整答案文本
         """
         import time
 
+        # P1-1: LaTeX 清理 + P2-2: 引用标记检测（缓存命中时跳过，因写入前已清理）
+        if not cache_hit:
+            content = _sanitize_latex(content)
+            content += _check_citation_markers(content)
+
         # 通知 CLI 层开始流式输出
         if on_step:
             on_step("stream_start", "")
 
         # 按词分割，保留空白符
-        import re as _re
-        tokens = _re.findall(r'\S+|\s+', content)
+        tokens = re.findall(r'\S+|\s+', content)
 
         full_content = ""
         for token in tokens:

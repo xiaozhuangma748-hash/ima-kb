@@ -32,6 +32,50 @@ __all__ = [
 
 
 # ============================================================
+# SmartReader 缓存辅助：连续读同一文档时复用 reader 实例
+# ============================================================
+
+def _open_reader(context: Optional[ToolContext], doc_id: str):
+    """打开 SmartReader，命中缓存时复用实例。
+
+    缓存策略：以 doc_id 前 8 位为 key（与 get_doc 的前缀匹配一致），
+    最多缓存 4 个文档的 reader，超过时按 FIFO 淘汰最旧的。
+
+    Returns:
+        (smart_reader, state) — state 为 sr.open() 返回的阅读状态
+    """
+    from core.reader.reader import SmartReader
+
+    cache = getattr(context, "_reader_cache", None) or {}
+    cache_max = getattr(context, "_reader_cache_max", 4)
+    key = doc_id[:8]  # 与 get_doc 的前缀匹配一致
+
+    # 命中缓存
+    if key in cache:
+        sr, _opened = cache[key]
+        try:
+            state = sr.open(doc_id)
+            return sr, state
+        except Exception:
+            # 缓存失效，删除后重新构造
+            cache.pop(key, None)
+
+    # 构造新 reader
+    sr = SmartReader(storage=context.storage)
+    state = sr.open(doc_id)
+
+    # 写入缓存（FIFO 淘汰）
+    if len(cache) >= cache_max and cache:
+        # 删除最早插入的 key（dict 保持插入顺序）
+        oldest = next(iter(cache))
+        cache.pop(oldest, None)
+    cache[key] = (sr, doc_id)
+    context._reader_cache = cache
+
+    return sr, state
+
+
+# ============================================================
 # 1. search — BM25 搜索知识库
 # ============================================================
 
@@ -43,11 +87,12 @@ class SearchArgs(BaseModel):
 @dataclass
 class SearchTool(Tool):
     name: str = "search"
-    description: str = "BM25 搜索知识库（按关键词找内容）"
+    description: str = "搜索知识库（BM25+向量+RRF+Cross-Encoder，按关键词找内容）"
     args_schema: Optional[Type[BaseModel]] = SearchArgs
     prompt_block: str = (
-        'search — BM25 搜索知识库（按关键词找内容）\n'
-        '   {"tool": "search", "args": "搜索关键词"}'
+        'search — 搜索知识库（BM25+向量+RRF+Cross-Encoder，按关键词找内容）\n'
+        '   {"tool": "search", "args": "搜索关键词"}\n'
+        '   返回结果含 doc_id 和 chunk_num，可直接用 read 精读对应段落'
     )
 
     def _parse_args_str(self, args_str: str) -> Tuple[Dict[str, Any], Optional[str]]:
@@ -57,13 +102,26 @@ class SearchTool(Tool):
         return {"query": query}, None
 
     def execute(self, context: Optional[ToolContext] = None, *, query: str, **_: Any) -> str:
-        results = context.storage.bm25_search(query, top_k=5)
+        # 优先用 HybridRetriever（P0-P5 工业级 RAG 流水线）
+        hybrid = getattr(context, "hybrid_retriever", None) if context else None
+        if hybrid is not None:
+            results = hybrid.search(query, top_k=5)
+        else:
+            # 降级：纯 BM25
+            results = context.storage.bm25_search(query, top_k=5)
+
         if not results:
             return "[无结果] 未找到相关内容"
 
         lines = [f"找到 {len(results)} 条结果：\n"]
         for i, r in enumerate(results, 1):
-            lines.append(f"[{i}] {r.doc_title} (相关度 {r.score:.2f})")
+            doc_id = getattr(r, "doc_id", "") or ""
+            doc_id_short = doc_id[:8] if doc_id else "?"
+            chunk_num = getattr(r, "paragraph_num", 0) or 0
+            loc = f"doc={doc_id_short}"
+            if chunk_num:
+                loc += f" 段={chunk_num}"
+            lines.append(f"[{i}] {r.doc_title} (相关度 {r.score:.2f} | {loc})")
             lines.append(f"    {r.content[:200]}...")
         return "\n".join(lines)
 
@@ -73,35 +131,85 @@ class SearchTool(Tool):
 # ============================================================
 
 class ListDocsArgs(BaseModel):
-    pass
+    tag: Optional[str] = None
+    page: int = 1
 
 
 @register_tool
 @dataclass
 class ListDocsTool(Tool):
     name: str = "list_docs"
-    description: str = "列出所有已入库文档"
+    description: str = "列出已入库文档（可选 tag 筛选，默认前 30 条）"
     args_schema: Optional[Type[BaseModel]] = ListDocsArgs
     prompt_block: str = (
-        'list_docs — 列出所有已入库文档\n'
-        '   {"tool": "list_docs", "args": ""}'
+        'list_docs — 列出已入库文档（可选 tag 筛选，默认前 30 条）\n'
+        '   {"tool": "list_docs", "args": ""}             # 全部前 30 条\n'
+        '   {"tool": "list_docs", "args": "海葬"}          # 按 tag 筛选\n'
+        '   {"tool": "list_docs", "args": "海葬 page=2"}   # tag + 翻页'
     )
 
     def _parse_args_str(self, args_str: str) -> Tuple[Dict[str, Any], Optional[str]]:
-        # 原实现忽略参数
-        return {}, None
+        args = args_str.strip()
+        if not args:
+            return {}, None
+        # 支持 "tag" 或 "tag page=2" 两种格式
+        parts = args.split()
+        tag = parts[0] if parts else None
+        page = 1
+        for p in parts[1:]:
+            if p.startswith("page="):
+                try:
+                    page = int(p[5:])
+                    if page < 1:
+                        page = 1
+                except ValueError:
+                    pass
+        return {"tag": tag, "page": page}, None
 
-    def execute(self, context: Optional[ToolContext] = None, **_: Any) -> str:
+    def execute(
+        self,
+        context: Optional[ToolContext] = None,
+        *,
+        tag: Optional[str] = None,
+        page: int = 1,
+        **_: Any,
+    ) -> str:
         docs = context.storage.list_documents()
         if not docs:
             return "[空] 知识库中没有文档"
 
-        lines = [f"共 {len(docs)} 篇文档：\n"]
-        for d in docs:
+        # tag 筛选（任一 tag 命中即保留）
+        if tag:
+            filtered = []
+            for d in docs:
+                if any(tag.lower() in (t or "").lower() for t in (d.tags or [])):
+                    filtered.append(d)
+            docs = filtered
+            if not docs:
+                return f"[空] 没有带 tag '{tag}' 的文档"
+
+        total = len(docs)
+        page_size = 30
+        pages = (total + page_size - 1) // page_size
+        if page > pages:
+            page = pages if pages > 0 else 1
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        page_docs = docs[start_idx:end_idx]
+
+        header = f"共 {total} 篇文档"
+        if tag:
+            header += f"（tag='{tag}'）"
+        if pages > 1:
+            header += f"，第 {page}/{pages} 页"
+        lines = [header + "：\n"]
+        for d in page_docs:
             lines.append(
                 f"  {d.id[:8]}  {d.title}  "
                 f"[{d.chunk_count}段] [{','.join(d.tags[:3])}]"
             )
+        if pages > 1 and page < pages:
+            lines.append(f"\n（还有更多，用 list_docs {'tag' if tag else ''} page={page+1} 翻页）")
         return "\n".join(lines)
 
 
@@ -128,7 +236,8 @@ class GetDocTool(Tool):
         args = args_str.strip()
         if not args:
             return {}, "[错误] 请指定文档ID"
-        return {"doc_id": args[:8]}, None
+        # 不截断，交给 storage.get_document 做前缀匹配（支持 8 位或完整 UUID）
+        return {"doc_id": args}, None
 
     def execute(self, context: Optional[ToolContext] = None, *, doc_id: str, **_: Any) -> str:
         doc = context.storage.get_document(doc_id)
@@ -199,10 +308,7 @@ class ReadTool(Tool):
         **_: Any,
     ) -> str:
         try:
-            from core.reader.reader import SmartReader
-
-            sr = SmartReader(storage=context.storage)
-            state = sr.open(doc_id)
+            sr, state = _open_reader(context, doc_id)
             total = state.total_chunks
             if chunk_num > total:
                 return f"[错误] 该文档共 {total} 段，你请求第 {chunk_num} 段（超出范围）"
@@ -271,10 +377,7 @@ class ReadMultiTool(Tool):
         **_: Any,
     ) -> str:
         try:
-            from core.reader.reader import SmartReader
-
-            sr = SmartReader(storage=context.storage)
-            state = sr.open(doc_id)
+            sr, state = _open_reader(context, doc_id)
             total = state.total_chunks
             if start > total:
                 return f"[错误] 起始段 {start} 超出范围（共 {total} 段）"
@@ -287,7 +390,7 @@ class ReadMultiTool(Tool):
             for i in range(start, end + 1):
                 sr.goto(i - 1)
                 chunk = sr.current_chunk()
-                lines.append(f"--- 第 {i} 段 ---\n{chunk.content[:500]}\n")
+                lines.append(f"--- 第 {i} 段 ---\n{chunk.content[:1000]}\n")
             return "\n".join(lines)
         except Exception as e:
             return f"阅读失败: {e}"
