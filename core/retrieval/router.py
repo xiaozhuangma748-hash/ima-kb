@@ -5,10 +5,11 @@
 - 知识查询     → 走完整 RAG 流水线
 
 分流策略（按优先级）：
-1. 问候/闲聊：短文本 + 问候关键词 → 'chat'
+1. 问候/闲聊：短文本 + 问候关键词 → 'greeting'
 2. 元问题：询问 AI 自身能力/状态 → 'chat'
 3. 知识查询：含政策/规定/标准/流程等关键词 → 'knowledge'
-4. 默认：未知意图走知识查询（保守，不漏答）
+4. 闲聊确认词：短文本精确匹配（好的/嗯/ok 等）→ 'chat'
+5. 默认：未知意图走知识查询（保守，不漏答）
 """
 from __future__ import annotations
 
@@ -23,6 +24,13 @@ _GREETING_KEYWORDS = {
     "你好", "您好", "在吗", "在不在", "谢谢", "感谢", "thanks", "thank you",
     "hi", "hello", "hey", "嗨", "哈喽", "再见", "bye", "goodbye",
     "早上好", "下午好", "晚上好", "早安", "晚安",
+}
+
+# 闲聊确认词（短文本精确匹配，跳过检索以省时）
+_CHAT_SHORT = {
+    "好的", "好", "嗯", "嗯嗯", "哦", "啊", "是的", "不是", "对", "不对",
+    "ok", "okay", "yes", "no", "好吧", "行", "可以", "收到", "明白",
+    "了解", "知道了", "嗯哼", "噢", "诶",
 }
 
 # 元问题关键词（询问 AI 自身能力）
@@ -85,12 +93,12 @@ def route_query(query: str) -> QueryType:
         if kw in q:
             return "knowledge"
 
-    # 4. 长文本（>10 字）默认走知识库（可能包含完整问题）
-    if len(q) > 10:
-        return "knowledge"
+    # 4. 短文本闲聊确认词（精确匹配，跳过检索省时）
+    if q in _CHAT_SHORT:
+        return "chat"
 
-    # 5. 短文本且无明确信号 → 当作闲聊
-    return "chat"
+    # 5. 默认走知识库（保守，不漏答；与文件头设计意图一致）
+    return "knowledge"
 
 
 def should_skip_retrieval(query: str) -> bool:

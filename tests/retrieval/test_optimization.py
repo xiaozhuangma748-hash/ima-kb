@@ -140,9 +140,21 @@ class TestQueryRouter:
         assert route_query("骨灰撒海的费用是多少") == "knowledge"
 
     def test_short_unknown(self):
-        """短文本未知意图 → chat。"""
+        """短文本闲聊确认词 → chat。"""
         assert route_query("好的") == "chat"
         assert route_query("嗯") == "chat"
+        assert route_query("ok") == "chat"
+        assert route_query("收到") == "chat"
+
+    def test_short_entity_query_goes_knowledge(self):
+        """短文本实体查询（无知识关键词）→ knowledge（保守，不漏答）。
+
+        回归测试：修复"高厚号码"等短文本实体查询被误判为 chat、
+        导致跳过知识库检索的问题。
+        """
+        assert route_query("高厚号码") == "knowledge"
+        assert route_query("殡协号码") == "knowledge"
+        assert route_query("联系电话") == "knowledge"
 
     def test_long_default_knowledge(self):
         """长文本默认走知识库。"""
