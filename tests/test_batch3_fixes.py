@@ -176,7 +176,7 @@ def test_degrade_no_error_no_hint():
 # ============================================================
 
 def test_rerank_snippet_has_ellipsis_for_long_content():
-    """超 200 字的内容 snippet 应带省略号。"""
+    """长内容 snippet 应保留完整（新设计：不截断到 200 字符）。"""
     from core.retrieval.rerank import Reranker
     from core.retrieval.hybrid import HybridResult
     from unittest.mock import MagicMock
@@ -202,7 +202,7 @@ def test_rerank_snippet_has_ellipsis_for_long_content():
     except Exception:
         pass
 
-    # 检查最后一次 LLM 调用的 prompt 中包含省略号
+    # 检查最后一次 LLM 调用的 prompt 中包含完整 content（不截断）
     call_args = llm.chat.call_args
     assert call_args is not None
     # prompt 在 messages 中
@@ -212,7 +212,8 @@ def test_rerank_snippet_has_ellipsis_for_long_content():
         for m in messages:
             if isinstance(m, dict) and "content" in m:
                 prompt_text += m["content"]
-    assert "..." in prompt_text, "长内容 snippet 应包含省略号"
+    # 新设计：长内容应完整保留（300 个 A 全部出现），不截断
+    assert long_content in prompt_text, "长内容 snippet 应完整保留（不再截断到 200 字符）"
 
 
 def test_rerank_snippet_no_ellipsis_for_short_content():

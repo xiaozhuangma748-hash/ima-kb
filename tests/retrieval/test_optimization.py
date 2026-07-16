@@ -68,17 +68,17 @@ class TestSemanticCache:
         stats = cache.stats()
         assert stats["total_hits"] == 3
 
-    def test_clear(self):
+    def test_clear(self, tmp_path):
         """清空缓存。"""
-        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10)
+        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10, db_path=tmp_path / "cache.db")
         cache.put("问题", np.random.rand(512).tolist(), "答案")
         assert cache.stats()["size"] == 1
         cache.clear()
         assert cache.stats()["size"] == 0
 
-    def test_cleanup_expired(self):
+    def test_cleanup_expired(self, tmp_path):
         """清理过期条目。"""
-        cache = SemanticCache(threshold=0.9, ttl=1, max_size=10)
+        cache = SemanticCache(threshold=0.9, ttl=1, max_size=10, db_path=tmp_path / "cache.db")
         cache.put("问题1", np.random.rand(512).tolist(), "答案1")
         cache.put("问题2", np.random.rand(512).tolist(), "答案2")
         time.sleep(1.2)

@@ -8,8 +8,12 @@
 #   ima stats       知识库统计
 #   ima ingest 路径 入库文件/目录
 #   ima --help      查看所有命令
+#
+# 安装：把本文件放到项目目录后，在 ~/.zshrc 末尾添加：
+#   source /你的项目路径/ima-command.zsh
+# 并修改下面的 KB_DIR 为你的实际路径
 ima() {
-    local KB_DIR="/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库"
+    local KB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
     if [ ! -d "$KB_DIR" ]; then
         echo "❌ 知识库目录不存在: $KB_DIR"
         return 1

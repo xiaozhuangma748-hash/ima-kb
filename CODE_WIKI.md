@@ -1,6 +1,6 @@
 # IMA 个人知识库 · Code Wiki
 
-> **版本**：v4.0（宠物知识库管理员） · pyproject 版本号 `4.0.0`
+> **版本**：v4.1（宠物知识库管理员 · 工业级 RAG 流水线） · pyproject 版本号 `4.1.0`
 > **代码仓库**：`xiaozhuangma748-hash/ima-kb`
 > **最后更新**：2026-07-15（检索性能优化：语义缓存 + 查询路由 + 并发检索 + LaTeX 输出清理）
 > **Python 兼容性**：3.9+（macOS 自带 3.9.6 即可运行）
@@ -530,7 +530,7 @@ def cli(ctx):
 - **欢迎面板**：左右分栏布局（参照 Claude Code v2.1 风格）
   - 左区（约 60%）：`Welcome back!` 欢迎语 + 像素机器人 ASCII 图 + 模型名 + 在线状态
   - 右区（约 40%）：`Tips for getting started`（5 条核心命令） + `Recent activity`（最近 3 条 + 文档统计）
-  - 中间 `│` 竖线分隔，顶部边框嵌入 `── IMA v4.0 ──` 标题
+  - 中间 `│` 竖线分隔，顶部边框嵌入 `── IMA v4.1 ──` 标题
   - 使用 `rich.cells.cell_len` 精确计算中文列宽（中文占 2 列），确保排版对齐
 - **命令补全**：自定义 `CommandCompleter`（继承 `prompt_toolkit.Completer`）
   - 输入 `/` 弹出所有命令 + 中文描述
@@ -1230,9 +1230,9 @@ class RAGChain:
 
 1. Query expansion（有 history 时调用 `_expand_query`，从上文 AI 回答提取关键短句拼接）
 2. 混合检索（`hybrid.search`，`top_k = top_k or settings.rag_top_k`）
-3. LLM 重排序（`reranker.rerank` top_n=min(5, len)）
+3. 重排序（通过 `create_reranker()` 工厂创建：优先 Cross-Encoder `bge-reranker-v2-m3`，失败降级 LLM；`top_n=min(settings.reranker_top_n, len)`）
 4. 确定最终结果（reranked 优先）
-5. 构造 Prompt（动态阈值 `settings.rag_top_k * 0.001`，低置信度加警告）
+5. 构造 Prompt（置信度阈值 `DEFAULT_CONFIDENCE_THRESHOLD=0.05`，低置信度加警告）
 6. LLM 生成（`temperature=0.2`，失败调用 `get_llm_degrade_message`）
 7. 构造引用列表
 8. 计算置信度（`final_results[0].score`）
@@ -2653,7 +2653,7 @@ RRF 分数低于阈值时：
 5. **Python 版本**：兼容 3.9+，但 3.10+ 体验更好
 6. **`def list()` 命名陷阱**：曾用 `list()` 作函数名覆盖内置 `list()`，已改名为 `list_docs`
 7. **pyproject.toml py-modules**：必须显式声明 `py-modules = ["run", "repl", "config"]`，否则 `pip install -e .` 后 `ima` 找不到 `run` 模块
-8. **版本号已统一**：`pyproject.toml` 版本为 `4.0.0`，与代码 v4.0 一致（已修复）
+8. **版本号已统一**：`pyproject.toml` 版本为 `4.1.0`，与代码 v4.1 一致（已修复）
 9. **PetStorage.save 非原子写入**：与 `MemoryStore.save` 不同，存在崩溃时数据损坏风险
 10. **向量模型大文件**：`model.safetensors` 需用 curl 从 hf-mirror.com 手动下载，HF 镜像 CDN 重定向会超时
 
@@ -2671,7 +2671,7 @@ RRF 分数低于阈值时：
 
 ---
 
-**项目状态**：P1-P7 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），433+ 测试通过，可用于日常使用。
+**项目状态**：P1-P7 全部完成（含 Web 前端 7 页面）+ P0-P5 工业级 RAG 流水线（Cross-Encoder/HyDE/Parent-Document/Lost-in-Middle/LRU 持久化缓存/引用验证），IMA v4.1 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），564 测试通过，可用于日常使用。
 
 ---
 

@@ -321,9 +321,9 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
 
     console.print()
 
-    # 顶边框 + 标题（左上角）：╭── IMA v4.0 ────────────────╮
+    # 顶边框 + 标题（左上角）：╭── IMA v4.1 ────────────────╮
     left_border = "╭── "
-    title_text = f"IMA v4.0"
+    title_text = f"IMA v4.1"
     right_sep = " ──"
     right_fill_len = term_cols - _w(left_border) - _w(title_text) - _w(right_sep) - 1  # -1 for ╮
     if right_fill_len < 1:

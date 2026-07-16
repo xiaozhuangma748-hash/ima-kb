@@ -5,8 +5,9 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Union
 
+from config import settings
 from core.retrieval.hybrid import HybridResult
 from core.llm.client import LLMClient
 
@@ -76,7 +77,8 @@ class Reranker:
         """
         candidate_texts = []
         for i, c in enumerate(candidates):
-            snippet = c.content[:200] + ("..." if len(c.content) > 200 else "") if c.content else ""
+            # 不再截断到 200 字符，保留完整 chunk（chunk_size=512，LLM 能处理）
+            snippet = c.content or ""
             candidate_texts.append(f"[{i}] {c.doc_title}: {snippet}")
 
         prompt = f"""请对以下候选文档与查询的相关性打分（0-10 分，10 最相关）。
@@ -192,3 +194,55 @@ class Reranker:
             )
             for c in candidates[:top_n]
         ]
+
+
+# ============================================================
+# Reranker 工厂：根据配置选择 Cross-Encoder 或 LLM
+# ============================================================
+
+# 类型别名：所有 reranker 都实现 rerank(query, candidates, top_n) -> List[RerankResult]
+RerankerType = Union["Reranker", "CrossEncoderReranker", None]
+
+
+def create_reranker(llm: Optional[LLMClient] = None) -> RerankerType:
+    """根据配置创建重排序器。
+
+    优先级：
+    1. settings.reranker_type == 'cross_encoder'：尝试 Cross-Encoder，加载失败自动降级 LLM
+    2. settings.reranker_type == 'llm'：直接用 LLM Reranker
+    3. settings.reranker_type == 'none'：返回 None（不重排）
+    4. LLM 不可用且 Cross-Encoder 不可用：返回 None
+
+    Args:
+        llm: 可选的 LLM 客户端实例，未提供时按需创建
+
+    Returns:
+        Reranker / CrossEncoderReranker / None
+    """
+    reranker_type = (settings.reranker_type or "cross_encoder").lower().strip()
+
+    if reranker_type == "none":
+        return None
+
+    if reranker_type == "cross_encoder":
+        # 尝试 Cross-Encoder
+        try:
+            from .cross_encoder import CrossEncoderReranker
+            ce = CrossEncoderReranker()
+            if ce.is_available():
+                logger.info("使用 Cross-Encoder 重排序器（bge-reranker-v2-m3）")
+                return ce
+            logger.warning("Cross-Encoder 不可用，降级为 LLM Reranker")
+        except Exception as e:
+            logger.warning(f"Cross-Encoder 加载失败，降级为 LLM Reranker: {e}")
+
+    # LLM Reranker
+    try:
+        if llm is None:
+            from core.llm.client import get_llm
+            llm = get_llm()
+        logger.info("使用 LLM 重排序器")
+        return Reranker(llm=llm)
+    except Exception as e:
+        logger.warning(f"LLM Reranker 也不可用，跳过重排: {e}")
+        return None

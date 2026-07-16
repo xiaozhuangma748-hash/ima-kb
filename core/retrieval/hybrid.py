@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 # RRF 参数：k 越大，排名差异的影响越小
-RRF_K = 60
+# 业界常用值 20-60；K=30 让 top-1 与 top-10 的分差更显著，避免次优结果挤掉最优
+RRF_K = 30
 
 # 并发检索线程池（复用，避免每次创建）
 _executor: Optional[ThreadPoolExecutor] = None
@@ -72,6 +73,7 @@ class HybridRetriever:
         query: str,
         top_k: int = 10,
         use_cache: bool = True,
+        doc_ids: Optional[List[str]] = None,
     ) -> List[HybridResult]:
         """混合检索：BM25 + 向量并发 + RRF 融合。
 
@@ -79,6 +81,7 @@ class HybridRetriever:
             query: 查询文本
             top_k: 返回结果数量
             use_cache: 是否使用语义缓存（默认 True）
+            doc_ids: 元数据预过滤，只在这些文档中检索（None 不过滤）
 
         Returns:
             融合后的结果列表，按 RRF 分数降序。若构造时传入了 storage，
@@ -110,16 +113,28 @@ class HybridRetriever:
                 logger.warning(f"语义缓存查询失败，继续检索: {e}")
 
         # 1. 并发执行 BM25 + 向量检索
+        # 构造向量检索的 where 过滤条件
+        vector_where: Optional[dict] = None
+        if doc_ids:
+            if len(doc_ids) == 1:
+                vector_where = {"doc_id": doc_ids[0]}
+            else:
+                vector_where = {"doc_id": {"$in": doc_ids}}
+
         if not self.vector.is_available():
             # 向量不可用，纯 BM25
             bm25_results = self.bm25.search(query, top_k=top_k)
+            # doc_ids 过滤（BM25 不支持 where，结果后过滤）
+            if doc_ids:
+                doc_id_set = set(doc_ids)
+                bm25_results = [r for r in bm25_results if r.doc_id in doc_id_set]
             results = self._bm25_only_results(bm25_results, top_k)
         else:
             executor = _get_executor()
             # 两级检索：BM25 粗排 top 50（召回更多候选）
             coarse_k = max(top_k * 5, 50)
             future_bm25 = executor.submit(self.bm25.search, query, coarse_k)
-            future_vec = executor.submit(self.vector.search, query, coarse_k)
+            future_vec = executor.submit(self.vector.search, query, coarse_k, vector_where)
             try:
                 bm25_results = future_bm25.result(timeout=30)
             except Exception as e:
@@ -130,6 +145,10 @@ class HybridRetriever:
             except Exception as e:
                 logger.warning(f"向量检索失败: {e}")
                 vector_results = []
+            # doc_ids 过滤 BM25 结果（后过滤）
+            if doc_ids:
+                doc_id_set = set(doc_ids)
+                bm25_results = [r for r in bm25_results if r.doc_id in doc_id_set]
             # RRF 融合
             results = self._rrf_fusion(bm25_results, vector_results, top_k)
 

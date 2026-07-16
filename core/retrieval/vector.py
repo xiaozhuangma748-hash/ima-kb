@@ -277,17 +277,27 @@ class VectorIndex:
             logger.warning(f"删除文档向量失败 {doc_id}: {e}")
             return -1
 
-    def search(self, query: str, top_k: int = 10) -> List[VectorResult]:
-        """向量检索。"""
+    def search(self, query: str, top_k: int = 10, where: Optional[dict] = None) -> List[VectorResult]:
+        """向量检索。
+
+        Args:
+            query: 查询文本
+            top_k: 返回结果数
+            where: ChromaDB metadata 过滤条件，如 {"doc_id": "xxx"} 或
+                   {"$in": {"doc_id": ["id1", "id2"]}}。None 不过滤。
+        """
         if not self._available:
             return []
         try:
             # query 也走缓存（相同搜索词重复搜索时省计算）
             query_embeddings = self._embed_with_cache([query])
-            results = self._collection.query(
-                query_embeddings=query_embeddings,
-                n_results=top_k,
-            )
+            query_kwargs: dict = {
+                "query_embeddings": query_embeddings,
+                "n_results": top_k,
+            }
+            if where is not None:
+                query_kwargs["where"] = where
+            results = self._collection.query(**query_kwargs)
             vector_results = []
             if results and results.get("ids"):
                 for i, chunk_id in enumerate(results["ids"][0]):

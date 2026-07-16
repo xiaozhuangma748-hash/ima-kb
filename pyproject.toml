@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ima-kb"
-version = "4.0.0"
+version = "4.1.0"
 description = "IMA 个人知识库：把电脑里散落的资料整理成可搜索、可问答的本机知识库"
 readme = "README.md"
 requires-python = ">=3.9"

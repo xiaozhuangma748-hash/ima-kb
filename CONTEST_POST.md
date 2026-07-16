@@ -95,7 +95,7 @@ ima web                      # 启动 Web 后台（http://localhost:8000）
 | **P2 智能** | 接入 LLM | BM25 中文检索 + Agnes LLM + RAG 问答（流式/非流式） | TRAE 协助实现 BM25 算法和流式输出处理 |
 | **P3 体系** | 交互体验 | 终端 REPL + `ima` 全局命令 + 命令补全 | TRAE 实现 prompt_toolkit 补全和 Claude Code 风格 UI |
 | **P4 增强** | 格式覆盖 | OCR 补齐 + 自动标签 + 知识图谱 + 安装脚本 | TRAE 集成 PaddleOCR + Tesseract 双引擎 |
-| **P5 智能化** | 检索升级 | 宠物管理员 v4.0 + 混合检索 + 记忆系统 + 人格风格 + Web 前端 | TRAE 实现四层检索流水线和 7 页面 Web 后台 |
+| **P5 智能化** | 检索升级 | 宠物管理员 v4.1 + 工业级 RAG 流水线 + 混合检索 + 记忆系统 + 人格风格 + Web 前端 | TRAE 实现 Cross-Encoder/HyDE/Parent-Document/Lost-in-Middle/LRU 持久化缓存/引用验证 + 7 页面 Web 后台 |
 | **P6 性能** | 工程优化 | BM25 倒排索引 + SQLite WAL + 连接池 + 懒加载 + Agent Trae 风格 | TRAE 重构性能瓶颈，优化 Agent 输出样式 |
 | **P7 智能增强** | 体验打磨 | BM25 匹配度提升 + 跨会话记忆 + 搜索配置 + 会话管理 | TRAE 实现 LLM 自动记忆提取和会话持久化 |
 | **P8 性能与可读性** | 检索提速 + 输出净化 | 语义缓存 + 查询路由 + 并发检索 + LaTeX 输出清理 | TRAE 实现检索性能三层优化和输出可读性防御 |

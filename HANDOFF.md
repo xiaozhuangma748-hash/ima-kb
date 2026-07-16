@@ -27,7 +27,7 @@
 | **P2 智能** | BM25 中文检索 + Agnes LLM 接入 + RAG 问答（流式/非流式） | ✅ 完成 |
 | **P3 体系** | 终端交互式 REPL + `ima` 全局命令 | ✅ 完成 |
 | **P4 增强** | OCR 补齐 + 自动标签 + 分发安装脚本 + Claude Code 风格 CLI + 知识图谱 | ✅ 完成 |
-| **P5 智能化** | 宠物管理员 v4.0 + 混合检索（BM25+向量+RRF+重排）+ 记忆系统 + 人格风格 + 增量同步 + 质量检查 + 近似去重 + 子命令菜单 + 数据分析 + 报告生成 + **Web 前端（7 页面完整实现）** | ✅ 完成 |
+| **P5 智能化** | 宠物管理员 v4.1 + 工业级 RAG 流水线（Cross-Encoder/HyDE/Parent-Document/Lost-in-Middle/LRU 持久化缓存/引用验证）+ 混合检索（BM25+向量+RRF+重排）+ 记忆系统 + 人格风格 + 增量同步 + 质量检查 + 近似去重 + 子命令菜单 + 数据分析 + 报告生成 + **Web 前端（7 页面完整实现）** | ✅ 完成 |
 | **P6 性能优化** | BM25 倒排索引 + SQLite WAL 模式 + 连接池 + 懒加载 + 异步 SSE + Web 组件复用 + Agent 输出 Trae 垂直风格 + BM25 索引智能重建 + 命令补全完善 | ✅ 完成 |
 | **P7 智能增强** | BM25 匹配度提升（归一化+多模式分词+IDF 截断+b=0.5）+ 跨会话记忆自动提取（LLM 分析对话提取偏好/主题/问题/事实）+ 搜索默认配置（/search config）+ 会话管理系统（独立记忆+自动持久化+跨会话恢复）+ 启动页优化 + 命令补全完善 | ✅ 完成 |
 
@@ -48,7 +48,7 @@
 - ✅ **知识图谱**（LLM 抽取实体关系，networkx 存储，vis.js 可视化）
 - ✅ **Web 后台**（7 个页面完整实现：AI 问答 / 文档入库 / 搜索 / 数据分析 / 仪表盘 / 知识图谱 / 宠物管理，FastAPI 后端 + 单页 HTML+JS 前端）
 - ✅ **一键安装**（`install.sh` + `pyproject.toml`，支持 `--ocr` / `--dev` / `--no-venv` / `--vector`）
-- ✅ **宠物管理员 v4.0**（统一 AI 交互入口，4 种人格风格 scholar/warrior/artisan/neutral，像素风 ASCII 艺术）
+- ✅ **宠物管理员 v4.1**（统一 AI 交互入口，4 种人格风格 scholar/warrior/artisan/neutral，像素风 ASCII 艺术）
 - ✅ **混合检索**（BM25 + 向量 bge-small-zh-v1.5 + RRF 融合 k=60 + LLM 重排序，四层流水线）
 - ✅ **检索性能优化**（语义缓存 L1/L2 + 查询路由 + BM25/向量并发检索 + 两级粗排精排）
 - ✅ **输出可读性**（system prompt 禁止 + 流式渲染清理 + 缓存清理，三重防护去除 LaTeX 公式）
@@ -113,7 +113,7 @@ ima-kb/
 ├── .gitignore
 ├── config.py                     # 配置中心（Settings 单例）
 ├── run.py                        # CLI 入口（23 个顶层命令 + graph 5 子命令，无子命令时进入 REPL）
-├── repl.py                       # 交互式 REPL（IMA v4.0 · Claude Code 风格 + 40+ 子命令）
+├── repl.py                       # 交互式 REPL（IMA v4.1 · Claude Code 风格 + 40+ 子命令）
 │
 ├── core/
 │   ├── ingestion/
@@ -248,8 +248,8 @@ ima-kb/
   - `ima graph export [-o PATH]`：导出 HTML 可视化
   - `ima graph clear`：清空图谱
 
-### `repl.py` / `core/cli/chat.py` — IMA REPL（v4.0 · Claude Code 风格）
-- **欢迎面板**：左窄右宽布局（左 32 列：mascot+宠物信息+状态 / 右：Tips+Recent activity），中间 `│` dim 竖线分隔，顶部标题线 `── IMA v4.0 ──`，输入框前 dim 提示 `/help for shortcuts` / `Ctrl+C to exit`
+### `repl.py` / `core/cli/chat.py` — IMA REPL（v4.1 · Claude Code 风格）
+- **欢迎面板**：左窄右宽布局（左 32 列：mascot+宠物信息+状态 / 右：Tips+Recent activity），中间 `│` dim 竖线分隔，顶部标题线 `── IMA v4.1 ──`，输入框前 dim 提示 `/help for shortcuts` / `Ctrl+C to exit`
 - **命令补全**：自定义 `CommandCompleter`（继承 `Completer`）取代旧 `NestedCompleter`
   - 输入 `/` 弹出所有命令 + 中文描述
   - 输入 `/s` 自动匹配 search/session/show/stats/sync 等 s 开头命令
@@ -325,7 +325,7 @@ ima-kb/
 - `list_all_tags()` / `list_documents_by_tag()`：标签查询
 
 ### `pyproject.toml` + `install.sh` — 分发安装
-- `pyproject.toml`：`name="ima-kb"` `version="4.0.0"` `requires-python=">=3.9"`，入口点 `ima = "run:cli"`，`py-modules=["run", "repl", "config"]`
+- `pyproject.toml`：`name="ima-kb"` `version="4.1.0"` `requires-python=">=3.9"`，入口点 `ima = "run:cli"`，`py-modules=["run", "repl", "config"]`
 - `install.sh`：6 步流程（Python 检查 → venv → pip install + `pip install -e .` → .env 配置 → zsh/bash ima 命令 → 验证）
 - 选项：`--ocr`（装 Tesseract 语言包）/ `--dev`（开发依赖）/ `--no-venv`（用系统 Python）
 
@@ -352,7 +352,7 @@ ima graph neighbors "杭州市"  # 查询节点关系
 ima graph export       # 导出 HTML 可视化（storage/graph.html）
 ```
 
-### REPL 内部（v4.0 Claude Code 风格）
+### REPL 内部（v4.1 Claude Code 风格）
 ```
 > 退役军人抚恤金有什么新规定？
 ⏺ AI 流式回答...
@@ -370,7 +370,7 @@ ima graph export       # 导出 HTML 可视化（storage/graph.html）
 
 ## ✅ P4 完成总结（2026-07-06）
 
-P4 全部 5 个任务已完成，IMA 升级到 v4.0：
+P4 全部 5 个任务已完成，IMA 升级到 v4.1：
 
 | 任务 | 实现方式 | 文件 |
 |---|---|---|
@@ -417,7 +417,7 @@ P4 全部 5 个任务已完成，IMA 升级到 v4.0：
 7. **`def list()` 命名陷阱**：曾用 `list()` 作函数名覆盖内置 `list()`，已改名为 `list_docs` 并用 `@cli.command(name="list")` 修复
 8. **pyproject.toml py-modules**：因 `run.py` 在根目录不在包内，必须显式声明 `py-modules = ["run", "repl", "config"]`，否则 `pip install -e .` 后 `ima` 找不到 `run` 模块
 9. ~~**`.streamlit/config.toml` 残留~~：✅ 已删除（2026-07-09）
-10. **版本号已统一**：`pyproject.toml` 版本已从 `3.1.0` 更新为 `4.0.0`，与代码 v4.0 一致（已修复）
+10. **版本号已统一**：`pyproject.toml` 版本已从 `3.1.0` 更新为 `4.1.0`，与代码 v4.1 一致（已修复）
 
 ---
 
@@ -485,7 +485,7 @@ ima web
 
 ---
 
-**项目状态**：P1-P7 全部完成（含 Web 前端 7 页面），IMA v4.0 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），407 个测试全部通过，可用于日常使用。后续优化方向见上方「后续待办」章节（2 项剩余：图谱扩展、多用户隔离）。
+**项目状态**：P1-P7 全部完成（含 Web 前端 7 页面）+ P0-P5 工业级 RAG 流水线（Cross-Encoder/HyDE/Parent-Document/Lost-in-Middle/LRU 持久化缓存/引用验证），IMA v4.1 已部署到 GitHub（仓库 `xiaozhuangma748-hash/ima-kb`），564 个测试全部通过，可用于日常使用。
 
 ---
 
@@ -534,7 +534,7 @@ ima web
 | 5 | test_data/ | 5个文件 | 6个文件 |
 | 6 | 测试数量 | 153+ | 323+ |
 | 7 | Web 默认端口 | 文档写8000 | 实际默认8501（run.py+repl.py） |
-| 8 | 版本号不一致 | ✅ 已修复 | pyproject.toml 统一为 4.0.0（2026-07-10） |
+| 8 | 版本号不一致 | ✅ 已修复 | pyproject.toml 统一为 4.1.0（2026-07-16） |
 | 9 | Web 前端状态 | "页面为空/未实现" | 7页面+7API全部已实现 |
 | 10 | PRD 技术栈 | Streamlit | FastAPI（实际实现） |
 | 11 | INSTALL.md 宠物等级 | Lv6 分系 | Lv5 分系 |

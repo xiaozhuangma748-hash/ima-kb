@@ -51,6 +51,24 @@ class Settings:
     rag_top_k: int = field(default_factory=lambda: int(_get_env("RAG_TOP_K", "6")))
     llm_max_tokens: int = field(default_factory=lambda: int(_get_env("LLM_MAX_TOKENS", "1024")))
 
+    # ---- Parent-Document 上下文扩展 ----
+    # 检索时用小 chunk 匹配，返回时附加前后各 N 个相邻 chunk 作为上下文
+    # 0 表示关闭，1 表示前后各 1 个（共 3 个 chunk 的上下文）
+    parent_window: int = field(default_factory=lambda: int(_get_env("PARENT_WINDOW", "1")))
+
+    # ---- Context 压缩 ----
+    # 每个 chunk content 传给 LLM 时的最大字符数，超过时保留首尾各一半
+    # 0 表示不压缩（适用于 parent_window 扩展后 content 较长的场景）
+    context_max_chars: int = field(default_factory=lambda: int(_get_env("CONTEXT_MAX_CHARS", "800")))
+
+    # ---- Reranker ----
+    # 重排序器类型：cross_encoder（专用模型，推荐）/ llm（LLM prompt 打分）/ none
+    reranker_type: str = field(default_factory=lambda: _get_env("RERANKER_TYPE", "cross_encoder"))
+    # Cross-Encoder 模型名称（BAAI/bge-reranker-v2-m3 中英多语言，1.1B 参数）
+    reranker_model: str = field(default_factory=lambda: _get_env("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"))
+    # 重排序候选数（top_n）：最终返回给 LLM 的资料条数
+    reranker_top_n: int = field(default_factory=lambda: int(_get_env("RERANKER_TOP_N", "5")))
+
     @property
     def uploads_dir(self) -> Path:
         """原文件存储目录。"""
