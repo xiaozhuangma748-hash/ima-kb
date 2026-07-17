@@ -83,35 +83,69 @@ class SemanticCache:
     # ============================================================
 
     def _init_db(self) -> None:
-        """初始化 SQLite 缓存表。"""
-        try:
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._db_conn = sqlite3.connect(
-                str(self._db_path), check_same_thread=False
-            )
-            self._db_conn.row_factory = sqlite3.Row  # 允许按列名访问
-            self._db_conn.execute("PRAGMA journal_mode=WAL")
-            self._db_conn.execute("""
-                CREATE TABLE IF NOT EXISTS semantic_cache (
-                    query_hash      TEXT PRIMARY KEY,
-                    query           TEXT NOT NULL,
-                    query_embedding BLOB NOT NULL,
-                    answer          TEXT NOT NULL,
-                    citations       TEXT DEFAULT '[]',
-                    sources         TEXT DEFAULT '[]',
-                    timestamp       REAL NOT NULL,
-                    last_access     REAL NOT NULL,
-                    hit_count       INTEGER DEFAULT 0
+        """初始化 SQLite 缓存表。
+
+        若 db 文件损坏（disk I/O error / file is not a database 等），
+        自动删除 db + wal/shm 后重建，避免永久退化为内存模式导致跨进程缓存失效。
+        """
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        for attempt in (1, 2):
+            try:
+                conn = sqlite3.connect(
+                    str(self._db_path), check_same_thread=False
                 )
-            """)
-            self._db_conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_sc_last_access "
-                "ON semantic_cache(last_access)"
-            )
-            self._db_conn.commit()
-        except Exception as e:
-            logger.warning(f"语义缓存 SQLite 初始化失败，仅用内存: {e}")
-            self._db_conn = None
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS semantic_cache (
+                        query_hash      TEXT PRIMARY KEY,
+                        query           TEXT NOT NULL,
+                        query_embedding BLOB NOT NULL,
+                        answer          TEXT NOT NULL,
+                        citations       TEXT DEFAULT '[]',
+                        sources         TEXT DEFAULT '[]',
+                        timestamp       REAL NOT NULL,
+                        last_access     REAL NOT NULL,
+                        hit_count       INTEGER DEFAULT 0
+                    )
+                """)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_sc_last_access "
+                    "ON semantic_cache(last_access)"
+                )
+                conn.commit()
+                self._db_conn = conn
+                return
+            except sqlite3.DatabaseError as e:
+                # 关闭失败的连接
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                if attempt == 1:
+                    logger.warning(
+                        f"语义缓存 SQLite 损坏 ({e})，删除重建: {self._db_path}"
+                    )
+                    # 删除 db + wal + shm，让下次尝试重建
+                    for suffix in ("", "-wal", "-shm"):
+                        p = Path(str(self._db_path) + suffix)
+                        if p.exists():
+                            try:
+                                p.unlink()
+                            except Exception:
+                                pass
+                    continue
+                logger.warning(f"语义缓存 SQLite 初始化失败，仅用内存: {e}")
+                self._db_conn = None
+                return
+            except Exception as e:
+                logger.warning(f"语义缓存 SQLite 初始化失败，仅用内存: {e}")
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                self._db_conn = None
+                return
 
     def _load_from_db(self) -> None:
         """从 SQLite 加载未过期的缓存条目到内存。"""

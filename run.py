@@ -1577,8 +1577,8 @@ def cli_doctor() -> None:
             results.append(("WARN", f"可选依赖: {dep}", "未安装 (向量检索不可用)"))
 
     # 4. .env 配置
-    api_key = getattr(settings, "api_key", None) or os.environ.get("LLM_API_KEY")
-    api_base = getattr(settings, "api_base", None) or os.environ.get("LLM_API_BASE")
+    api_key = getattr(settings, "agnes_api_key", None) or os.environ.get("AGNES_API_KEY")
+    api_base = getattr(settings, "agnes_base_url", None) or os.environ.get("AGNES_BASE_URL")
     model = getattr(settings, "llm_model", None) or os.environ.get("LLM_MODEL")
     results.append(("PASS" if api_key else "FAIL", "配置: API_KEY", "已设置" if api_key else "未设置"))
     results.append(("PASS" if api_base else "WARN", "配置: API_BASE", api_base or "未设置 (用默认)"))
@@ -1612,7 +1612,7 @@ def cli_doctor() -> None:
         results.append(("FAIL", "storage 目录", f"不可写: {e}"))
 
     # 7. 向量模型
-    model_dir = storage_dir / "models"
+    model_dir = storage_dir / "models" / "bge-small-zh-v1.5"
     safetensors = model_dir / "model.safetensors"
     if safetensors.exists():
         size_mb = safetensors.stat().st_size / (1024 * 1024)
@@ -1621,9 +1621,10 @@ def cli_doctor() -> None:
         results.append(("WARN", "向量模型", "未下载 (向量检索不可用)"))
 
     # 8. BM25 索引
-    bm25_dir = storage_dir / "bm25"
-    if bm25_dir.exists() and any(bm25_dir.iterdir()):
-        results.append(("PASS", "BM25 索引", "存在"))
+    bm25_file = storage_dir / "bm25_index.pkl"
+    if bm25_file.exists():
+        size_mb = bm25_file.stat().st_size / (1024 * 1024)
+        results.append(("PASS", "BM25 索引", f"存在 ({size_mb:.1f} MB)"))
     else:
         results.append(("WARN", "BM25 索引", "不存在 (运行 ima ingest 入库)"))
 
@@ -1632,7 +1633,7 @@ def cli_doctor() -> None:
         from core.storage import Storage
         st = Storage()
         stats = st.stats()
-        doc_count = stats.get("total_docs", 0)
+        doc_count = stats.get("documents", 0)
         results.append(("PASS" if doc_count > 0 else "WARN", "文档数量", f"{doc_count} 篇"))
     except Exception as e:
         results.append(("WARN", "文档数量", f"读取失败: {e}"))

@@ -89,7 +89,7 @@ class HybridRetriever:
         """
         # 0. 语义缓存查询（命中则直接返回）
         query_embedding = None
-        if use_cache and self.cache is not None and self.vector.is_available():
+        if use_cache and self.cache is not None and self.vector is not None and self.vector.is_available():
             try:
                 query_embedding = self.vector.embed_query(query)
                 cached = self.cache.get(query, query_embedding)
@@ -121,7 +121,7 @@ class HybridRetriever:
             else:
                 vector_where = {"doc_id": {"$in": doc_ids}}
 
-        if not self.vector.is_available():
+        if self.vector is None or not self.vector.is_available():
             # 向量不可用，纯 BM25
             bm25_results = self.bm25.search(query, top_k=top_k)
             # doc_ids 过滤（BM25 不支持 where，结果后过滤）

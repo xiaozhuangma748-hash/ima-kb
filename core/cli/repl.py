@@ -142,9 +142,12 @@ class REPL(
                 from core.retrieval.vector import VectorIndex
                 vector_index = VectorIndex()
                 self._vector_available = True
+                # 注入到 storage，使降级路径的 RAGChain 也能访问向量索引
+                self.storage.attach_vector_index(vector_index)
             except Exception:
                 self._vector_available = False
                 console.print("[dim]! 向量检索不可用，使用纯 BM25 检索[/dim]")
+                vector_index = None
 
             hybrid = HybridRetriever(
                 bm25_index=self.storage.bm25, vector_index=vector_index,

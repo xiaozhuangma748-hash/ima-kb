@@ -84,6 +84,15 @@ class Storage:
         self._init_schema()
         self._sync_bm25_from_db()
 
+    @property
+    def vector(self):
+        """公开访问器：返回已注入的向量索引（未注入时为 None）。
+
+        RAGChain / HybridRetriever 等上层组件通过 `storage.vector` 访问，
+        与 `attach_vector_index` 注入的 `_vector_index` 保持连通。
+        """
+        return self._vector_index
+
     def attach_vector_index(self, vector_index) -> None:
         """注入向量索引实例，使后续 save/delete 自动同步向量索引。
 

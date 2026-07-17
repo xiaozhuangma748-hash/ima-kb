@@ -27,6 +27,14 @@ class PetStorage:
             return None
         try:
             data = json.loads(self.file_path.read_text(encoding="utf-8"))
+            # 过滤掉 Pet dataclass 不识别的字段（向前兼容：
+            # 旧版本可能写入了 room_state 等已移除的字段，导致 TypeError）
+            import inspect
+            valid_keys = {
+                p.name for p in inspect.signature(Pet.__init__).parameters.values()
+                if p.name != "self"
+            }
+            data = {k: v for k, v in data.items() if k in valid_keys}
             return Pet(**data)
         except (json.JSONDecodeError, TypeError) as e:
             # 备份损坏的文件（用 parent / name.bak.ts 避免后缀替换问题）

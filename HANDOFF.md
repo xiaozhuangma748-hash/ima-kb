@@ -1195,3 +1195,51 @@ python3 -m pytest tests/ -q
 ```
 
 ---
+
+## 🆕 2026-07-17 更新：Agent 直接回答也强制输出 Thought + 领养后记忆模块初始化 + 测试隔离修复
+
+### 问题 1：Agent 直接回答时不显示 Thought
+
+**现象**：问 `/a nishi ?` 或 `/a 你好你是什么？` 时，有时只显示"总结"，没有"Thinking"过程。
+
+**根因**：系统提示只要求"需要调用工具时先写 Thought"，LLM 对直接可回答的问题（问候/自我介绍）会跳过 Thought 直接输出答案。
+
+**修复**：在 `core/agent/tools/base.py` 的 `_PROMPT_FOOTER` 新增「强制输出格式」章节，明确要求 **无论是否需要调用工具，每一步都必须先输出 Thought**，并给出问候/自我介绍的示例。
+
+### 问题 2：领养宠物后 `/memory show` 报"记忆模块未初始化"
+
+**现象**：用户已领养宠物（/pet 显示"小林同学 Lv1"），但 `/memory show` 仍提示"记忆模块未初始化（需要先领养宠物）"。
+
+**根因**：`REPL.__init__` 时如果 `self.pet` 为 None 会跳过 `MemoryStore` 初始化；用户领养宠物后 `_pet_adopt` 没有补初始化。
+
+**修复**：在 `core/cli/commands/pet.py` 的 `_pet_adopt` 中，领养成功后同步初始化 `memory_store` 和 `workflow_tracker`。
+
+### 问题 3：SemanticCache 测试间 db 污染
+
+**现象**：`test_hit_count` 在运行一次测试后会因为 `storage/semantic_cache.db` 累积旧数据而失败。
+
+**根因**：7 个 `TestSemanticCache` 测试使用默认 `db_path=storage/semantic_cache.db`，没有隔离。
+
+**修复**：给所有 `TestSemanticCache` 测试传入 `tmp_path / "cache.db"`。
+
+### 其他累积修复（用户本地修改）
+
+| 文件 | 说明 |
+|---|---|
+| `core/cli/repl.py` | `_init_administrator` 中将向量索引注入 `storage`，使降级路径的 RAGChain 也能访问 |
+| `core/pet/storage.py` | `PetStorage.load` 过滤 `Pet.__init__` 不识别的字段（向前兼容旧版本数据） |
+| `core/retrieval/hybrid.py` | 增加 `self.vector is None` 检查，避免无向量索引时崩溃 |
+| `core/retrieval/rerank.py` | Cross-Encoder 不可用时日志级别从 warning 降至 info |
+| `core/retrieval/router.py` | 增加"你是？/你是?/你是"等元问题识别 |
+| `core/retrieval/semantic_cache.py` | SQLite db 损坏时自动删除 db+wal+shm 后重建 |
+| `core/storage.py` | 新增 `vector` property 访问器，返回注入的向量索引 |
+| `run.py` | `doctor` 命令修复 API key 环境变量名、模型子目录、BM25 索引文件名、stats key |
+
+### 测试验证
+
+```bash
+python3 -m pytest tests/ -q
+# 661 passed, 6 warnings in 12.33s
+```
+
+---

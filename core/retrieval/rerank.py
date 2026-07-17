@@ -232,9 +232,9 @@ def create_reranker(llm: Optional[LLMClient] = None) -> RerankerType:
             if ce.is_available():
                 logger.info("使用 Cross-Encoder 重排序器（bge-reranker-v2-m3）")
                 return ce
-            logger.warning("Cross-Encoder 不可用，降级为 LLM Reranker")
+            logger.info("Cross-Encoder 不可用（模型未下载），降级为 LLM Reranker")
         except Exception as e:
-            logger.warning(f"Cross-Encoder 加载失败，降级为 LLM Reranker: {e}")
+            logger.info(f"Cross-Encoder 加载失败，降级为 LLM Reranker: {e}")
 
     # LLM Reranker
     try:

@@ -12,18 +12,18 @@ from core.retrieval.router import route_query, should_skip_retrieval, should_use
 class TestSemanticCache:
     """语义缓存测试。"""
 
-    def test_l1_exact_match(self):
+    def test_l1_exact_match(self, tmp_path):
         """L1 精确缓存：相同 query 直接命中。"""
-        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10)
+        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10, db_path=tmp_path / "cache.db")
         emb = np.random.rand(512).tolist()
         cache.put("什么是生态安葬？", emb, "生态安葬是...")
         entry = cache.get("什么是生态安葬？")
         assert entry is not None
         assert entry.answer == "生态安葬是..."
 
-    def test_l2_semantic_match(self):
+    def test_l2_semantic_match(self, tmp_path):
         """L2 语义缓存：相似 embedding 命中。"""
-        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10)
+        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10, db_path=tmp_path / "cache.db")
         emb1 = np.random.rand(512).tolist()
         cache.put("什么是生态安葬？", emb1, "生态安葬是...")
         # 相同 embedding 应命中
@@ -31,35 +31,35 @@ class TestSemanticCache:
         assert entry is not None
         assert entry.answer == "生态安葬是..."
 
-    def test_no_match_different_embedding(self):
+    def test_no_match_different_embedding(self, tmp_path):
         """不同 embedding 不应命中。"""
-        cache = SemanticCache(threshold=0.99, ttl=60, max_size=10)  # 高阈值
+        cache = SemanticCache(threshold=0.99, ttl=60, max_size=10, db_path=tmp_path / "cache.db")  # 高阈值
         emb1 = np.random.rand(512).tolist()
         emb2 = np.random.rand(512).tolist()
         cache.put("问题1", emb1, "答案1")
         entry = cache.get("问题2", emb2)
         assert entry is None
 
-    def test_ttl_expiry(self):
+    def test_ttl_expiry(self, tmp_path):
         """TTL 过期后不命中。"""
-        cache = SemanticCache(threshold=0.9, ttl=1, max_size=10)  # 1 秒过期
+        cache = SemanticCache(threshold=0.9, ttl=1, max_size=10, db_path=tmp_path / "cache.db")  # 1 秒过期
         emb = np.random.rand(512).tolist()
         cache.put("问题", emb, "答案")
         time.sleep(1.2)  # 等待过期
         entry = cache.get("问题")
         assert entry is None
 
-    def test_lru_eviction(self):
+    def test_lru_eviction(self, tmp_path):
         """超容量时淘汰最旧的。"""
-        cache = SemanticCache(threshold=0.9, ttl=60, max_size=3)
+        cache = SemanticCache(threshold=0.9, ttl=60, max_size=3, db_path=tmp_path / "cache.db")
         for i in range(5):
             cache.put(f"问题{i}", np.random.rand(512).tolist(), f"答案{i}")
         stats = cache.stats()
         assert stats["size"] == 3  # 不超过 max_size
 
-    def test_hit_count(self):
+    def test_hit_count(self, tmp_path):
         """命中次数统计。"""
-        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10)
+        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10, db_path=tmp_path / "cache.db")
         emb = np.random.rand(512).tolist()
         cache.put("问题", emb, "答案")
         cache.get("问题")
@@ -86,10 +86,10 @@ class TestSemanticCache:
         assert cleaned == 2
         assert cache.stats()["size"] == 0
 
-    def test_thread_safety(self):
+    def test_thread_safety(self, tmp_path):
         """线程安全：多线程并发读写。"""
         import threading
-        cache = SemanticCache(threshold=0.5, ttl=60, max_size=100)
+        cache = SemanticCache(threshold=0.5, ttl=60, max_size=100, db_path=tmp_path / "cache.db")
         errors = []
 
         def writer():
