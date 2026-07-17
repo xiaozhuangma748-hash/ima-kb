@@ -425,7 +425,14 @@ class AgentMixin:
 
         from core.agent.agent import Agent
         try:
-            ag = Agent(storage=self.storage)
+            ag = Agent(
+                storage=self.storage,
+                pet=self.pet,
+                pet_interactor=self.pet_interactor,
+                pet_storage=self.pet_storage,
+                pet_shop=self.shop,
+                pet_task_manager=self.task_manager,
+            )
         except Exception as e:
             console.print(f"[red]初始化失败: {e}[/red]")
             return
@@ -518,7 +525,14 @@ class AgentMixin:
         stop_spinner = None
         try:
             from core.agent.agent import Agent
-            agent = Agent(storage=self.storage)
+            agent = Agent(
+                storage=self.storage,
+                pet=self.pet,
+                pet_interactor=self.pet_interactor,
+                pet_storage=self.pet_storage,
+                pet_shop=self.shop,
+                pet_task_manager=self.task_manager,
+            )
             config = _load_agent_config()
             show_thoughts = bool(config.get("show_thoughts", False))
             mode_hint = " · Show Thoughts" if show_thoughts else " · Hide Thoughts"

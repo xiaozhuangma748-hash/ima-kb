@@ -98,6 +98,11 @@ class ToolContext:
         llm: Any = None,
         chunker: Any = None,
         hybrid_retriever: Any = None,
+        pet: Any = None,
+        pet_interactor: Any = None,
+        pet_storage: Any = None,
+        pet_shop: Any = None,
+        pet_task_manager: Any = None,
     ) -> None:
         self.storage = storage
         self.llm = llm
@@ -105,6 +110,13 @@ class ToolContext:
         # P0-P5 工业级 RAG 流水线（BM25+向量+RRF+Cross-Encoder+HyDE+缓存）
         # 优先使用注入的 retriever；为 None 时工具回退到旧 BM25 路径
         self.hybrid_retriever = hybrid_retriever
+        # 虚拟宠物依赖：让 pet_interact/pet_status/pet_manage/pet_shop 工具
+        # 能真正查询和更新宠物状态（未注入时相关工具返回未启用提示）
+        self.pet = pet
+        self.pet_interactor = pet_interactor
+        self.pet_storage = pet_storage
+        self.pet_shop = pet_shop
+        self.pet_task_manager = pet_task_manager
         # SmartReader 缓存：连续读同一文档时复用实例，避免重复 open
         # key = doc_id（前 8 位前缀），value = (reader, opened_doc_id)
         self._reader_cache: Dict[str, Tuple[Any, str]] = {}

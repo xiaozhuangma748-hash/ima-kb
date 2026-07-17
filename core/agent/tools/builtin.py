@@ -28,6 +28,13 @@ __all__ = [
     "ReadTool",
     "ReadMultiArgs",
     "ReadMultiTool",
+    "PetInteractArgs",
+    "PetInteractTool",
+    "PetStatusTool",
+    "PetManageArgs",
+    "PetManageTool",
+    "PetShopArgs",
+    "PetShopTool",
 ]
 
 
@@ -439,3 +446,378 @@ class AnalyzeTool(Tool):
             )
         except Exception as e:
             return f"分析失败: {e}"
+
+
+# ============================================================
+# 7. pet_interact — 与虚拟宠物互动（喂食/玩耍/训练/洗澡/睡觉）
+# ============================================================
+
+class PetInteractArgs(BaseModel):
+    action: str
+
+
+@register_tool
+@dataclass
+class PetInteractTool(Tool):
+    """与虚拟宠物互动，真正更新宠物状态（饱食/心情/能量/清洁）。
+
+    依赖 ToolContext 中的 pet / pet_interactor / pet_storage（由 REPL 注入）。
+    未注入时返回未启用提示，Agent 不会"嘴上喂"。
+    """
+    name: str = "pet_interact"
+    description: str = "与虚拟宠物互动（喂食/玩耍/训练/洗澡/睡觉/恢复能量），真正更新宠物状态"
+    args_schema: Optional[Type[BaseModel]] = PetInteractArgs
+    prompt_block: str = (
+        'pet_interact — 与虚拟宠物互动（喂食/玩耍/训练/洗澡/睡觉/恢复能量）\n'
+        '   {"tool": "pet_interact", "args": "feed"}             # 喂食：+30 饱食\n'
+        '   {"tool": "pet_interact", "args": "play"}             # 玩耍：+40 心情\n'
+        '   {"tool": "pet_interact", "args": "train"}            # 训练：+50 经验\n'
+        '   {"tool": "pet_interact", "args": "wash"}             # 洗澡：+50 清洁\n'
+        '   {"tool": "pet_interact", "args": "sleep"}            # 睡觉：+50 能量（1h 冷却）\n'
+        '   {"tool": "pet_interact", "args": "restore_energy"}   # 智能恢复能量（优先道具，否则 sleep）\n'
+        '   当用户要求"喂宠物/给宠物食物/陪宠物玩/清洁宠物/加能量"等时使用此工具'
+    )
+
+    _VALID_ACTIONS = ("feed", "play", "train", "wash", "sleep", "restore_energy")
+
+    def _parse_args_str(self, args_str: str) -> Tuple[Dict[str, Any], Optional[str]]:
+        action = args_str.strip().lower()
+        if not action:
+            return {}, "[错误] 请指定动作: feed/play/train/wash/sleep/restore_energy"
+        if action not in self._VALID_ACTIONS:
+            return {}, f"[错误] 未知动作: {action}，可选: {', '.join(self._VALID_ACTIONS)}"
+        return {"action": action}, None
+
+    def execute(self, context: Optional[ToolContext] = None, *, action: str, **_: Any) -> str:
+        # 依赖检查：未注入 pet 时返回明确提示，避免 LLM 误以为已执行
+        if context is None or context.pet is None or context.pet_interactor is None:
+            return "[未启用] 当前会话未加载宠物，无法互动。请用 /pet adopt 领养后再试。"
+        pet = context.pet
+        interactor = context.pet_interactor
+        try:
+            # restore_energy 走智能路由：优先道具，否则 sleep
+            if action == "restore_energy":
+                return self._restore_energy(context, pet, interactor)
+
+            method = getattr(interactor, action)
+            result = method(pet)
+            # 持久化保存（与 _pet_interact CLI 路径保持一致）
+            if context.pet_storage is not None:
+                context.pet_storage.save(pet)
+            # 返回状态摘要，便于 LLM 在最终答案中给出真实数值
+            return (
+                f"{result['message']}\n"
+                f"当前状态：饱食 {pet.hunger}/100，心情 {pet.mood}/100，"
+                f"能量 {pet.energy}/100，清洁 {pet.cleanliness}/100"
+            )
+        except Exception as e:
+            return f"[互动失败] {type(e).__name__}: {e}"
+
+    def _restore_energy(self, context: ToolContext, pet: Any, interactor: Any) -> str:
+        """智能恢复能量：优先用 energy_drink 道具，否则 sleep，都失败则提示购买。"""
+        # 能量已满
+        if pet.energy >= 100:
+            return f"{pet.name} 能量已满（{pet.energy}/100），无需恢复"
+
+        # 策略 1：检查背包是否有 energy_drink
+        has_drink = any(
+            slot.get("item_id") == "energy_drink" and slot.get("count", 0) > 0
+            for slot in pet.inventory
+        )
+        if has_drink and context.pet_shop is not None:
+            try:
+                result = context.pet_shop.use(pet, "energy_drink")
+                if context.pet_storage is not None:
+                    context.pet_storage.save(pet)
+                return (
+                    f"{result['message']}（用了能量饮料，无冷却）\n"
+                    f"当前能量 {pet.energy}/100"
+                )
+            except Exception as e:
+                # 道具失败降级到 sleep
+                pass
+
+        # 策略 2：尝试 sleep
+        try:
+            result = interactor.sleep(pet)
+            if context.pet_storage is not None:
+                context.pet_storage.save(pet)
+            return (
+                f"{result['message']}\n"
+                f"当前能量 {pet.energy}/100"
+            )
+        except Exception as sleep_err:
+            # 策略 3：sleep 冷却中，提示去商店
+            return (
+                f"[恢复失败] {sleep_err}\n"
+                f"提示：可用 pet_shop 工具购买 energy_drink（100 经验），"
+                f"无冷却立即恢复 50 能量"
+            )
+
+
+# ============================================================
+# 8. pet_status — 查询宠物完整状态
+# ============================================================
+
+@register_tool
+@dataclass
+class PetStatusTool(Tool):
+    """查询宠物完整状态：属性、等级经验、分系、道具栏、每日任务进度。
+
+    解决"宠物能量还有吗"/"宠物状态怎么样"等查询类问题，
+    返回真实数据而非让 LLM 编造。
+    """
+    name: str = "pet_status"
+    description: str = "查询宠物完整状态（属性/等级/经验/道具栏/任务进度）"
+    args_schema: Optional[Type[BaseModel]] = None
+    prompt_block: str = (
+        'pet_status — 查询宠物完整状态\n'
+        '   {"tool": "pet_status", "args": ""}\n'
+        '   返回：饱食/心情/能量/清洁/等级/经验/分系/道具栏/今日任务进度\n'
+        '   当用户问"宠物能量还有吗/状态怎么样/有什么道具"时使用'
+    )
+
+    def _parse_args_str(self, args_str: str) -> Tuple[Dict[str, Any], Optional[str]]:
+        # 无参数工具
+        return {}, None
+
+    def execute(self, context: Optional[ToolContext] = None, **_: Any) -> str:
+        if context is None or context.pet is None:
+            return "[未启用] 当前会话未加载宠物。请用 /pet adopt 领养后再试。"
+        pet = context.pet
+        branch_label = {"scholar": "学者", "warrior": "战士", "artisan": "工匠"}.get(
+            pet.branch or "", "未分系"
+        )
+
+        # 基础属性
+        lines = [
+            f"宠物：{pet.name}（Lv{pet.level} {branch_label}）",
+            f"属性：饱食 {pet.hunger}/100，心情 {pet.mood}/100，"
+            f"能量 {pet.energy}/100，清洁 {pet.cleanliness}/100",
+            f"经验：{pet.exp}/{pet.exp_needed()}" + (
+                f"（距离 Lv{pet.level + 1} 还需 {pet.exp_remaining()}）"
+                if pet.level < 10 else "（已达最高级）"
+            ),
+        ]
+
+        # 道具栏
+        if pet.inventory:
+            inv_desc = ", ".join(
+                f"{slot.get('item_id', '?')}×{slot.get('count', 0)}"
+                for slot in pet.inventory
+            )
+            lines.append(f"道具栏：{inv_desc}")
+        else:
+            lines.append("道具栏：空")
+
+        # 每日任务进度
+        if context.pet_task_manager is not None and pet.daily_tasks:
+            task_lines = []
+            for t in pet.daily_tasks:
+                status = "✓" if t.get("completed") else f"{t.get('progress', 0)}/{t.get('target', 0)}"
+                task_lines.append(f"  - {t.get('description', '?')} [{status}] +{t.get('reward', 0)}")
+            lines.append("今日任务：\n" + "\n".join(task_lines))
+
+        # 限时效果
+        if pet.active_effects:
+            effects_desc = ", ".join(
+                f"{e.get('effect', '?')}" for e in pet.active_effects
+            )
+            lines.append(f"限时效果：{effects_desc}")
+
+        return "\n".join(lines)
+
+
+# ============================================================
+# 9. pet_manage — 宠物管理（改名/切换人格/重置）
+# ============================================================
+
+class PetManageArgs(BaseModel):
+    action: str
+    value: str = ""
+
+
+@register_tool
+@dataclass
+class PetManageTool(Tool):
+    """宠物管理操作：改名、切换人格风格、重置统计/效果。
+
+    action 取值：
+    - rename <新名字>      改名
+    - style <scholar|warrior|artisan|auto>  切换人格风格
+    - reset_stats          清空行为统计（重新分系判定）
+    - reset_effects        清空所有限时效果
+    """
+    name: str = "pet_manage"
+    description: str = "宠物管理（改名/切换人格/重置统计/清空效果）"
+    args_schema: Optional[Type[BaseModel]] = PetManageArgs
+    prompt_block: str = (
+        'pet_manage — 宠物管理（改名/切换人格/重置）\n'
+        '   {"tool": "pet_manage", "args": "rename 小白"}          # 改名\n'
+        '   {"tool": "pet_manage", "args": "style scholar"}        # 切换学者风格\n'
+        '   {"tool": "pet_manage", "args": "reset_stats"}          # 清空行为统计\n'
+        '   {"tool": "pet_manage", "args": "reset_effects"}        # 清空限时效果'
+    )
+
+    _VALID_ACTIONS = ("rename", "style", "reset_stats", "reset_effects")
+    _VALID_STYLES = ("scholar", "warrior", "artisan", "auto")
+
+    def _parse_args_str(self, args_str: str) -> Tuple[Dict[str, Any], Optional[str]]:
+        parts = args_str.strip().split(None, 1)
+        if not parts or not parts[0]:
+            return {}, "[错误] 用法: rename <名字> | style <风格> | reset_stats | reset_effects"
+        action = parts[0].lower()
+        value = parts[1].strip() if len(parts) > 1 else ""
+        if action not in self._VALID_ACTIONS:
+            return {}, f"[错误] 未知操作: {action}，可选: {', '.join(self._VALID_ACTIONS)}"
+        return {"action": action, "value": value}, None
+
+    def execute(
+        self,
+        context: Optional[ToolContext] = None,
+        *,
+        action: str,
+        value: str = "",
+        **_: Any,
+    ) -> str:
+        if context is None or context.pet is None:
+            return "[未启用] 当前会话未加载宠物。"
+        pet = context.pet
+
+        try:
+            if action == "rename":
+                if not value:
+                    return "[错误] 改名需要新名字：rename <新名字>"
+                old = pet.name
+                pet.name = value
+                if context.pet_storage is not None:
+                    context.pet_storage.save(pet)
+                return f"✓ {old} 改名为 {value}"
+
+            elif action == "style":
+                if not value or value not in self._VALID_STYLES:
+                    return f"[错误] 风格可选: {', '.join(self._VALID_STYLES)}"
+                # 切换人格风格需要写入 memory_store（与 _pet_style 一致）
+                # Agent 工具层只更新 pet.branch，profile 持久化交由调用方
+                # 这里返回提示，让用户用 /pet style 命令持久化
+                return (
+                    f"提示：人格风格切换需用 /pet style {value} 命令持久化到 profile。"
+                    f"当前 pet.branch={pet.branch or '未分系'}。"
+                )
+
+            elif action == "reset_stats":
+                pet.reset_stats()
+                if context.pet_storage is not None:
+                    context.pet_storage.save(pet)
+                return "✓ 已清空行为统计（等级/经验/属性保留）"
+
+            elif action == "reset_effects":
+                count = pet.clear_active_effects()
+                if context.pet_storage is not None:
+                    context.pet_storage.save(pet)
+                return f"✓ 已清空 {count} 个限时效果"
+
+            else:
+                return f"[错误] 未知操作: {action}"
+
+        except Exception as e:
+            return f"[管理失败] {type(e).__name__}: {e}"
+
+
+# ============================================================
+# 10. pet_shop — 商店操作（查看/购买/使用道具）
+# ============================================================
+
+class PetShopArgs(BaseModel):
+    action: str
+    item_id: str = ""
+
+
+@register_tool
+@dataclass
+class PetShopTool(Tool):
+    """宠物商店：查看道具列表、购买道具、使用道具。
+
+    action 取值：
+    - list                 列出商店所有道具
+    - buy <item_id>        购买道具（消耗经验）
+    - use <item_id>        使用道具（应用效果）
+    """
+    name: str = "pet_shop"
+    description: str = "宠物商店（查看/购买/使用道具）"
+    args_schema: Optional[Type[BaseModel]] = PetShopArgs
+    prompt_block: str = (
+        'pet_shop — 宠物商店（查看/购买/使用道具）\n'
+        '   {"tool": "pet_shop", "args": "list"}              # 查看商店\n'
+        '   {"tool": "pet_shop", "args": "buy fish"}          # 购买小鱼干\n'
+        '   {"tool": "pet_shop", "args": "use fish"}          # 使用小鱼干'
+    )
+
+    _VALID_ACTIONS = ("list", "buy", "use")
+
+    def _parse_args_str(self, args_str: str) -> Tuple[Dict[str, Any], Optional[str]]:
+        parts = args_str.strip().split(None, 1)
+        if not parts or not parts[0]:
+            return {}, "[错误] 用法: list | buy <id> | use <id>"
+        action = parts[0].lower()
+        item_id = parts[1].strip() if len(parts) > 1 else ""
+        if action not in self._VALID_ACTIONS:
+            return {}, f"[错误] 未知操作: {action}，可选: {', '.join(self._VALID_ACTIONS)}"
+        return {"action": action, "item_id": item_id}, None
+
+    def execute(
+        self,
+        context: Optional[ToolContext] = None,
+        *,
+        action: str,
+        item_id: str = "",
+        **_: Any,
+    ) -> str:
+        # list 不需要 pet，但 buy/use 需要
+        if action == "list":
+            shop = context.pet_shop if context else None
+            if shop is None:
+                # 降级：直接读静态 ITEMS 定义
+                from core.pet.shop import ITEMS
+                lines = ["道具商店："]
+                for item in ITEMS:
+                    lines.append(f"  {item['id']}  {item['name']}  {item['price']}经验")
+                return "\n".join(lines)
+            items = shop.list_items()
+            lines = ["道具商店："]
+            for item in items:
+                lines.append(f"  {item['id']}  {item['name']}  {item['price']}经验")
+            return "\n".join(lines)
+
+        if context is None or context.pet is None or context.pet_shop is None:
+            return "[未启用] 当前会话未加载宠物或商店。"
+
+        pet = context.pet
+        shop = context.pet_shop
+
+        try:
+            if action == "buy":
+                if not item_id:
+                    return "[错误] 购买需要道具ID：buy <item_id>"
+                result = shop.buy(pet, item_id)
+                if context.pet_storage is not None:
+                    context.pet_storage.save(pet)
+                return result["message"] + f"（剩余经验 {pet.exp}）"
+
+            elif action == "use":
+                if not item_id:
+                    return "[错误] 使用需要道具ID：use <item_id>"
+                result = shop.use(pet, item_id)
+                if context.pet_storage is not None:
+                    context.pet_storage.save(pet)
+                return (
+                    f"{result['message']}\n"
+                    f"当前状态：饱食 {pet.hunger}/100，心情 {pet.mood}/100，"
+                    f"能量 {pet.energy}/100，清洁 {pet.cleanliness}/100"
+                )
+
+            else:
+                return f"[错误] 未知操作: {action}"
+
+        except Exception as e:
+            return f"[商店操作失败] {type(e).__name__}: {e}"

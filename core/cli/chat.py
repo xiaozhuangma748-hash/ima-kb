@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Optional
 
 from rich.live import Live
 from rich.spinner import Spinner
@@ -23,6 +24,114 @@ from core.qa.chain import RAGChain
 from core.pet.administrator import AnswerResult
 from core.cli.constants import console
 from core.cli.welcome import _record_activity
+
+
+# 宠物互动意图识别：自然语言 → 互动动作
+# 命中后短路到 _pet_interact，避免 LLM "嘴上喂" 但状态不变
+_PET_INTENT_RULES = [
+    # (action, 中文关键词, 英文关键词)
+    ("feed",   ("喂", "喂食", "喂养", "吃的", "吃东西", "加食物", "加粮", "投喂", "饱食"), ("feed",)),
+    ("play",   ("玩", "玩耍", "陪玩", "逗", "互动一下", "游戏"), ("play",)),
+    ("wash",   ("洗", "洗澡", "清洁", "清理", "打扫", "清扫", "卫生"), ("wash", "clean")),
+    ("train",  ("训练", "练习", "学习"), ("train",)),
+    ("sleep",  ("睡", "睡觉", "休息", "歇", "歇会", "睡一会", "睡一会儿"), ("sleep", "rest")),
+    # 恢复能量：智能路由（优先道具，否则 sleep），不走 PetInteractor 直接方法
+    ("restore_energy", ("加能量", "补充能量", "恢复能量", "能量加", "充能", "回能",
+                         "加一下能量", "能量加上", "补能量", "回血"), ()),
+]
+
+# 宠物状态查询关键词：命中后返回真实状态，而非让 LLM 编造
+_PET_QUERY_KEYWORDS = (
+    "能量", "饱食", "心情", "清洁", "状态", "等级", "经验", "属性",
+    "怎么样", "还好吗", "还有吗", "多少", "进度", "任务",
+    "道具栏", "有什么道具", "有什么东西", "背包",
+    "lv", "level",
+)
+
+# 宠物改名关键词：用正则提取新名字
+_PET_RENAME_KEYWORDS = ("改名", "名字改成", "叫", "重新命名", "改名叫")
+
+
+def _detect_pet_intent(text: str) -> Optional[str]:
+    """识别自然语言中的宠物互动意图。
+
+    Returns:
+        命中的动作名 (feed/play/wash/train/sleep)，未命中返回 None
+    """
+    t = text.strip().lower()
+    if not t or len(t) > 60:
+        # 过长输入多半是正经问答，不走宠物短路
+        return None
+    # 去掉前导"帮我"/"请"/"给"等口语词，避免误判
+    stripped = t
+    for prefix in ("帮我", "请", "给", "麻烦", "能不能", "可以", "帮"):
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix):]
+    stripped = stripped.strip()
+    if not stripped:
+        return None
+    for action, cn_words, en_words in _PET_INTENT_RULES:
+        for w in cn_words:
+            if w in stripped:
+                return action
+        for w in en_words:
+            if w in stripped.split():
+                return action
+    return None
+
+
+def _is_pet_query(text: str) -> bool:
+    """识别宠物状态查询意图（如"宠物能量还有吗"）。
+
+    与 _detect_pet_intent 互补：互动意图走短路执行，
+    查询意图走返回真实状态。
+    """
+    t = text.strip().lower()
+    if not t or len(t) > 80:
+        return False
+    # 必须同时包含"宠物"或宠物名字相关线索，避免误判普通问句
+    has_pet_marker = any(k in t for k in ("宠物", "它", "小林", "小黑", "小白"))
+    # 但"宠物能量/状态"这种直接问法也算
+    has_query_kw = any(k in t for k in _PET_QUERY_KEYWORDS)
+    return has_pet_marker and has_query_kw
+
+
+def _extract_rename_target(text: str) -> Optional[str]:
+    """从"给宠物改名叫小白"等句子中提取新名字。
+
+    支持的句式：
+    - 改名叫XX / 改名XX
+    - 名字改成XX / 名字改为XX
+    - 叫XX（前文需有"宠物"上下文）
+
+    Returns:
+        新名字字符串，未命中返回 None
+    """
+    import re
+    t = text.strip()
+    if not t or len(t) > 60:
+        return None
+    # 必须包含"宠物"上下文，否则"我叫张三"这种也会误判
+    if "宠物" not in t and "它" not in t:
+        return None
+
+    # 优先匹配"改名叫XX""改名XX""名字改成XX""名字改为XX"
+    patterns = [
+        r"改名叫(.+?)$",
+        r"改名(.+?)$",
+        r"名字改成(.+?)$",
+        r"名字改为(.+?)$",
+        r"重新命名(?:为|叫)?(.+?)$",
+    ]
+    for pat in patterns:
+        m = re.search(pat, t)
+        if m:
+            name = m.group(1).strip()
+            # 去掉末尾标点
+            name = name.rstrip("。.!！?？了啊")
+            if 1 <= len(name) <= 12:
+                return name
+    return None
 
 
 class ChatMixin:
@@ -79,6 +188,29 @@ class ChatMixin:
 
     def _handle_chat(self, user_input: str) -> None:
         """AI 对话（带多轮历史 + RAG 检索 + Spinner 动画）。"""
+        # 宠物互动意图短路：用户说"帮我喂一下宠物"等自然语言时，
+        # 直接调 _pet_interact 真正更新状态，避免 LLM "嘴上喂"但状态不变
+        if self.pet is not None:
+            intent = _detect_pet_intent(user_input)
+            if intent is not None:
+                # restore_energy 走智能路由（优先道具，否则 sleep）
+                if intent == "restore_energy":
+                    self._pet_restore_energy()
+                    return
+                self._pet_interact(intent)
+                return
+
+            # 改名意图：正则提取新名字后调 _pet_rename
+            new_name = _extract_rename_target(user_input)
+            if new_name is not None:
+                self._pet_rename(new_name)
+                return
+
+            # 状态查询意图：返回真实状态，避免 LLM 编造
+            if _is_pet_query(user_input):
+                self._pet_answer_query()
+                return
+
         if not self.llm_available:
             console.print("[red]LLM 未配置，无法问答[/red]")
             console.print("[dim]请在 .env 中设置 AGNES_API_KEY[/dim]")

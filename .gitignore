@@ -39,3 +39,6 @@ storage/models/
 *.log
 logs/
 
+# ===== 视觉伴侣 mockup =====
+.superpowers/
+

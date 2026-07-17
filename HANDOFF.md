@@ -1,7 +1,7 @@
 # IMA 个人知识库 · 项目交接文档
 
 > 本文档供下一次会话快速理解项目状态，便于继续开发。
-> 最后更新：2026-07-17（Agent 后处理补全：LaTeX 清理 + 语义缓存 + 引用规范）
+> 最后更新：2026-07-17（宠物对话接入：自然语言短路 + Agent 工具 + 智能恢复能量路由）
 
 ---
 
@@ -75,6 +75,7 @@
 - ✅ **Agent 工具系统优化**（search 接入 HybridRetriever 复用 P0-P5 全套 RAG；SmartReader FIFO 缓存；list_docs tag 筛选+分页；get_doc 前缀匹配；read_multi 1000 字；Tool Registry + Schema 校验）
 - ✅ **Agent 后处理补全**（最终答案 LaTeX 清理 + 答案级语义缓存独立 agent_cache.db + 引用规范禁止 [n] 标记 + 引用检测警告）
 - ✅ **Show Thoughts 打字机效果**（thought 内容逐字显示 15ms/字符 + spinner 持续动画 + L 形树状连接符）
+- ✅ **宠物对话接入**（自然语言"帮我喂一下宠物/加能量/改名叫XX/状态怎么样"直接短路到真实状态更新，避免 LLM "嘴上喂"；新增 4 个 Agent 工具 pet_interact/pet_status/pet_manage/pet_shop；智能恢复能量路由：优先 energy_drink 道具 → 降级 sleep → 提示购买）
 
 ---
 

@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from config import settings
 from core.llm.client import get_llm, LLMError
@@ -89,7 +89,15 @@ class Agent:
     MAX_CONTEXT_LEN = 6000       # 上下文最大总长度（超出压缩）
     MAX_SAME_TOOL_CALLS = 3      # 同一工具最大调用次数（超出警告）
 
-    def __init__(self, storage: Optional[Storage] = None) -> None:
+    def __init__(
+        self,
+        storage: Optional[Storage] = None,
+        pet: Optional[Any] = None,
+        pet_interactor: Optional[Any] = None,
+        pet_storage: Optional[Any] = None,
+        pet_shop: Optional[Any] = None,
+        pet_task_manager: Optional[Any] = None,
+    ) -> None:
         if not settings.has_llm():
             raise LLMError("LLM 未配置，Agent 模式需要 AGNES_API_KEY")
         self.llm = get_llm()
@@ -104,6 +112,11 @@ class Agent:
             storage=self.storage,
             llm=self.llm,
             hybrid_retriever=hybrid,
+            pet=pet,
+            pet_interactor=pet_interactor,
+            pet_storage=pet_storage,
+            pet_shop=pet_shop,
+            pet_task_manager=pet_task_manager,
         )
         self._system_prompt = self._registry.build_system_prompt()
 

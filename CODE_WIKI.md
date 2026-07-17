@@ -1685,6 +1685,82 @@ class PetStorage:
 
 > ⚠️ `save` 方法未使用原子写入（与 `MemoryStore.save` 不同），存在崩溃时数据损坏风险。
 
+#### 6.8.7 宠物对话接入（自然语言 → 真实状态更新）
+
+##### 涉及文件
+
+| 文件 | 角色 |
+|---|---|
+| [core/cli/chat.py](core/cli/chat.py) | `_handle_chat` 入口的意图识别短路层 |
+| [core/cli/commands/pet.py](core/cli/commands/pet.py) | PetMixin 扩展（`_pet_answer_query` / `_pet_restore_energy`） |
+| [core/agent/tools/builtin.py](core/agent/tools/builtin.py) | Agent 工具层（`PetInteractTool` / `PetStatusTool` / `PetManageTool` / `PetShopTool`） |
+| [core/agent/tools/base.py](core/agent/tools/base.py) | `ToolContext` 扩展依赖注入 |
+| [core/agent/agent.py](core/agent/agent.py) | `Agent.__init__` 接收并注入宠物依赖 |
+
+##### 设计动机
+
+早期"帮我喂一下宠物"等自然语言会走 LLM 路径，LLM 凭训练语料"假装喂了"生成文字回复，但 `pet.hunger` 状态不变，`/pet` 查看仍为 0。本次接入让两个对话入口都能真正调用 `PetInteractor` / `Shop` 更新状态并持久化。
+
+##### 直接对话入口：意图识别短路
+
+[`_handle_chat`](core/cli/chat.py) 在进入 LLM 流程前做三层意图识别：
+
+1. **互动意图**（`_detect_pet_intent`）：关键词匹配 → `_pet_interact(action)`
+2. **改名意图**（`_extract_rename_target`）：正则提取新名字 → `_pet_rename(name)`
+3. **查询意图**（`_is_pet_query`）：返回真实状态 → `_pet_answer_query()`
+
+意图规则（`_PET_INTENT_RULES`）：
+
+| action | 中文关键词 |
+|---|---|
+| `feed` | 喂 / 喂食 / 投喂 / 加粮 / 饱食 |
+| `play` | 玩 / 陪玩 / 逗 / 游戏 |
+| `wash` | 洗 / 洗澡 / 清洁 / 打扫 / 卫生 |
+| `train` | 训练 / 练习 |
+| `sleep` | 睡 / 休息 / 歇会 |
+| `restore_energy` | 加能量 / 补充能量 / 充能 / 回血 |
+
+> `restore_energy` 是智能路由动作，不走 `PetInteractor` 直接方法，详见下文。
+
+##### 智能恢复能量（`_pet_restore_energy`）
+
+[core/cli/commands/pet.py](core/cli/commands/pet.py) 新增 `_pet_restore_energy` 方法，三级降级策略：
+
+1. **优先用 `energy_drink` 道具**（无冷却，立即 +50）
+2. **降级到 `sleep`**（+50，但 1h 冷却）
+3. **sleep 冷却中** → 提示用户用 `/pet buy energy_drink` 购买
+
+避免能量低时被 `SLEEP_COOLDOWN_SECONDS = 3600` 卡住无法恢复。
+
+##### Agent 工具入口
+
+新增 4 个工具，让 `/agent` 模式也能管理宠物：
+
+| 工具 | 用途 | 关键方法 |
+|---|---|---|
+| `PetInteractTool` | 5 种互动 + `restore_energy` 智能路由 | `PetInteractor.<action>(pet)` |
+| `PetStatusTool` | 查询完整状态（属性/经验/道具栏/任务/效果） | 直接读 `pet` 字段 |
+| `PetManageTool` | 改名/切换人格/重置统计/清空效果 | `pet.name=` / `pet.reset_stats()` / `pet.clear_active_effects()` |
+| `PetShopTool` | 查看/购买/使用道具 | `Shop.list_items()` / `Shop.buy()` / `Shop.use()` |
+
+所有工具：
+- 依赖通过 `ToolContext` 注入（`pet` / `pet_interactor` / `pet_storage` / `pet_shop` / `pet_task_manager`）
+- 未注入依赖时返回 `[未启用]` 提示，避免 LLM 误以为已执行
+- 状态变更后调用 `pet_storage.save(pet)` 持久化
+- 返回带真实数值的摘要，便于 LLM 在最终答案中给出准确数据
+
+##### 依赖注入链
+
+```
+REPL（持有 pet/pet_interactor/pet_storage/shop/task_manager）
+  ↓ /agent 或 /smart 命令
+Agent(pet=..., pet_interactor=..., pet_storage=..., pet_shop=..., pet_task_manager=...)
+  ↓ 构造
+ToolContext(pet=..., pet_interactor=..., pet_storage=..., pet_shop=..., pet_task_manager=...)
+  ↓ 工具 execute(context=ctx)
+真正调用 PetInteractor / Shop / pet 方法
+```
+
 ### 6.9 知识图谱
 
 #### 6.9.1 实体关系抽取

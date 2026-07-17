@@ -142,6 +142,98 @@ class PetMixin:
         except InteractError as e:
             console.print(f"[yellow]{e}[/yellow]")
 
+    def _pet_restore_energy(self) -> None:
+        """智能恢复能量（被 _handle_chat 意图识别调用）。
+
+        路由策略：
+        1. 优先用背包里的 energy_drink（无冷却，立即 +50）
+        2. 否则尝试 sleep（+50，但 1h 冷却）
+        3. sleep 冷却中 → 提示用户去商店购买能量饮料
+        """
+        if self.pet is None:
+            console.print("[yellow]还没有宠物，/pet adopt 领养[/yellow]")
+            return
+        pet = self.pet
+
+        # 能量已满无需恢复
+        if pet.energy >= 100:
+            console.print(f"[green]{pet.name} 能量已满（{pet.energy}/100），无需恢复[/green]")
+            return
+
+        # 策略 1：检查背包是否有 energy_drink
+        has_drink = any(
+            slot.get("item_id") == "energy_drink" and slot.get("count", 0) > 0
+            for slot in pet.inventory
+        )
+        if has_drink:
+            try:
+                result = self.shop.use(pet, "energy_drink")
+                self.pet_storage.save(pet)
+                console.print(f"[green]{result['message']}（用了能量饮料）[/green]")
+                console.print(f"[dim]当前能量 {pet.energy}/100[/dim]")
+                return
+            except Exception as e:
+                # 道具使用失败，降级到 sleep
+                console.print(f"[dim]能量饮料使用失败：{e}，尝试睡觉...[/dim]")
+
+        # 策略 2：尝试 sleep
+        try:
+            result = self.pet_interactor.sleep(pet)
+            self.pet_storage.save(pet)
+            console.print(f"[green]{result['message']}[/green]")
+            console.print(f"[dim]当前能量 {pet.energy}/100[/dim]")
+        except InteractError as e:
+            # 策略 3：sleep 冷却中，提示去商店
+            console.print(f"[yellow]{e}[/yellow]")
+            console.print(
+                f"[dim]提示：可用 /pet buy energy_drink 购买能量饮料（100 经验），"
+                f"无冷却立即恢复 50 能量[/dim]"
+            )
+
+    def _pet_answer_query(self) -> None:
+        """以对话形式回答宠物状态查询（被 _handle_chat 意图识别调用）。
+
+        与 _pet_show_status 不同：本方法用自然语言回答而非面板，
+        让用户在直接对话中感觉"宠物在回答自己的状态"。
+        """
+        if self.pet is None:
+            console.print("[yellow]还没有宠物，/pet adopt 领养[/yellow]")
+            return
+        p = self.pet
+        branch_label = {"scholar": "学者", "warrior": "战士", "artisan": "工匠"}.get(
+            p.branch or "", "未分系"
+        )
+        # 头像标识行（与 _handle_chat 流式输出一致）
+        avatar = {"scholar": "[O]", "warrior": "[W]", "artisan": "[A]"}.get(p.branch, "[?]")
+        color = {"scholar": "cyan", "warrior": "red", "artisan": "yellow"}.get(p.branch, "white")
+        console.print(f"[{color}]{avatar}[/{color}] [bold magenta]{p.name}[/bold magenta]")
+        console.print()
+
+        # 用自然语言描述状态，让回答更有温度
+        lines = [
+            f"我是 {p.name}（Lv{p.level} {branch_label}），当前状态：",
+            f"- 饱食 {p.hunger}/100",
+            f"- 心情 {p.mood}/100",
+            f"- 能量 {p.energy}/100",
+            f"- 清洁 {p.cleanliness}/100",
+            f"- 经验 {p.exp}/{p.exp_needed()}" + (
+                f"（距离 Lv{p.level + 1} 还需 {p.exp_remaining()}）"
+                if p.level < 10 else "（已达最高级）"
+            ),
+        ]
+        # 道具栏
+        if p.inventory:
+            inv_desc = "、".join(
+                f"{slot.get('item_id', '?')}×{slot.get('count', 0)}"
+                for slot in p.inventory
+            )
+            lines.append(f"- 道具栏：{inv_desc}")
+        else:
+            lines.append("- 道具栏：空")
+
+        console.print("\n".join(lines))
+        console.print()
+
     def _pet_rename(self, new_name: str) -> None:
         """改名。"""
         if self.pet is None:
