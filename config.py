@@ -72,6 +72,9 @@ class Settings:
     summary_max_chars: int = field(default_factory=lambda: int(_get_env("SUMMARY_MAX_CHARS", "500")))
     # 是否启用历史感知检索（用 summary 扩展 query 提升多轮对话召回率）
     history_aware_retrieval: bool = field(default_factory=lambda: _get_env("HISTORY_AWARE_RETRIEVAL", "1") == "1")
+    # 是否启用跨会话记忆自动提取（每轮 QA 后调用 LLM 提取关键事实）
+    # 关闭后 /cross 手动管理仍可用，且不会触发额外 LLM 调用
+    enable_cross_session_extract: bool = field(default_factory=lambda: _get_env("ENABLE_CROSS_SESSION_EXTRACT", "1") == "1")
 
     # ---- Reranker ----
     # 重排序器类型：cross_encoder（专用模型，推荐）/ llm（LLM prompt 打分）/ none

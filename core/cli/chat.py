@@ -228,6 +228,66 @@ class ChatMixin:
         except Exception:
             pass
 
+    def _print_context_hint(self) -> None:
+        """根据会话累计长度，提示用户是否需要新建会话。
+
+        由于 _compress_history() 触发后 history 会被截断到 window 条，
+        不能靠 len(self.history) 判断总轮数。我们依赖：
+        - self._max_rounds_seen：本会话中压缩前见过的最大轮数
+        - self._compressions_count：触发过几次压缩
+
+        提示策略：
+        - 首次触发压缩后，下一轮提示一次
+        - 之后每累计新增 10 轮提示一次
+        """
+        try:
+            max_rounds = getattr(self, "_max_rounds_seen", 0)
+            compressions = getattr(self, "_compressions_count", 0)
+            if max_rounds == 0 or compressions == 0:
+                return
+
+            window = settings.history_window // 2  # 1 轮 = 2 条消息
+            threshold = settings.history_compress_threshold // 2
+
+            # 提示间隔：首次提示后，每新增 10 轮提示一次
+            hint_interval = 10
+            first_hint_at = threshold + 1
+            if max_rounds < first_hint_at:
+                return
+            if (max_rounds - first_hint_at) % hint_interval != 0:
+                return
+
+            from rich.panel import Panel
+            from rich.text import Text
+
+            if max_rounds >= threshold * 2:
+                title = "✻ 会话已较长"
+                body_text = (
+                    f"累计 [bold]{max_rounds}[/bold] 轮对话，早期上下文已转为摘要。\n"
+                    f"继续对话可能遗漏细节，建议执行 [bold yellow]/session new[/bold yellow] 开启新会话。"
+                )
+                border_style = "yellow"
+            else:
+                title = "✻ 上下文已压缩"
+                body_text = (
+                    f"当前保留最近 [bold]{window}[/bold] 轮原文，更早的对话已转为摘要。\n"
+                    f"若换话题，建议执行 [bold cyan]/session new[/bold cyan] 新建会话。"
+                )
+                border_style = "cyan"
+
+            panel = Panel(
+                Text.from_markup(body_text),
+                title=title,
+                title_align="left",
+                border_style=border_style,
+                padding=(1, 2),
+            )
+            console.print()
+            console.print(panel)
+            console.print()
+        except Exception:
+            pass
+
     def _handle_chat(self, user_input: str) -> None:
         """AI 对话（带多轮历史 + RAG 检索 + Spinner 动画）。"""
         # 宠物互动意图短路：用户说"帮我喂一下宠物"等自然语言时，
@@ -384,6 +444,7 @@ class ChatMixin:
                     # history 超过阈值时触发滚动摘要压缩，保留最近 window 条原文
                     if len(self.history) > settings.history_compress_threshold:
                         self._compress_history()
+                        self._print_context_hint()
                     # 记忆持久化 + 工作流记录
                     if self.memory_store is not None:
                         try:
@@ -539,6 +600,7 @@ class ChatMixin:
         self.history.append({"role": "assistant", "content": assistant_content})
         if len(self.history) > settings.history_compress_threshold:
             self._compress_history()
+            self._print_context_hint()
 
         # 宠物经验 + 能量
         self._pet_gain_exp(10, "qa")
@@ -561,7 +623,9 @@ class ChatMixin:
 
         失败静默降级，不影响主流程。
         """
-        # 前置条件：跨会话记忆可用 + LLM 可用
+        # 前置条件：开关开启 + 跨会话记忆可用 + LLM 可用
+        if not settings.enable_cross_session_extract:
+            return
         if getattr(self, 'cross_session_memory', None) is None:
             console.print("[dim]! 记忆提取跳过: cross_session_memory 未初始化[/dim]")
             return
@@ -576,6 +640,21 @@ class ChatMixin:
             llm = get_llm()
             extractor = MemoryExtractor(llm=llm, memory=self.cross_session_memory)
             added = extractor.extract_and_merge(user_input, assistant_reply)
+
+            # 同步新增关键事实到 SQLite（JSON 仍保留全量记忆，SQLite 用于检索/引用）
+            new_facts = added.get("facts", [])
+            if new_facts and getattr(self, 'storage', None) is not None:
+                try:
+                    session_name = getattr(self, 'active_session_name', '') or ''
+                    source = f"QA: {user_input[:40]}"
+                    for fact in new_facts:
+                        self.storage.add_key_fact(
+                            fact=fact,
+                            session=session_name,
+                            source=source,
+                        )
+                except Exception:
+                    pass  # SQLite 写入失败不应影响主流程
 
             # 详细反馈：显示新增的记忆
             new_items: list[str] = []
@@ -610,6 +689,13 @@ class ChatMixin:
         window = settings.history_window
         if len(self.history) <= threshold:
             return
+
+        # 记录压缩前的最大轮数（用于后续提示用户新建会话）
+        current_rounds = len(self.history) // 2
+        if current_rounds > getattr(self, "_max_rounds_seen", 0):
+            self._max_rounds_seen = current_rounds
+        # 记录压缩次数
+        self._compressions_count = getattr(self, "_compressions_count", 0) + 1
 
         # 早期对话（要被摘要的部分）
         old_messages = self.history[:-window]

@@ -643,6 +643,17 @@ class MemoryMixin:
                 console.print(f"[green]✓ 问题已记录: {content}[/green]")
             elif category == "fact":
                 cm.add_key_fact(content)
+                # 同步到 SQLite key_facts 表（JSON 仍保留全量记忆）
+                if getattr(self, 'storage', None) is not None:
+                    try:
+                        session_name = getattr(self, 'active_session_name', '') or ''
+                        self.storage.add_key_fact(
+                            fact=content,
+                            session=session_name,
+                            source="/cross add",
+                        )
+                    except Exception:
+                        pass
                 console.print(f"[green]✓ 事实已记录: {content}[/green]")
             else:
                 console.print(f"[red]未知类别: {category}[/red]  允许: preference / topic / question / fact")
@@ -661,6 +672,15 @@ class MemoryMixin:
 
         elif sub == "clear":
             cm.clear_all()
+            # 同步清空 SQLite 中当前会话的关键事实
+            if getattr(self, 'storage', None) is not None:
+                try:
+                    session_name = getattr(self, 'active_session_name', '') or ''
+                    count = self.storage.clear_key_facts(session=session_name)
+                    if count:
+                        console.print(f"[dim]  已同步清理 {count} 条关键事实记录[/dim]")
+                except Exception:
+                    pass
             console.print("[green]✓ 跨会话记忆已清空[/green]")
 
         else:

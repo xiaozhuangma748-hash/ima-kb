@@ -64,6 +64,17 @@ class ChunkRecord:
     end_char: int
 
 
+@dataclass
+class KeyFactRecord:
+    """跨会话关键事实记录（对应 key_facts 表一行）。"""
+    id: str                        # UUID
+    session: str                   # 所属会话名（空字符串表示全局）
+    fact: str                      # 关键事实文本
+    created_at: str
+    updated_at: str
+    source: str                    # 来源轮次简要说明
+
+
 # ============================================================
 # Storage 主类
 # ============================================================
@@ -145,6 +156,17 @@ class Storage:
                     FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
+
+                CREATE TABLE IF NOT EXISTS key_facts (
+                    id          TEXT PRIMARY KEY,
+                    session     TEXT NOT NULL DEFAULT '',
+                    fact        TEXT NOT NULL,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL,
+                    source      TEXT DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_key_facts_session ON key_facts(session);
+                CREATE INDEX IF NOT EXISTS idx_key_facts_fact ON key_facts(fact);
                 """
             )
             # 迁移：给已存在的 documents 表加 tags 列（SQLite 用 PRAGMA 检测列是否存在）
@@ -844,6 +866,163 @@ class Storage:
                     )
                     affected += 1
         return affected
+
+    # ---- 跨会话关键事实 ----
+
+    def add_key_fact(self, fact: str, session: str = "", source: str = "") -> Optional[str]:
+        """添加一条跨会话关键事实到 SQLite。
+
+        JSON 中的 cross_session.json 仍保留全量记忆；key_facts 表只补充
+        关键事实，便于后续检索、引用和按会话查询。
+
+        Args:
+            fact: 关键事实文本
+            session: 所属会话名（空字符串表示全局）
+            source: 来源轮次简要说明
+
+        Returns:
+            新记录 ID；如果同 session 下已有完全相同的事实则返回已有 ID
+        """
+        fact = fact.strip()
+        if not fact:
+            return None
+        session = (session or "").strip()
+        source = (source or "").strip()
+
+        import uuid
+        now = datetime.now().isoformat()
+
+        with self._conn() as conn:
+            # 同 session 下去重：相同 fact 文本不再新增
+            row = conn.execute(
+                "SELECT id FROM key_facts WHERE session = ? AND fact = ?",
+                (session, fact),
+            ).fetchone()
+            if row:
+                return row["id"]
+
+            fact_id = str(uuid.uuid4())
+            conn.execute(
+                """
+                INSERT INTO key_facts (id, session, fact, created_at, updated_at, source)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (fact_id, session, fact, now, now, source),
+            )
+        return fact_id
+
+    def list_key_facts(
+        self,
+        session: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[KeyFactRecord]:
+        """列出关键事实。
+
+        Args:
+            session: 指定会话名（None 表示不限会话）
+            limit: 最大返回条数
+
+        Returns:
+            KeyFactRecord 列表
+        """
+        with self._conn() as conn:
+            if session is None:
+                rows = conn.execute(
+                    "SELECT * FROM key_facts ORDER BY updated_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM key_facts WHERE session = ? ORDER BY updated_at DESC LIMIT ?",
+                    (session.strip(), limit),
+                ).fetchall()
+        return [
+            KeyFactRecord(
+                id=r["id"],
+                session=r["session"],
+                fact=r["fact"],
+                created_at=r["created_at"],
+                updated_at=r["updated_at"],
+                source=r["source"],
+            )
+            for r in rows
+        ]
+
+    def search_key_facts(
+        self,
+        keyword: str,
+        session: Optional[str] = None,
+        limit: int = 10,
+    ) -> List[KeyFactRecord]:
+        """按关键词搜索关键事实（LIKE 匹配）。
+
+        Args:
+            keyword: 搜索关键词
+            session: 指定会话名（None 表示不限会话）
+            limit: 最大返回条数
+
+        Returns:
+            KeyFactRecord 列表
+        """
+        keyword = keyword.strip()
+        if not keyword:
+            return []
+        pattern = f"%{keyword}%"
+        with self._conn() as conn:
+            if session is None:
+                rows = conn.execute(
+                    "SELECT * FROM key_facts WHERE fact LIKE ? ORDER BY updated_at DESC LIMIT ?",
+                    (pattern, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM key_facts
+                    WHERE session = ? AND fact LIKE ?
+                    ORDER BY updated_at DESC LIMIT ?
+                    """,
+                    (session.strip(), pattern, limit),
+                ).fetchall()
+        return [
+            KeyFactRecord(
+                id=r["id"],
+                session=r["session"],
+                fact=r["fact"],
+                created_at=r["created_at"],
+                updated_at=r["updated_at"],
+                source=r["source"],
+            )
+            for r in rows
+        ]
+
+    def remove_key_fact(self, fact_id: str) -> bool:
+        """删除指定关键事实。
+
+        Args:
+            fact_id: 事实记录 ID
+
+        Returns:
+            True 成功删除 / False 不存在
+        """
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM key_facts WHERE id = ?", (fact_id,))
+            return cur.rowcount > 0
+
+    def clear_key_facts(self, session: Optional[str] = None) -> int:
+        """清空关键事实。
+
+        Args:
+            session: 指定会话名（None 表示清空全部）
+
+        Returns:
+            删除的记录数
+        """
+        with self._conn() as conn:
+            if session is None:
+                cur = conn.execute("DELETE FROM key_facts")
+            else:
+                cur = conn.execute("DELETE FROM key_facts WHERE session = ?", (session.strip(),))
+            return cur.rowcount
 
     def delete_chunk(self, chunk_id: str) -> bool:
         """删除单个 chunk。

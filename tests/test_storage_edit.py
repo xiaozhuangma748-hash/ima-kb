@@ -180,3 +180,84 @@ def test_delete_chunk_nonexistent_returns_false(tmp_path):
     """删除不存在的 chunk 返回 False。"""
     storage = Storage(storage_path=tmp_path)
     assert storage.delete_chunk("nonexistent_chunk") is False
+
+
+# ---- 跨会话关键事实 ----
+
+def test_add_key_fact(tmp_path):
+    """add_key_fact 写入关键事实并返回 ID。"""
+    storage = Storage(storage_path=tmp_path)
+    fact_id = storage.add_key_fact("用户关注殡葬政策", session="test-session")
+    assert fact_id is not None
+    facts = storage.list_key_facts(session="test-session")
+    assert len(facts) == 1
+    assert facts[0].fact == "用户关注殡葬政策"
+    assert facts[0].session == "test-session"
+
+
+def test_add_key_fact_dedup_in_same_session(tmp_path):
+    """同 session 下相同事实去重。"""
+    storage = Storage(storage_path=tmp_path)
+    id1 = storage.add_key_fact("用户关注殡葬政策", session="s1")
+    id2 = storage.add_key_fact("用户关注殡葬政策", session="s1")
+    assert id1 == id2
+    assert len(storage.list_key_facts(session="s1")) == 1
+
+
+def test_add_key_fact_different_session_not_dedup(tmp_path):
+    """不同 session 下相同事实不去重。"""
+    storage = Storage(storage_path=tmp_path)
+    storage.add_key_fact("用户关注殡葬政策", session="s1")
+    storage.add_key_fact("用户关注殡葬政策", session="s2")
+    assert len(storage.list_key_facts()) == 2
+
+
+def test_list_key_facts_by_session(tmp_path):
+    """list_key_facts 可按 session 过滤。"""
+    storage = Storage(storage_path=tmp_path)
+    storage.add_key_fact("事实 A", session="s1")
+    storage.add_key_fact("事实 B", session="s2")
+    storage.add_key_fact("事实 C", session="s1")
+
+    assert len(storage.list_key_facts(session="s1")) == 2
+    assert len(storage.list_key_facts(session="s2")) == 1
+    assert len(storage.list_key_facts()) == 3
+
+
+def test_search_key_facts(tmp_path):
+    """search_key_facts 按关键词搜索。"""
+    storage = Storage(storage_path=tmp_path)
+    storage.add_key_fact("用户关注殡葬政策", session="s1")
+    storage.add_key_fact("用户喜欢表格输出", session="s1")
+    storage.add_key_fact("项目服务于拱墅区", session="s2")
+
+    results = storage.search_key_facts("殡葬", session="s1")
+    assert len(results) == 1
+    assert results[0].fact == "用户关注殡葬政策"
+
+    results = storage.search_key_facts("用户")
+    assert len(results) == 2
+
+
+def test_remove_key_fact(tmp_path):
+    """remove_key_fact 删除指定事实。"""
+    storage = Storage(storage_path=tmp_path)
+    fact_id = storage.add_key_fact("待删除事实", session="s1")
+    assert storage.remove_key_fact(fact_id) is True
+    assert storage.remove_key_fact(fact_id) is False
+    assert len(storage.list_key_facts(session="s1")) == 0
+
+
+def test_clear_key_facts(tmp_path):
+    """clear_key_facts 可按 session 清空。"""
+    storage = Storage(storage_path=tmp_path)
+    storage.add_key_fact("事实 A", session="s1")
+    storage.add_key_fact("事实 B", session="s2")
+    storage.add_key_fact("事实 C", session="s1")
+
+    assert storage.clear_key_facts(session="s1") == 2
+    assert len(storage.list_key_facts(session="s1")) == 0
+    assert len(storage.list_key_facts(session="s2")) == 1
+
+    assert storage.clear_key_facts() == 1
+    assert len(storage.list_key_facts()) == 0
