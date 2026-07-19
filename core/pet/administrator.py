@@ -126,7 +126,7 @@ class PetAdministrator:
                 logger.warning(f"加载今日待办失败: {e}")
 
         # 2. 混合检索
-        candidates = self.hybrid.search(query, top_k=15)
+        candidates = self.hybrid.search(query, top_k=10)
 
         # 3. LLM 重排
         top_sources = self.reranker.rerank(query, candidates, top_n=5)
@@ -288,7 +288,7 @@ class PetAdministrator:
             candidates = []
             yield {"type": "stage", "stage": "检索", "count": 0}
         else:
-            candidates = self.hybrid.search(query, top_k=15)
+            candidates = self.hybrid.search(query, top_k=10)
             yield {"type": "stage", "stage": "检索", "count": len(candidates)}
 
         # 3. LLM 重排（无候选时跳过）

@@ -154,7 +154,13 @@ class REPL(
                 storage=self.storage,
             )
             llm = get_llm() if settings.has_llm() else None
-            reranker = Reranker(llm) if llm else None
+            # 优先使用 Cross-Encoder（本地 bge-reranker-v2-m3，准确且快），
+            # 不可用时降级为 LLM Reranker
+            if llm:
+                from core.retrieval.rerank import create_reranker
+                reranker = create_reranker(llm=llm)
+            else:
+                reranker = None
             if llm and reranker:
                 # 复用 TodoMixin 的 todo_mgr（懒加载的 TodoManager）
                 todo_mgr = getattr(self, "_todo_mgr", None)

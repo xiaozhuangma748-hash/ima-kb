@@ -102,7 +102,10 @@ class _EmbeddingCache:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     def get_batch(self, texts: List[str]) -> Dict[str, List[float]]:
-        """批量获取缓存。返回 {text: embedding} 字典（只含命中的）。"""
+        """批量获取缓存。返回 {text: embedding} 字典（只含命中的）。
+
+        维度校验：跳过维度异常的坏缓存（避免检索失败）。
+        """
         if not texts:
             return {}
         hashes = {self._hash(t): t for t in texts}
@@ -112,7 +115,20 @@ class _EmbeddingCache:
             f"WHERE content_hash IN ({placeholders})",
             list(hashes.keys()),
         ).fetchall()
-        return {hashes[h]: pickle.loads(blob) for h, blob in rows}
+        result = {}
+        for h, blob in rows:
+            try:
+                emb = pickle.loads(blob)
+                # 统一转为 list，并校验维度（bge-small-zh-v1.5 = 512 维）
+                if hasattr(emb, "tolist"):
+                    emb = emb.tolist()
+                if not isinstance(emb, list) or len(emb) < 10:
+                    # 维度异常，跳过坏缓存
+                    continue
+                result[hashes[h]] = emb
+            except Exception:
+                continue
+        return result
 
     def put_batch(self, texts: List[str], embeddings: List[List[float]]) -> None:
         """批量写入缓存。"""
@@ -168,7 +184,7 @@ class VectorIndex:
                 name="ima_chunks",
                 embedding_function=self._embedding_fn,
             )
-            self._cache = _EmbeddingCache(settings.storage_path / "embedding_cache.db")
+            self._cache = _EmbeddingCache(self.storage_path / "embedding_cache.db")
             self._available = True
         except Exception as e:
             logger.warning(f"向量索引初始化失败，降级为纯 BM25: {e}")

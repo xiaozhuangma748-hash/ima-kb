@@ -83,6 +83,20 @@ class CrossEncoderReranker:
         """模型是否加载成功。"""
         return self._available
 
+    def warmup(self) -> None:
+        """预热模型：跑一次 dummy 推理，避免首次查询的 warmup 开销。
+
+        bge-reranker-v2-m3 首次 predict 需要 2-3s 额外的图编译开销，
+        预热后后续 predict 每条约 0.2s。
+        """
+        if not self._available:
+            return
+        try:
+            _ = self._model.predict([("预热", "warmup")])
+            logger.info("Cross-Encoder 预热完成")
+        except Exception as e:
+            logger.warning(f"Cross-Encoder 预热失败: {e}")
+
     def rerank(
         self,
         query: str,

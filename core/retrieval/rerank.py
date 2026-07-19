@@ -230,6 +230,7 @@ def create_reranker(llm: Optional[LLMClient] = None) -> RerankerType:
             from .cross_encoder import CrossEncoderReranker
             ce = CrossEncoderReranker()
             if ce.is_available():
+                ce.warmup()  # 预热，避免首次查询慢
                 logger.info("使用 Cross-Encoder 重排序器（bge-reranker-v2-m3）")
                 return ce
             logger.info("Cross-Encoder 不可用（模型未下载），降级为 LLM Reranker")

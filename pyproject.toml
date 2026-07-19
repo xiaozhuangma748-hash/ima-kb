@@ -31,10 +31,11 @@ dependencies = [
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
     "python-pptx>=0.6.23",
-    "markdown>=3.5.0",
     "trafilatura>=1.8.0",
+    "Pillow>=10.0.0",
     "openai>=1.12.0",
     "httpx>=0.27.0",
+    "requests>=2.31.0",
     "jieba>=0.42.1",
     "python-dotenv>=1.0.0",
     "click>=8.1.0",
@@ -44,13 +45,19 @@ dependencies = [
     "fastapi>=0.110.0",
     "uvicorn>=0.27.0",
     "python-multipart>=0.0.9",
+    # 检索增强（向量检索 + 重排序 + 图谱）
+    "numpy>=1.24.0",
+    "networkx>=3.0",
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
 ]
 
 [project.optional-dependencies]
 # OCR 支持（可选，体积较大）
+# 系统依赖：brew install tesseract tesseract-lang
 ocr = [
     "pytesseract>=0.3.10",
-    # 还需要系统安装 tesseract：brew install tesseract tesseract-lang
+    "paddleocr>=2.7.0",  # PaddleOCR（扫描版 PDF / 图片文字识别）
 ]
 # 开发工具
 dev = [
