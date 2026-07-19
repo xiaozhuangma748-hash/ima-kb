@@ -105,24 +105,34 @@ _NAME_MAP = {
 
 # 帮助文本
 HELP_TEXT = """\
-[bold green]基础[/bold green]
-  /search <关键词>     BM25 智能搜索    /ingest <路径>      入库文件/目录
-  /ask <问题>          AI 问答          /note <文本>        文本直入库
+[bold green]核心[/bold green]
+  /smart <描述>        智能路由           /search <关键词>    BM25 搜索 (/s)
+  /agent <任务>        Agent 多步执行     直接输入问题       AI 问答
+
+[bold green]入库[/bold green]
+  /ingest <路径>       文件/目录入库      /note <文本>        文本直入库
+  /clip                剪贴板入库         /url <链接>         网页入库
 
 [bold green]文档[/bold green]
-  /read <ID>           智能阅读模式     /compare <A> <B>    对比文档
-  /report <ID>         生成分析报告     /agent <文件>       数据表分析
+  /list                列出所有文档       /show <ID>          查看文档详情
+  /read <ID>           智能阅读模式       /compare <A> <B>    对比文档
+  /report <ID>         生成分析报告       /analyze <文件>     数据表分析
+  /delete <ID>         删除文档
+
+[bold green]记忆与个性化[/bold green]
+  /memory              记忆管理           /cross              跨会话记忆
+  /pet                 虚拟宠物           /theme              切换主题
 
 [bold green]系统[/bold green]
-  /stats               知识库统计       /tags              标签管理
-  /memory              记忆管理         /cross             跨会话记忆
-  /health              健康检查         /dedup             去重
+  /stats               知识库统计         /tag                标签管理
+  /health              健康检查           /dedup              去重
+  /sync                增量同步           /session            会话管理
 
-[bold green]高级[/bold green]
-  /agent <任务>        Agent 多步执行   /smart <描述>       智能路由
-  /session <子命令>    会话管理         /pet <子命令>       宠物管理
+[bold green]生成与其他[/bold green]
+  /draw <ID>           基于文档生成配图   /daily              每日知识卡片
+  /pic <描述>          文生图             /todo               每日任务
 
-[dim]示例: /search 骨灰 | /agent 找骨灰安置政策并总结 | /session save[/dim]
+[dim]示例: 杭州火化政策 | /search 骨灰 | /agent 找骨灰安置政策并总结[/dim]
 """
 
 
