@@ -240,7 +240,9 @@ def build_system_prompt(
     prompt += _format_pet_state_warnings(pet)
 
     # 全局输出规范（防止 LLM 自行生成引用列表/来源区块，与系统渲染的"引用溯源"重复）
+    num_sources = len(sources) if sources else 0
     prompt += "\n\n## 输出规范（必须遵守）\n"
+    prompt += f"- 本次检索到 {num_sources} 条资料，引用编号只能用 [1]-[{num_sources}]，禁止使用超出此范围的编号（如 [{num_sources + 1}]）\n"
     prompt += "- 引用只在正文相关位置用 [n] 标注，不要在回答末尾生成\"引用\"、\"引用来源\"、\"参考资料\"等列表\n"
     prompt += "- 引用溯源由系统自动渲染，你不需要重复列出文档标题或编号\n"
     prompt += "- 不要使用 ▌ 等非标准符号，强调内容用 markdown 的 **加粗** 或 > 引用\n"

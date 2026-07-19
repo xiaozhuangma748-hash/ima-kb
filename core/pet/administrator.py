@@ -20,6 +20,7 @@ from core.persona.prompts import build_system_prompt
 from core.llm.client import LLMClient, LLMError
 from core.llm.degrade import get_llm_degrade_message
 from core.todo.manager import TodoManager
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,54 @@ class PetAdministrator:
         # 答案级语义缓存（与检索层 hybrid.cache 互补：这里缓存完整 LLM 答案）
         self._answer_cache = SemanticCache(threshold=0.92, ttl=1800, max_size=200)
 
+    def _expand_query_with_context(
+        self,
+        query: str,
+        summary: Optional[str] = None,
+        history: Optional[List[Dict]] = None,
+    ) -> str:
+        """历史感知的查询扩展：用会话摘要补全当前问题的隐含上下文。
+
+        策略：
+        - 如果有 summary 且 query 较短（<=15 字），把摘要前 80 字附加到 query
+          （短问题往往省略主语，需要摘要补全主题）
+        - 如果有最近一轮 assistant 回答，提取其前 60 字作为上下文
+        - 不修改原 query 的关键词，只附加上下文（避免污染 BM25）
+
+        Args:
+            query: 用户当前问题
+            summary: 早期对话摘要
+            history: 最近对话历史
+
+        Returns:
+            扩展后的 query（可能等于原 query）
+        """
+        try:
+            if not settings.history_aware_retrieval:
+                return query
+            # 提取最近一轮 assistant 回答作为即时上下文
+            last_assistant_snippet = ""
+            if history:
+                for msg in reversed(history):
+                    if msg.get("role") == "assistant":
+                        last_assistant_snippet = (msg.get("content") or "")[:60]
+                        break
+            # 主题摘要（取前 80 字，避免 query 过长）
+            summary_snippet = ""
+            if summary:
+                summary_snippet = summary.strip().replace("\n", " ")[:80]
+            # 只对短查询做扩展（长查询本身已包含足够上下文）
+            if len(query.strip()) > 15:
+                return query
+            parts = [query]
+            if summary_snippet:
+                parts.append(f"（话题：{summary_snippet}）")
+            elif last_assistant_snippet:
+                parts.append(f"（上文：{last_assistant_snippet}）")
+            return " ".join(parts) if len(parts) > 1 else query
+        except Exception:
+            return query
+
     def ask(self, query: str, style_override: Optional[str] = None,
             history: Optional[List[Dict]] = None,
             summary: Optional[str] = None,
@@ -125,8 +174,9 @@ class PetAdministrator:
             except Exception as e:
                 logger.warning(f"加载今日待办失败: {e}")
 
-        # 2. 混合检索
-        candidates = self.hybrid.search(query, top_k=10)
+        # 2. 混合检索（历史感知：用 summary 扩展 query，提升多轮对话召回率）
+        search_query = self._expand_query_with_context(query, summary=summary, history=history)
+        candidates = self.hybrid.search(search_query, top_k=10)
 
         # 3. LLM 重排
         top_sources = self.reranker.rerank(query, candidates, top_n=5)
@@ -200,7 +250,9 @@ class PetAdministrator:
             else:
                 answer_text = get_llm_degrade_message(error=e, has_sources=False)
 
-        # 7. 提取引用
+        # 7. 提取引用（提取前先清理越界 [n] 标记，确保正文与引用列表一致）
+        from core.retrieval.citation import sanitize_outbound_citations
+        answer_text = sanitize_outbound_citations(answer_text, len(top_sources))
         try:
             citations = extract_citations(answer_text, sources_dict)
         except Exception as e:
@@ -288,7 +340,9 @@ class PetAdministrator:
             candidates = []
             yield {"type": "stage", "stage": "检索", "count": 0}
         else:
-            candidates = self.hybrid.search(query, top_k=10)
+            # 历史感知：用 summary 扩展 query，提升多轮对话召回率
+            search_query = self._expand_query_with_context(query, summary=summary, history=history)
+            candidates = self.hybrid.search(search_query, top_k=10)
             yield {"type": "stage", "stage": "检索", "count": len(candidates)}
 
         # 3. LLM 重排（无候选时跳过）
@@ -350,6 +404,8 @@ class PetAdministrator:
         messages.extend(recent_history)
         messages.append({"role": "user", "content": query})
         answer_text = ""
+        # 通知 REPL 参考资料数量，用于流式实时清理越界 [n] 引用标记
+        yield {"type": "source_count", "count": len(top_sources)}
         try:
             for token in self.llm.chat_stream(
                 messages=messages,
@@ -371,7 +427,9 @@ class PetAdministrator:
                 answer_text = get_llm_degrade_message(error=e, has_sources=False)
             yield {"type": "token", "text": answer_text}
 
-        # 7. 提取引用
+        # 7. 提取引用（提取前先清理越界 [n] 标记，确保正文与引用列表一致）
+        from core.retrieval.citation import sanitize_outbound_citations
+        answer_text = sanitize_outbound_citations(answer_text, len(top_sources))
         try:
             citations = extract_citations(answer_text, sources_dict)
         except Exception as e:

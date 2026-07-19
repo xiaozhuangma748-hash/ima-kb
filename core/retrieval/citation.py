@@ -49,3 +49,26 @@ def extract_citations(answer: str, sources: List[dict]) -> List[Citation]:
             snippet=src["snippet"],
         ))
     return citations
+
+
+def sanitize_outbound_citations(text: str, num_sources: int) -> str:
+    """删除越界的 [n] 引用标记。
+
+    LLM 幻觉可能生成 [3] 但实际只有 1 条资料，此时 [3] 是越界标记，
+    需要从正文删除，否则用户看到 [3] 却在引用列表找不到对应条目。
+
+    Args:
+        text: 原始文本
+        num_sources: 参考资料总数（合法编号 1..num_sources）
+
+    Returns:
+        清理后的文本（越界 [n] 被删除）
+    """
+    if num_sources <= 0 or not text:
+        return text
+
+    def _replacer(m: "re.Match[str]") -> str:
+        n = int(m.group(1))
+        return m.group(0) if 1 <= n <= num_sources else ""
+
+    return re.sub(r"\[(\d{1,3})\]", _replacer, text)

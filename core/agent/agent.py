@@ -133,6 +133,21 @@ class Agent:
             logger.warning(f"Agent 语义缓存初始化失败，跳过缓存: {e}")
             self._answer_cache = None
 
+        # 本次 run() 内所有 LLM 调用的累计 token 使用量
+        self._total_usage = {"input": 0, "output": 0, "total": 0}
+
+    def _accumulate_usage(self) -> None:
+        """累加最近一次 LLM 调用的 token 使用量到 _total_usage。"""
+        try:
+            u = getattr(self.llm, "last_usage", None)
+            if not u:
+                return
+            self._total_usage["input"] += u.get("input", 0)
+            self._total_usage["output"] += u.get("output", 0)
+            self._total_usage["total"] += u.get("total", 0)
+        except Exception:
+            pass
+
     def _build_hybrid_retriever(self):
         """构造 HybridRetriever，失败时回退到 None（search 工具降级用 BM25）。"""
         try:
@@ -279,6 +294,7 @@ class Agent:
 
             try:
                 reply = self.llm.chat(messages, temperature=0.3, max_tokens=self.MAX_TOKENS)
+                self._accumulate_usage()
             except LLMError as e:
                 if on_step:
                     on_step("error", f"LLM 调用失败: {e}")
@@ -379,6 +395,7 @@ class Agent:
             ),
         })
         summary = self.llm.chat(messages, temperature=0.3, max_tokens=self.MAX_TOKENS)
+        self._accumulate_usage()
         # P1-1: LaTeX 清理 + P2-2: 引用标记检测
         summary = _sanitize_latex(summary)
         summary += _check_citation_markers(summary)

@@ -374,7 +374,7 @@ def _render_pet_compact(pet: "Pet") -> tuple:
     branch_label = {"scholar": "学者", "warrior": "战士", "artisan": "工匠"}.get(pet.branch, "未分系")
     color = {"scholar": "cyan", "warrior": "red", "artisan": "yellow"}.get(pet.branch, "white")
     # 单行 Emoji 头像（按系别）
-    avatar = {"scholar": "[O]", "warrior": "[W]", "artisan": "[A]"}.get(pet.branch, "[?]")
+    avatar = {"scholar": "✻", "warrior": "✦", "artisan": "✼"}.get(pet.branch, "✺")
     line1 = Text.from_markup(
         f"  [{color}]{avatar}[/{color}] [bold magenta]{pet.name}[/bold magenta] "
         f"[dim]Lv{pet.level} {branch_label}[/dim]"
@@ -421,7 +421,7 @@ def _render_pet_compact(pet: "Pet") -> tuple:
 def _render_pet_empty_compact() -> tuple:
     """未领养宠物的占位（2 行）。"""
     return (
-        Text.from_markup("  [?][bold magenta]虚拟宠物[/bold magenta] [dim]/pet adopt 领养[/dim]"),
+        Text.from_markup("  [dim]✺[/dim] [bold magenta]虚拟宠物[/bold magenta] [dim]/pet adopt 领养[/dim]"),
         Text(""),  # 空行占位
     )
 

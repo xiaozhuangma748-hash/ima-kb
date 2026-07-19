@@ -24,6 +24,7 @@ from core.qa.chain import RAGChain
 from core.pet.administrator import AnswerResult
 from core.cli.constants import console
 from core.cli.welcome import _record_activity
+from config import settings
 
 
 # 宠物互动意图识别：自然语言 → 互动动作
@@ -186,6 +187,47 @@ class ChatMixin:
 
         return text
 
+    @staticmethod
+    def _sanitize_citations(text: str, num_sources: int) -> str:
+        """清理越界的 [n] 引用标记。
+
+        LLM 幻觉可能生成 [3] 但实际只有 1 条资料，调用 sanitize_outbound_citations
+        删除越界标记，保证正文编号与引用列表一致。
+        """
+        if num_sources <= 0 or not text:
+            return text
+        from core.retrieval.citation import sanitize_outbound_citations
+        return sanitize_outbound_citations(text, num_sources)
+
+    def _print_token_usage(self, llm_obj=None) -> None:
+        """打印最近一次 LLM 调用的 token 使用量。
+
+        Args:
+            llm_obj: LLM 客户端实例。未传时优先用 self.administrator.llm，
+                    再回退到 self.rag.llm（RAGChain 降级路径）
+        """
+        try:
+            if llm_obj is None:
+                llm_obj = getattr(self, "administrator", None)
+                if llm_obj is not None:
+                    llm_obj = getattr(llm_obj, "llm", None)
+                if llm_obj is None:
+                    rag = getattr(self, "rag", None)
+                    if rag is not None:
+                        llm_obj = getattr(rag, "llm", None)
+            if llm_obj is None:
+                return
+            usage = getattr(llm_obj, "last_usage", None)
+            if not usage:
+                return
+            console.print(
+                f"[dim]tokens: input={usage.get('input', 0)} "
+                f"output={usage.get('output', 0)} "
+                f"total={usage.get('total', 0)}[/dim]"
+            )
+        except Exception:
+            pass
+
     def _handle_chat(self, user_input: str) -> None:
         """AI 对话（带多轮历史 + RAG 检索 + Spinner 动画）。"""
         # 宠物互动意图短路：用户说"帮我喂一下宠物"等自然语言时，
@@ -256,6 +298,9 @@ class ChatMixin:
                             console=console, transient=True, refresh_per_second=10,
                         )
                         live.start()
+                    elif event["type"] == "source_count":
+                        # 记录参考资料数量，供 token 流式清理越界 [n] 引用标记使用
+                        self._source_count = event.get("count", 0)
                     elif event["type"] == "token":
                         # 逐 token 输出 — 首次 token 前停掉 spinner 并启动 Live
                         if not getattr(self, "_stream_started", False):
@@ -267,7 +312,7 @@ class ChatMixin:
                             self._stream_started = True
                             # 打印 AI 标识行（与降级路径一致，避免用户输入和回答紧贴）
                             if self.pet is not None:
-                                avatar = {"scholar": "[O]", "warrior": "[W]", "artisan": "[A]"}.get(self.pet.branch, "[?]")
+                                avatar = {"scholar": "✻", "warrior": "✦", "artisan": "✼"}.get(self.pet.branch, "✺")
                                 color = {"scholar": "cyan", "warrior": "red", "artisan": "yellow"}.get(self.pet.branch, "white")
                                 console.print(f"[{color}]{avatar}[/{color}] [bold magenta]{self.pet.name}[/bold magenta]")
                             else:
@@ -286,8 +331,11 @@ class ChatMixin:
                             self._stream_text = ""
                         self._stream_text += event["text"]
                         # 用 Markdown 实时渲染（表格、标题、列表等格式正确显示）
-                        # 同时清理 LLM 可能生成的 LaTeX 公式语法，保证终端可读
+                        # 同时清理 LLM 可能生成的 LaTeX 公式语法和越界 [n] 引用标记
                         sanitized = self._sanitize_latex(self._stream_text)
+                        sanitized = self._sanitize_citations(
+                            sanitized, getattr(self, "_source_count", 0)
+                        )
                         self._stream_live.update(Markdown(sanitized))
                     elif event["type"] == "done":
                         # 收尾：停掉残留 spinner 和 Live（无 token 的极端情况）
@@ -319,10 +367,8 @@ class ChatMixin:
                     if _think_time is not None:
                         console.print(f"[dim]Thinking {_think_time:.1f}s[/dim]")
                     console.print(f"[dim]Total {_total:.1f}s[/dim]")
-                    # token 使用量（非 debug 模式也显示）
-                    if hasattr(self, 'administrator') and self.administrator and hasattr(self.administrator.llm, 'last_usage') and self.administrator.llm.last_usage:
-                        u = self.administrator.llm.last_usage
-                        console.print(f"[dim]tokens: input={u.get('input', 0)} output={u.get('output', 0)} total={u.get('total', 0)}[/dim]")
+                    # token 使用量（统一通过 _print_token_usage 输出）
+                    self._print_token_usage()
                     # debug 诊断信息
                     if os.environ.get("IMA_DEBUG"):
                         import time as _time
@@ -335,8 +381,8 @@ class ChatMixin:
                     # 保存到对话历史（修复 /session save 无法保存 bug）
                     self.history.append({"role": "user", "content": user_input})
                     self.history.append({"role": "assistant", "content": result.text})
-                    # history 超过 20 条时触发摘要压缩，保留最近 10 条原文
-                    if len(self.history) > 20:
+                    # history 超过阈值时触发滚动摘要压缩，保留最近 window 条原文
+                    if len(self.history) > settings.history_compress_threshold:
                         self._compress_history()
                     # 记忆持久化 + 工作流记录
                     if self.memory_store is not None:
@@ -413,8 +459,8 @@ class ChatMixin:
             console.print("[yellow]! 知识库中没有相关资料，尝试基于通用知识回答[/yellow]\n")
             # 退化为纯对话（带多轮上下文）
             try:
-                # 构建带历史的 messages
-                recent_history = (self.history or [])[-10:]
+                # 构建带历史的 messages（窗口大小由 settings.history_window 控制）
+                recent_history = (self.history or [])[-settings.history_window:]
                 messages = list(recent_history) + [{"role": "user", "content": user_input}]
                 # 注入跨会话记忆
                 _cross_ctx2 = None
@@ -448,6 +494,8 @@ class ChatMixin:
                 _total = _time.time() - _t0
                 console.print(f"[dim]Thinking {_think_time:.1f}s[/dim]")
                 console.print(f"[dim]Total {_total:.1f}s[/dim]")
+                # token 使用量（纯对话降级路径，直接读 LLM 客户端）
+                self._print_token_usage()
             except LLMError:
                 console.print("[yellow]（AI 暂时无法回答）[/yellow]\n")
                 return
@@ -459,6 +507,8 @@ class ChatMixin:
             _total = _time.time() - _t0
             console.print(f"[dim]Thinking {_think_time:.1f}s[/dim]")
             console.print(f"[dim]Total {_total:.1f}s[/dim]")
+            # token 使用量（RAGChain 同步路径，读 self.rag.llm）
+            self._print_token_usage()
             assistant_content = answer.content
 
         # 显示引用来源
@@ -487,7 +537,7 @@ class ChatMixin:
         # 保存历史
         self.history.append({"role": "user", "content": user_input})
         self.history.append({"role": "assistant", "content": assistant_content})
-        if len(self.history) > 20:
+        if len(self.history) > settings.history_compress_threshold:
             self._compress_history()
 
         # 宠物经验 + 能量
@@ -549,18 +599,22 @@ class ChatMixin:
             console.print(f"[dim]! 记忆提取失败: {e}[/dim]")
 
     def _compress_history(self) -> None:
-        """当 history 超过 20 条时，压缩早期对话为摘要。
+        """当 history 超过阈值时，压缩早期对话为滚动摘要。
 
-        - 保留最近 10 条原文（5 轮）
+        - 阈值由 settings.history_compress_threshold 控制（默认 24）
+        - 保留最近 settings.history_window 条原文（默认 16，8 轮）
         - 对前 N 条生成增量摘要（基于已有 summary + 早期对话）
         - 摘要失败则简单截断，不影响主流程
         """
-        if len(self.history) <= 20:
+        threshold = settings.history_compress_threshold
+        window = settings.history_window
+        if len(self.history) <= threshold:
             return
 
         # 早期对话（要被摘要的部分）
-        old_messages = self.history[:-10]
-        recent_messages = self.history[-10:]
+        old_messages = self.history[:-window]
+        recent_messages = self.history[-window:]
+        max_chars = settings.summary_max_chars
 
         # 构建摘要 prompt（增量：基于旧 summary + 新早期对话）
         if self.conversation_summary:
@@ -572,7 +626,7 @@ class ChatMixin:
                 "3. 保留未解决的问题或待办事项\n"
                 "4. 保留提到的具体文档名/政策名/人名/地名\n"
                 "5. 用第三人称，简洁条目式\n"
-                "6. 不超过 500 字\n\n"
+                f"6. 不超过 {max_chars} 字\n\n"
                 f"已有摘要：\n{self.conversation_summary}\n\n"
                 "新对话内容：\n"
             )
@@ -585,7 +639,7 @@ class ChatMixin:
                 "3. 保留未解决的问题或待办事项\n"
                 "4. 保留提到的具体文档名/政策名/人名/地名\n"
                 "5. 用第三人称，简洁条目式\n"
-                "6. 不超过 500 字\n\n"
+                f"6. 不超过 {max_chars} 字\n\n"
                 "对话内容：\n"
             )
 
@@ -601,13 +655,13 @@ class ChatMixin:
             summary = self.administrator.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=500,
+                max_tokens=max_chars,
             )
             self.conversation_summary = summary.strip()
             self.history = recent_messages
         except Exception:
-            # 摘要失败则简单截断，保留最近 20 条
-            self.history = self.history[-20:]
+            # 摘要失败则简单截断，保留最近 window 条
+            self.history = self.history[-window:]
 
     def _render_answer(self, result: AnswerResult) -> None:
         """渲染带引用的管理员回答：宠物头像标题 + Markdown 回答面板 + 引用溯源 + 经验提示。"""
@@ -615,7 +669,7 @@ class ChatMixin:
 
         # 宠物头像标题栏（带系别标签）
         if self.pet is not None:
-            avatar = {"scholar": "[O]", "warrior": "[W]", "artisan": "[A]"}.get(self.pet.branch, "[?]")
+            avatar = {"scholar": "✻", "warrior": "✦", "artisan": "✼"}.get(self.pet.branch, "✺")
             color = {"scholar": "cyan", "warrior": "red", "artisan": "yellow"}.get(self.pet.branch, "white")
             branch_label = {"scholar": "学者", "warrior": "战士", "artisan": "工匠"}.get(self.pet.branch, "")
             branch_tag = f" · {branch_label}" if branch_label else ""
@@ -715,6 +769,9 @@ class ChatMixin:
             # 推荐下一步（基于历史模式）
             suggestion = self.workflow_tracker.suggest_next(cmd)
             if suggestion:
+                # suggest_next 返回的命令名可能带前导斜杠（与 record_command 入参一致），
+                # 统一去掉前导斜杠后再做 friendly 映射或拼接，避免出现 "//agent" 的双斜杠
+                normalized = suggestion.lstrip("/")
                 friendly = {
                     "qa": "输入问题进行 AI 问答",
                     "search": "/search 搜索文档",
@@ -726,7 +783,7 @@ class ChatMixin:
                     "summarize": "/summarize 生成摘要",
                     "daily": "/daily 生成知识卡片",
                     "draw": "/draw 配图",
-                }.get(suggestion, f"/{suggestion}")
+                }.get(normalized, f"/{normalized}")
                 console.print(f"[dim]接下来可以试试: {friendly}[/dim]")
                 console.print()
         except Exception:

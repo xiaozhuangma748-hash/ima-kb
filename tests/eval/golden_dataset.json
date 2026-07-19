@@ -1,9 +1,10 @@
 {
-  "version": "1.0",
+  "version": "2.0",
   "created_at": "2026-07-16",
-  "description": "殡葬知识库检索评测集。每个问题标注期望命中的文档关键词/标题片段，用于 Recall@k 和 MRR 评估。",
+  "updated_at": "2026-07-19",
+  "description": "殡葬知识库检索评测集。每个问题标注期望命中的文档关键词/标题片段，用于 Recall@k 和 MRR 评估。v2.0 扩充至 100 题，新增同义改写、跨文档推理、反例诱导、hard 难度等场景。",
   "evaluator_note": "expected_doc_keywords 是 chunk content 中应出现的关键词（任一命中即算 hit）；expected_doc_titles_containing 是文档标题应包含的子串（任一命中即算 hit）。两个条件是 OR 关系，任一满足即视为检索正确。",
-  "categories": ["definition", "policy", "process", "fee", "subsidy", "time", "location", "comparison"],
+  "categories": ["definition", "policy", "process", "fee", "subsidy", "time", "location", "comparison", "paraphrase", "cross_doc", "negative"],
   "questions": [
     {
       "id": "q001",
@@ -319,6 +320,591 @@
       "expected_doc_titles_containing": ["免费"],
       "reference_answer": "适用于杭州市区符合条件的逝者",
       "difficulty": "medium"
+    },
+    {
+      "id": "q036",
+      "question": "骨灰撒海怎么办理？",
+      "category": "paraphrase",
+      "expected_doc_keywords": ["海葬", "骨灰", "撒海", "办理"],
+      "expected_doc_titles_containing": ["节地生态安葬", "海葬"],
+      "reference_answer": "同义改写：海葬=骨灰撒海，需申请登记后统一出海撒放",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q037",
+      "question": "亲人过世后骨灰埋树下是什么葬法？",
+      "category": "paraphrase",
+      "expected_doc_keywords": ["树葬", "骨灰", "树", "安葬"],
+      "expected_doc_titles_containing": ["节地生态安葬", "树葬"],
+      "reference_answer": "同义改写：树葬=骨灰埋树下",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q038",
+      "question": "杭州市民去世后能享受哪些免费殡葬服务？",
+      "category": "paraphrase",
+      "expected_doc_keywords": ["殡葬基本服务", "免费", "遗体接运", "遗体火化"],
+      "expected_doc_titles_containing": ["免费", "殡葬基本服务"],
+      "reference_answer": "同义改写：去世后免费殡葬服务=殡葬基本服务免费政策",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q039",
+      "question": "给逝者办身后事需要跑几个部门？",
+      "category": "paraphrase",
+      "expected_doc_keywords": ["身后一件事", "联办", "部门"],
+      "expected_doc_titles_containing": ["身后", "一件事"],
+      "reference_answer": "同义改写：身后事=身后一件事，多部门联办",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q040",
+      "question": "节地安葬政府给多少钱奖励？",
+      "category": "paraphrase",
+      "expected_doc_keywords": ["节地", "安葬", "奖补", "金额"],
+      "expected_doc_titles_containing": ["节地生态安葬", "奖补"],
+      "reference_answer": "同义改写：奖励=奖补",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q041",
+      "question": "哪几个区公布了殡葬改革实施方案？",
+      "category": "cross_doc",
+      "expected_doc_keywords": ["滨江区", "萧山区", "钱塘区", "临平区", "余杭区"],
+      "expected_doc_titles_containing": ["实施方案"],
+      "reference_answer": "跨文档聚合：滨江区、萧山区、钱塘区、临平区、余杭区等均有实施方案",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q042",
+      "question": "杭州市有哪些针对逝者家属的补助政策？",
+      "category": "cross_doc",
+      "expected_doc_keywords": ["丧葬补助金", "抚恤金", "奖补", "免费"],
+      "expected_doc_titles_containing": ["补助", "抚恤金", "免费", "奖补"],
+      "reference_answer": "跨文档聚合：丧葬补助金、抚恤金、节地生态安葬奖补、基本服务免费",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q043",
+      "question": "退伍军人和机关工作人员死亡后分别享受什么待遇？",
+      "category": "cross_doc",
+      "expected_doc_keywords": ["退伍", "军人", "国家机关", "工作人员", "抚恤金"],
+      "expected_doc_titles_containing": ["退伍军人", "国家机关", "抚恤金"],
+      "reference_answer": "跨文档对比：退伍军人一次性抚恤金；机关工作人员一次性抚恤金按工资发放",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q044",
+      "question": "浙江省殡葬改革涉及哪几个层级政府？",
+      "category": "cross_doc",
+      "expected_doc_keywords": ["浙江省", "杭州市", "滨江区", "钱塘区", "萧山区"],
+      "expected_doc_titles_containing": ["浙江省", "实施方案", "管理条例"],
+      "reference_answer": "跨文档聚合：省、市、区三级",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q045",
+      "question": "哪些文件提到了骨灰处理方式？",
+      "category": "cross_doc",
+      "expected_doc_keywords": ["骨灰", "海葬", "树葬", "寄存"],
+      "expected_doc_titles_containing": ["节地生态安葬", "管理条例", "实施方案"],
+      "reference_answer": "跨文档聚合：节地生态安葬通知、殡葬管理条例、各区实施方案",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q046",
+      "question": "火化需要花多少钱？",
+      "category": "negative",
+      "expected_doc_keywords": ["火化", "免费", "收费"],
+      "expected_doc_titles_containing": ["免费", "收费"],
+      "reference_answer": "反例诱导：知识库只有'基本服务免费'，没有'火化单独收费标准'",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q047",
+      "question": "买一块墓地多少钱？",
+      "category": "negative",
+      "expected_doc_keywords": ["公墓", "收费", "价格"],
+      "expected_doc_titles_containing": ["公墓", "收费"],
+      "reference_answer": "反例诱导：知识库只有公墓管理办法，没有墓地售价信息",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q048",
+      "question": "殡仪馆联系电话是多少？",
+      "category": "negative",
+      "expected_doc_keywords": ["殡仪馆", "电话", "联系"],
+      "expected_doc_titles_containing": ["殡仪馆", "热线"],
+      "reference_answer": "反例诱导：知识库只有白事服务热线，没有具体殡仪馆电话",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q049",
+      "question": "杭州冬天平均气温多少？",
+      "category": "negative",
+      "expected_doc_keywords": [],
+      "expected_doc_titles_containing": [],
+      "reference_answer": "反例诱导：完全无关问题，应返回低置信度或资料不足",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q050",
+      "question": "骨灰钻石制作价格？",
+      "category": "negative",
+      "expected_doc_keywords": [],
+      "expected_doc_titles_containing": [],
+      "reference_answer": "反例诱导：知识库无骨灰钻石相关内容",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q051",
+      "question": "遗体冷藏超过多少天要收费？",
+      "category": "fee",
+      "expected_doc_keywords": ["遗体冷藏", "免费", "收费", "期限"],
+      "expected_doc_titles_containing": ["免费", "收费"],
+      "reference_answer": "边界题：免费有期限，超期收费",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q052",
+      "question": "骨灰寄存免费期是多久？",
+      "category": "time",
+      "expected_doc_keywords": ["骨灰", "寄存", "免费", "期限"],
+      "expected_doc_titles_containing": ["免费"],
+      "reference_answer": "时间题：骨灰寄存有免费期",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q053",
+      "question": "节地生态安葬奖补需要提交什么材料？",
+      "category": "process",
+      "expected_doc_keywords": ["奖补", "申请", "材料", "节地"],
+      "expected_doc_titles_containing": ["节地生态安葬", "奖补"],
+      "reference_answer": "流程题：奖补申请所需材料",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q054",
+      "question": "滨江区公墓审批由哪个部门负责？",
+      "category": "policy",
+      "expected_doc_keywords": ["滨江区", "公墓", "审批", "部门"],
+      "expected_doc_titles_containing": ["滨江区", "公墓"],
+      "reference_answer": "政策题：公墓审批主体",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q055",
+      "question": "身后一件事联办包含哪些事项？",
+      "category": "policy",
+      "expected_doc_keywords": ["身后一件事", "联办", "事项", "注销"],
+      "expected_doc_titles_containing": ["身后", "一件事"],
+      "reference_answer": "政策题：联办事项清单（户口注销、社保结算等）",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q056",
+      "question": "拱墅区殡仪服务机构监管要求有哪些？",
+      "category": "policy",
+      "expected_doc_keywords": ["拱墅区", "殡仪", "监管", "要求"],
+      "expected_doc_titles_containing": ["拱墅", "监管"],
+      "reference_answer": "政策题：拱墅区监管通知具体要求",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q057",
+      "question": "殡葬管理条例对公墓建设是怎么规定的？",
+      "category": "policy",
+      "expected_doc_keywords": ["殡葬管理条例", "公墓", "建设", "规定"],
+      "expected_doc_titles_containing": ["殡葬管理条例"],
+      "reference_answer": "政策题：国务院条例对公墓建设的规定",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q058",
+      "question": "钱塘区殡葬改革的时间表是什么？",
+      "category": "time",
+      "expected_doc_keywords": ["钱塘区", "殡葬", "时间", "目标"],
+      "expected_doc_titles_containing": ["钱塘区", "实施"],
+      "reference_answer": "时间题：钱塘区改革时间节点",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q059",
+      "question": "浙江省身后一件事实施方案由哪些部门联合印发？",
+      "category": "policy",
+      "expected_doc_keywords": ["浙江省", "身后一件事", "部门", "联合"],
+      "expected_doc_titles_containing": ["身后", "一件事"],
+      "reference_answer": "政策题：12 部门联合印发",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q060",
+      "question": "哪些情况不能享受殡葬基本服务免费？",
+      "category": "policy",
+      "expected_doc_keywords": ["免费", "不符合", "条件", "除外"],
+      "expected_doc_titles_containing": ["免费"],
+      "reference_answer": "边界题：免费政策的排除情形",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q061",
+      "question": "节地生态安葬和树葬是什么关系？",
+      "category": "comparison",
+      "expected_doc_keywords": ["节地", "生态", "树葬"],
+      "expected_doc_titles_containing": ["节地生态安葬"],
+      "reference_answer": "对比题：树葬是节地生态安葬的一种形式",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q062",
+      "question": "海葬、树葬、草坪葬哪种占地最少？",
+      "category": "comparison",
+      "expected_doc_keywords": ["海葬", "树葬", "草坪葬", "占地"],
+      "expected_doc_titles_containing": ["节地生态安葬"],
+      "reference_answer": "对比题：海葬不占地",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q063",
+      "question": "丧葬补助金和抚恤金能同时领取吗？",
+      "category": "comparison",
+      "expected_doc_keywords": ["丧葬补助金", "抚恤金", "同时", "领取"],
+      "expected_doc_titles_containing": ["丧葬补助金", "抚恤金"],
+      "reference_answer": "对比题：两者性质不同，可分别申领",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q064",
+      "question": "滨江区和萧山区的殡葬实施方案有什么不同？",
+      "category": "comparison",
+      "expected_doc_keywords": ["滨江区", "萧山区", "实施方案"],
+      "expected_doc_titles_containing": ["滨江区", "萧山区"],
+      "reference_answer": "对比题：两区实施方案侧重点不同",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q065",
+      "question": "殡葬基本服务免费和节地生态安葬奖补可以叠加吗？",
+      "category": "comparison",
+      "expected_doc_keywords": ["免费", "奖补", "叠加", "节地"],
+      "expected_doc_titles_containing": ["免费", "奖补"],
+      "reference_answer": "对比题：两项政策可叠加享受",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q066",
+      "question": "申请海葬需要满足什么条件？",
+      "category": "process",
+      "expected_doc_keywords": ["海葬", "申请", "条件"],
+      "expected_doc_titles_containing": ["节地生态安葬", "海葬"],
+      "reference_answer": "流程题：海葬申请条件",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q067",
+      "question": "骨灰寄存到期能续期吗？",
+      "category": "process",
+      "expected_doc_keywords": ["骨灰", "寄存", "续期", "到期"],
+      "expected_doc_titles_containing": ["免费", "实施方案"],
+      "reference_answer": "流程题：骨灰寄存续期规定",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q068",
+      "question": "办理身后一件事需要哪些材料？",
+      "category": "process",
+      "expected_doc_keywords": ["身后一件事", "办理", "材料", "死亡证明"],
+      "expected_doc_titles_containing": ["身后", "一件事"],
+      "reference_answer": "流程题：联办所需材料清单",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q069",
+      "question": "白事服务热线能帮家属做什么？",
+      "category": "process",
+      "expected_doc_keywords": ["白事", "服务", "热线", "咨询"],
+      "expected_doc_titles_containing": ["白事", "热线"],
+      "reference_answer": "流程题：热线的具体服务内容",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q070",
+      "question": "殡葬服务办理指南包括哪些流程？",
+      "category": "process",
+      "expected_doc_keywords": ["办理指南", "流程", "服务"],
+      "expected_doc_titles_containing": ["办理指南", "服务办理"],
+      "reference_answer": "流程题：办理指南流程",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q071",
+      "question": "退休人员死亡后家属能拿到什么钱？",
+      "category": "subsidy",
+      "expected_doc_keywords": ["退休", "丧葬费", "抚恤金"],
+      "expected_doc_titles_containing": ["退休", "丧葬费"],
+      "reference_answer": "补助题：丧葬费+抚恤金",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q072",
+      "question": "国家机关工作人员死亡抚恤金按什么标准计算？",
+      "category": "subsidy",
+      "expected_doc_keywords": ["国家机关", "工作人员", "抚恤金", "标准"],
+      "expected_doc_titles_containing": ["国家机关", "抚恤金"],
+      "reference_answer": "补助题：按生前基本工资计发",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q073",
+      "question": "杭州市节地生态安葬奖补金额是多少？",
+      "category": "subsidy",
+      "expected_doc_keywords": ["节地", "生态", "安葬", "奖补", "金额"],
+      "expected_doc_titles_containing": ["节地生态安葬", "奖补"],
+      "reference_answer": "补助题：具体奖补金额",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q074",
+      "question": "丧葬补助金的发放对象是谁？",
+      "category": "subsidy",
+      "expected_doc_keywords": ["丧葬补助金", "发放", "对象", "法定继承人"],
+      "expected_doc_titles_containing": ["丧葬补助金"],
+      "reference_answer": "补助题：法定继承人",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q075",
+      "question": "退伍军人死亡一次性抚恤金怎么算？",
+      "category": "subsidy",
+      "expected_doc_keywords": ["退伍", "军人", "抚恤金", "一次性"],
+      "expected_doc_titles_containing": ["退伍军人"],
+      "reference_answer": "补助题：按相关规定计算",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q076",
+      "question": "殡葬服务收费项目有哪些？",
+      "category": "fee",
+      "expected_doc_keywords": ["殡葬服务", "收费", "项目", "基本服务"],
+      "expected_doc_titles_containing": ["收费"],
+      "reference_answer": "费用题：基本服务+延伸服务",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q077",
+      "question": "遗体接运收费标准是什么？",
+      "category": "fee",
+      "expected_doc_keywords": ["遗体接运", "收费", "免费"],
+      "expected_doc_titles_containing": ["免费", "收费"],
+      "reference_answer": "费用题：基本服务免费，超标准另收",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q078",
+      "question": "骨灰寄存费用怎么算？",
+      "category": "fee",
+      "expected_doc_keywords": ["骨灰", "寄存", "费用", "免费"],
+      "expected_doc_titles_containing": ["免费", "收费"],
+      "reference_answer": "费用题：免费期内免费，超期收费",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q079",
+      "question": "殡仪馆延伸服务包括哪些？",
+      "category": "fee",
+      "expected_doc_keywords": ["延伸服务", "殡仪馆", "收费"],
+      "expected_doc_titles_containing": ["收费", "殡仪馆"],
+      "reference_answer": "费用题：延伸服务项目",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q080",
+      "question": "公墓墓穴占地面积标准是多少？",
+      "category": "definition",
+      "expected_doc_keywords": ["公墓", "墓穴", "面积", "标准"],
+      "expected_doc_titles_containing": ["公墓"],
+      "reference_answer": "定义题：骨灰墓穴面积规定",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q081",
+      "question": "什么是惠民殡葬？",
+      "category": "definition",
+      "expected_doc_keywords": ["惠民", "殡葬", "免费"],
+      "expected_doc_titles_containing": ["免费", "实施方案"],
+      "reference_answer": "定义题：惠民殡葬即基本服务免费等政策",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q082",
+      "question": "什么是公益性公墓？",
+      "category": "definition",
+      "expected_doc_keywords": ["公益性", "公墓", "定义"],
+      "expected_doc_titles_containing": ["公墓", "实施"],
+      "reference_answer": "定义题：公益性公墓定义",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q083",
+      "question": "白事贴心管家是什么？",
+      "category": "definition",
+      "expected_doc_keywords": ["白事", "贴心", "管家"],
+      "expected_doc_titles_containing": ["白事", "贴心", "管家"],
+      "reference_answer": "定义题：白事服务贴心管家介绍",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q084",
+      "question": "殡葬改革的目标是什么？",
+      "category": "definition",
+      "expected_doc_keywords": ["殡葬改革", "目标", "节地", "惠民"],
+      "expected_doc_titles_containing": ["改革", "实施方案"],
+      "reference_answer": "定义题：改革目标",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q085",
+      "question": "萧山区对公益性公墓建设有什么要求？",
+      "category": "policy",
+      "expected_doc_keywords": ["萧山区", "公益性", "公墓", "建设"],
+      "expected_doc_titles_containing": ["萧山区"],
+      "reference_answer": "政策题：萧山区公墓建设要求",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q086",
+      "question": "临平区殡葬实施方案对殡葬设施有什么规定？",
+      "category": "policy",
+      "expected_doc_keywords": ["临平区", "殡葬", "设施", "实施方案"],
+      "expected_doc_titles_containing": ["临平区"],
+      "reference_answer": "政策题：临平区殡葬设施规定",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q087",
+      "question": "余杭区实施方案对节地生态安葬有什么部署？",
+      "category": "policy",
+      "expected_doc_keywords": ["余杭区", "节地", "生态", "安葬"],
+      "expected_doc_titles_containing": ["余杭区"],
+      "reference_answer": "政策题：余杭区节地生态安葬部署",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q088",
+      "question": "钱塘区殡葬改革重点任务是什么？",
+      "category": "policy",
+      "expected_doc_keywords": ["钱塘区", "殡葬", "改革", "任务"],
+      "expected_doc_titles_containing": ["钱塘区"],
+      "reference_answer": "政策题：钱塘区重点任务",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q089",
+      "question": "滨江区公墓管理办法对墓穴使用年限有什么规定？",
+      "category": "time",
+      "expected_doc_keywords": ["滨江区", "公墓", "使用", "年限"],
+      "expected_doc_titles_containing": ["滨江区", "公墓"],
+      "reference_answer": "时间题：墓穴使用年限",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q090",
+      "question": "殡葬管理条例什么时候开始实施？",
+      "category": "time",
+      "expected_doc_keywords": ["殡葬管理条例", "实施", "时间"],
+      "expected_doc_titles_containing": ["殡葬管理条例"],
+      "reference_answer": "时间题：国务院条例实施时间",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q091",
+      "question": "浙江省身后一件事实施方案什么时候印发？",
+      "category": "time",
+      "expected_doc_keywords": ["浙江省", "身后一件事", "印发", "2025"],
+      "expected_doc_titles_containing": ["身后", "一件事"],
+      "reference_answer": "时间题：2025年印发",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q092",
+      "question": "殡葬基本服务免费政策从什么时候开始执行？",
+      "category": "time",
+      "expected_doc_keywords": ["免费", "执行", "时间"],
+      "expected_doc_titles_containing": ["免费"],
+      "reference_answer": "时间题：政策执行起始时间",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q093",
+      "question": "殡葬改革汇报中提到了哪些主要成效？",
+      "category": "policy",
+      "expected_doc_keywords": ["殡葬改革", "汇报", "成效"],
+      "expected_doc_titles_containing": ["殡葬改革", "汇报"],
+      "reference_answer": "政策题：改革主要成效",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q094",
+      "question": "白事服务贴心管家的服务流程是什么？",
+      "category": "process",
+      "expected_doc_keywords": ["白事", "贴心", "管家", "流程"],
+      "expected_doc_titles_containing": ["白事", "贴心", "管家"],
+      "reference_answer": "流程题：贴心管家服务流程",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q095",
+      "question": "政策汇集表包含哪些政策文件？",
+      "category": "policy",
+      "expected_doc_keywords": ["政策", "汇集", "文件"],
+      "expected_doc_titles_containing": ["政策汇集"],
+      "reference_answer": "政策题：汇集表收录文件清单",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q096",
+      "question": "殡仪馆服务管理通知对服务流程有什么要求？",
+      "category": "policy",
+      "expected_doc_keywords": ["殡仪馆", "服务", "管理", "流程"],
+      "expected_doc_titles_containing": ["殡仪馆", "管理"],
+      "reference_answer": "政策题：服务流程要求",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q097",
+      "question": "身后一件事实施后群众需要跑几次窗口？",
+      "category": "process",
+      "expected_doc_keywords": ["身后一件事", "窗口", "联办", "一次"],
+      "expected_doc_titles_containing": ["身后", "一件事"],
+      "reference_answer": "流程题：一窗联办，最多跑一次",
+      "difficulty": "hard"
+    },
+    {
+      "id": "q098",
+      "question": "节地生态安葬奖补政策覆盖哪些安葬形式？",
+      "category": "subsidy",
+      "expected_doc_keywords": ["节地", "生态", "奖补", "海葬", "树葬"],
+      "expected_doc_titles_containing": ["节地生态安葬", "奖补"],
+      "reference_answer": "补助题：海葬、树葬、草坪葬、花坛葬等",
+      "difficulty": "medium"
+    },
+    {
+      "id": "q099",
+      "question": "遗体火化免费吗？",
+      "category": "fee",
+      "expected_doc_keywords": ["遗体火化", "免费", "基本服务"],
+      "expected_doc_titles_containing": ["免费"],
+      "reference_answer": "费用题：遗体火化属基本服务，符合条件免费",
+      "difficulty": "easy"
+    },
+    {
+      "id": "q100",
+      "question": "丧事活动中禁止哪些行为？",
+      "category": "policy",
+      "expected_doc_keywords": ["丧事", "禁止", "行为", "规定"],
+      "expected_doc_titles_containing": ["殡葬管理条例"],
+      "reference_answer": "政策题：殡葬管理条例禁止行为",
+      "difficulty": "hard"
     }
   ]
 }

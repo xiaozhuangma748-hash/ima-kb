@@ -61,6 +61,18 @@ class Settings:
     # 0 表示不压缩（适用于 parent_window 扩展后 content 较长的场景）
     context_max_chars: int = field(default_factory=lambda: int(_get_env("CONTEXT_MAX_CHARS", "800")))
 
+    # ---- 对话记忆 ----
+    # 进入 LLM prompt 的最近消息条数（1 轮 = user + assistant 2 条）
+    # 8 轮 = 16 条是 token 与上下文的平衡点
+    history_window: int = field(default_factory=lambda: int(_get_env("HISTORY_WINDOW", "16")))
+    # 触发摘要压缩的阈值（history 超过此值就压缩早期对话）
+    # 建议 = history_window * 1.5（窗口 16 → 阈值 24）
+    history_compress_threshold: int = field(default_factory=lambda: int(_get_env("HISTORY_COMPRESS_THRESHOLD", "24")))
+    # 摘要最大字符数（控制 token 成本）
+    summary_max_chars: int = field(default_factory=lambda: int(_get_env("SUMMARY_MAX_CHARS", "500")))
+    # 是否启用历史感知检索（用 summary 扩展 query 提升多轮对话召回率）
+    history_aware_retrieval: bool = field(default_factory=lambda: _get_env("HISTORY_AWARE_RETRIEVAL", "1") == "1")
+
     # ---- Reranker ----
     # 重排序器类型：cross_encoder（专用模型，推荐）/ llm（LLM prompt 打分）/ none
     reranker_type: str = field(default_factory=lambda: _get_env("RERANKER_TYPE", "cross_encoder"))

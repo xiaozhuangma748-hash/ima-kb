@@ -213,7 +213,7 @@ class PetMixin:
             p.branch or "", "未分系"
         )
         # 头像标识行（与 _handle_chat 流式输出一致）
-        avatar = {"scholar": "[O]", "warrior": "[W]", "artisan": "[A]"}.get(p.branch, "[?]")
+        avatar = {"scholar": "✻", "warrior": "✦", "artisan": "✼"}.get(p.branch, "✺")
         color = {"scholar": "cyan", "warrior": "red", "artisan": "yellow"}.get(p.branch, "white")
         console.print(f"[{color}]{avatar}[/{color}] [bold magenta]{p.name}[/bold magenta]")
         console.print()

@@ -353,9 +353,14 @@ class RAGChain:
             )
 
         # 7. 构造引用列表（验证引用合法性后只保留 LLM 实际引用的文档）
+        # 同时从正文中删除越界 [n] 标记，保证正文编号与引用列表一致
         valid_citations, invalid_citations, citation_warning = validate_answer(
             content, len(final_results)
         )
+        if invalid_citations:
+            # 删除正文中的越界 [n] 标记（避免用户看到 [3] 但引用列表只有 1 条）
+            from core.retrieval.citation import sanitize_outbound_citations
+            content = sanitize_outbound_citations(content, len(final_results))
         valid_set = set(valid_citations)
         citations = [
             {
@@ -370,14 +375,7 @@ class RAGChain:
             if (i + 1) in valid_set
         ]
 
-        # 7.1 越界引用存在时，在答案末尾追加提示
-        if invalid_citations:
-            content = content + (
-                f"\n\n（已忽略越界引用标记 {invalid_citations}，"
-                f"参考资料共 {len(final_results)} 条）"
-            )
-
-        # 7.2 答案有实质内容但无合法引用时追加缺失提示
+        # 7.1 答案有实质内容但无合法引用时追加缺失提示
         if citation_warning:
             content = content + "\n\n" + citation_warning
 

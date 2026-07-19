@@ -26,6 +26,28 @@ from core.cli.constants import console
 _AGENT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "storage" / "agent_config.json"
 
 
+def _print_agent_tokens(agent_obj) -> None:
+    """打印 Agent 本次 run() 累计的 token 使用量。
+
+    Agent 一次任务可能包含多次 LLM 调用（ReAct 多步 + 最终总结），
+    使用 agent._total_usage 累计值显示总消耗。
+    """
+    try:
+        usage = getattr(agent_obj, "_total_usage", None)
+        if not usage:
+            return
+        total = usage.get("total", 0)
+        if total <= 0:
+            return
+        console.print(
+            f"[dim]tokens: input={usage.get('input', 0)} "
+            f"output={usage.get('output', 0)} "
+            f"total={total}[/dim]"
+        )
+    except Exception:
+        pass
+
+
 def _load_agent_config() -> dict:
     """加载 Agent 配置。"""
     if not _AGENT_CONFIG_PATH.exists():
@@ -453,7 +475,10 @@ class AgentMixin:
                 console.print(Markdown(result))
             console.print()
             elapsed = time.time() - t0
-            console.print(f"[bold magenta]✻ ✓ Complete[/bold magenta] [dim]· Brewed for {elapsed:.1f}s · {step_n[0]} Steps[/dim]\n")
+            console.print(f"[bold magenta]✻ ✓ Complete[/bold magenta] [dim]· Brewed for {elapsed:.1f}s · {step_n[0]} Steps[/dim]")
+            # token 使用量（累计 Agent 整个 run() 的所有 LLM 调用）
+            _print_agent_tokens(ag)
+            console.print()
             # 宠物经验埋点：agent 行为
             self._pet_gain_exp(15, "agent")
         except LLMError as e:
@@ -549,7 +574,10 @@ class AgentMixin:
                 console.print(Markdown(result))
             console.print()
             elapsed = time.time() - t0
-            console.print(f"[bold magenta]✻ ✓ Complete[/bold magenta] [dim]· Brewed for {elapsed:.1f}s · {step_n[0]} Steps[/dim]\n")
+            console.print(f"[bold magenta]✻ ✓ Complete[/bold magenta] [dim]· Brewed for {elapsed:.1f}s · {step_n[0]} Steps[/dim]")
+            # token 使用量（累计 Agent 整个 run() 的所有 LLM 调用）
+            _print_agent_tokens(agent)
+            console.print()
             # 宠物经验埋点
             self._pet_gain_exp(8, "smart")
             return
