@@ -42,3 +42,6 @@ logs/
 # ===== 视觉伴侣 mockup =====
 .superpowers/
 
+# ===== Electron 桌面宠物依赖 =====
+desktop-pet/node_modules/
+
