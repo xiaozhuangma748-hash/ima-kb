@@ -1,0 +1,225 @@
+/*
+ * 桌面宠物样式 — 猫咪 GIF 动画 + cat-agent-showcase 暖色调设计系统
+ *
+ * 设计要点：
+ * - 透明背景：html / body 设置 background: rgba(0,0,0,0)，配合 pywebview transparent=True
+ *   实现整体窗口透明（仅猫咪 GIF 与气泡区域可见）。
+ * - 点击穿透：html / body 设置 pointer-events: none，使透明区域点击事件穿透到下层窗口；
+ *   宠物 img 与气泡交互区域单独设置 pointer-events: auto 重新接收事件。
+ * - 像素锐利：#pet-img 设置 image-rendering: pixelated，保留 GIF 像素艺术风格。
+ * - 暖色调：cat-agent-showcase 配色（珊瑚橙 / 奶油色 / 深棕），通过 CSS 变量统一管理。
+ */
+
+:root {
+  --pet-bg: #FFFAF5;           /* 暖奶油色（仅气泡用） */
+  --pet-fg: #2D2017;            /* 深棕文字 */
+  --pet-primary: #E88C64;       /* 珊瑚橙主色 */
+  --pet-primary-fg: #FFFFFF;    /* 主色上的白字 */
+  --pet-muted: #F5EDE6;         /* 静音背景 */
+  --pet-muted-fg: #8C7A6B;      /* 静音文字 */
+  --pet-border: #E8DDD3;        /* 边框 */
+  --pet-success: #5CAA6E;       /* 成功状态 */
+  --pet-warning: #D4A843;       /* 警告状态 */
+  --pet-error: #D4573E;         /* 错误状态 */
+  --pet-info: #5B8EC9;          /* 信息状态 */
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    /* 使用完全透明的背景，配合 pywebview transparent=True 实现窗口透明 */
+    background: rgba(0, 0, 0, 0);
+    overflow: hidden;
+    /* 全局点击穿透：透明区域不接收事件，落到下层窗口 */
+    pointer-events: none;
+}
+
+#pet-img {
+    display: block;
+    margin: 12px auto;
+    /* GIF 默认尺寸 120×120（HTML 中已指定，CSS 强化） */
+    width: 120px;
+    height: 120px;
+    /* 像素锐利：保留 GIF 像素艺术风格，避免缩放模糊 */
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    /* 宠物身体区域允许接收事件（覆盖全局的 pointer-events: none） */
+    pointer-events: auto;
+    cursor: grab;
+    /* 透明背景，不遮挡桌面 */
+    background: transparent;
+    /* 防止默认拖拽行为干扰 drop 事件 */
+    -webkit-user-drag: none;
+    user-drag: none;
+}
+
+#pet-img:active {
+    cursor: grabbing;
+}
+
+/* 拖拽文件悬停时的高亮：珊瑚橙边框 */
+#pet-img.drag-over {
+    box-shadow: 0 0 0 3px rgba(232, 140, 100, 0.6);
+    border-radius: 8px;
+}
+
+/* === 快速问答气泡（宠物说话模式） === */
+#bubble {
+    position: absolute;
+    /* 气泡放在猫咪头顶上方，带尾巴 */
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    /* 半透明奶油色背景，珊瑚橙边框 */
+    background: rgba(255, 250, 245, 0.97);
+    border: 1px solid var(--pet-primary);
+    border-radius: 10px;
+    padding: 10px 12px 8px;
+    box-shadow: 0 4px 20px rgba(45, 32, 23, 0.18);
+    /* 气泡容器允许接收事件（输入框 / 答案区 / 引用链接可交互） */
+    pointer-events: auto;
+    /* 默认隐藏，只有双击宠物时才弹出 */
+    display: none;
+    /* 自适应宽度：最小 140px，最大 220px，根据内容自动撑开 */
+    width: max-content;
+    min-width: 140px;
+    max-width: 220px;
+    min-height: 48px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    color: var(--pet-fg);
+    /* 弹出动画 */
+    animation: bubble-pop-in 0.2s ease-out;
+}
+
+@keyframes bubble-pop-in {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(8px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0) scale(1);
+    }
+}
+
+/* 气泡底部小三角尾巴（指向猫咪） */
+#bubble::after {
+    content: '';
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid rgba(255, 250, 245, 0.97);
+    filter: drop-shadow(0 1px 1px rgba(45, 32, 23, 0.1));
+}
+
+#bubble-input-area {
+    margin-bottom: 4px;
+}
+
+#bubble-input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--pet-border);
+    border-radius: 4px;
+    font-size: 13px;
+    outline: none;
+    background: var(--pet-muted);
+    color: var(--pet-fg);
+}
+
+#bubble-input::placeholder {
+    color: var(--pet-muted-fg);
+}
+
+#bubble-input:focus {
+    border-color: var(--pet-primary);
+    box-shadow: 0 0 0 2px rgba(232, 140, 100, 0.2);
+}
+
+#bubble-answer {
+    margin: 6px 0;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: var(--pet-fg);
+}
+
+#bubble-citations {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--pet-border);
+    /* 引用默认隐藏，点击按钮才展开 */
+    display: none;
+}
+
+#bubble-citations.expanded {
+    display: block;
+}
+
+#bubble-citations ul {
+    margin: 4px 0 0 16px;
+    padding: 0;
+}
+
+#bubble-citations a {
+    color: var(--pet-primary);
+    text-decoration: none;
+}
+
+#bubble-citations a:hover {
+    text-decoration: underline;
+}
+
+/* === 操作栏（引用按钮 + 关闭按钮） === */
+#bubble-action-bar {
+    display: none;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--pet-border);
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+#bubble-action-bar.visible {
+    display: flex;
+}
+
+.action-btn {
+    background: transparent;
+    border: 1px solid var(--pet-border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    color: var(--pet-muted-fg);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    line-height: 1.4;
+}
+
+.action-btn:hover {
+    background: var(--pet-muted);
+    color: var(--pet-fg);
+    border-color: var(--pet-primary);
+}
+
+#btn-close-bubble:hover {
+    background: var(--pet-error);
+    color: var(--pet-primary-fg);
+    border-color: var(--pet-error);
+}

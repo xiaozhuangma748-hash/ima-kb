@@ -1,0 +1,16 @@
+{
+  "name": "ima-kb-desktop-pet",
+  "version": "1.0.0",
+  "description": "Desktop pet for IMA knowledge base (independent, pre-integration)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

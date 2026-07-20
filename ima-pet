@@ -1,0 +1,16 @@
+#!/bin/zsh
+# IMA 桌面宠物 CLI 状态联动入口
+# 用法：
+#   ./ima-pet state thinking        # 手动切换桌宠状态
+#   ./ima-pet ask "什么是殡葬改革"   # 带状态联动问答
+#   ./ima-pet ingest /path/to/file  # 带状态联动入库
+#   ./ima-pet status                # 检查桌宠是否运行
+cd "$(dirname "$0")"
+
+if [ -x "./.venv/bin/python" ]; then
+  PY="./.venv/bin/python"
+else
+  PY="python3"
+fi
+
+exec "$PY" -m core.desktop.cli_sync "$@"

@@ -1,0 +1,8 @@
+# 桌面宠物可选依赖（零侵入：不写入 pyproject.toml，需单独安装）
+# 安装：pip install -r requirements-desktop.txt
+pywebview>=5.0      # 透明无边框置顶窗体（macOS 用 WebKit）
+pystray>=0.19       # 系统托盘（macOS 上与 pywebview 冲突，自动禁用）
+
+# Mobile 同步服务（可选，不装则自动跳过）
+# fastapi>=0.110
+# uvicorn>=0.29

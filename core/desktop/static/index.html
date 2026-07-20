@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IMA Desktop Pet</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 宠物渲染图像：猫咪 GIF 动画，默认 idle 状态，120×120 适配 180×240 窗口 -->
+    <img id="pet-img" src="cats/cat_idle.gif" width="120" height="120" draggable="false">
+
+    <!-- 快速问答气泡（宠物说话模式） -->
+    <div id="bubble" style="display:none">
+      <div id="bubble-input-area">
+        <input type="text" id="bubble-input" placeholder="问点什么？" autocomplete="off">
+      </div>
+      <div id="bubble-answer"></div>
+      <div id="bubble-citations"></div>
+      <!-- 操作栏：引用按钮（有引用时才显示）+ 关闭按钮 -->
+      <div id="bubble-action-bar" style="display:none">
+        <button id="btn-toggle-citations" class="action-btn" style="display:none">📎 引用</button>
+        <button id="btn-close-bubble" class="action-btn">✕</button>
+      </div>
+    </div>
+
+    <!-- 桌面宠物渲染脚本（CatPet 类 + 气泡/拖拽/双击逻辑） -->
+    <script src="pet.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+#!/bin/zsh
+# IMA 桌面宠物启动入口（Electron 版）
+# 用法：./ima-desktop
+
+cd "$(dirname "$0")"
+
+# 清理可能干扰的环境变量
+unset ELECTRON_RUN_AS_NODE 2>/dev/null
+unset NODE_OPTIONS 2>/dev/null
+
+if ! command -v node &>/dev/null; then
+  echo "错误：未找到 Node.js，请先安装 Node.js 18+"
+  exit 1
+fi
+
+if [ ! -d "./desktop-pet/node_modules" ]; then
+  echo "正在安装 Electron 依赖..."
+  (cd desktop-pet && npm install)
+  if [ $? -ne 0 ]; then
+    echo "错误：Electron 依赖安装失败"
+    exit 1
+  fi
+fi
+
+echo "🐱 启动 IMA 桌面宠物 (Electron)..."
+echo "   Python 后端: core.desktop.electron_bridge"
+echo "   IPC: /tmp/ima-desktop-pet.sock"
+echo "   按 Ctrl+C 退出"
+echo ""
+
+cd desktop-pet
+exec npm start
