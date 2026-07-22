@@ -24,6 +24,11 @@ let idleCheckTimer = null;
 let pythonProcess = null;
 let dnd = false;
 let dragState = { active: false, offsetX: 0, offsetY: 0 };
+let bubbleVisible = false; // 气泡是否展开
+
+// 窗口尺寸常量（原版：260×360，上方透明区留给气泡，下方显示宠物）
+const WIN_W = 260;
+const WIN_H = 360;
 
 const IDLE_THRESHOLD_SEC = 300; // 5 分钟无操作 → sleeping
 
@@ -152,15 +157,13 @@ function sendToPython(request, options = {}) {
 function createWindow() {
   const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
   const saved = settings.get('position');
-  // 默认大窗口：上方透明区留给气泡，下方显示宠物
-  const winW = 260;
-  const winH = 360;
-  const x = saved ? saved[0] : Math.round(screenW / 2 - winW / 2);
-  const y = saved ? saved[1] : screenH - winH - 40;
+  // 整体等比 75% 缩放：上方透明区留给气泡，下方显示宠物
+  const x = saved ? saved[0] : Math.round(screenW / 2 - WIN_W / 2);
+  const y = saved ? saved[1] : screenH - WIN_H - 40;
 
   win = new BrowserWindow({
-    width: winW,
-    height: winH,
+    width: WIN_W,
+    height: WIN_H,
     x,
     y,
     frame: false,
@@ -289,7 +292,9 @@ function startIdleMonitor() {
 // === IPC: renderer → main ===
 ipcMain.handle('ask-stream', async (event, question, history) => {
   if (!question.trim()) return;
-  setState('listening', 'manual');
+  setState('listening', 'external');
+  let gotDone = false;
+  let gotError = false;
   try {
     await sendToPython({ action: 'ask_stream', question, history }, {
       onEvent: (r) => {
@@ -297,19 +302,31 @@ ipcMain.handle('ask-stream', async (event, question, history) => {
         if (r.type === 'stage') {
           const stageMap = { 检索: 'retrieving', 重排: 'ranking', 缓存: 'thinking' };
           if (stageMap[r.stage]) setState(stageMap[r.stage], 'external');
+          // 转发阶段信息给渲染进程，用于气泡状态提示
+          win.webContents.send('answer-stage', { stage: r.stage, count: r.count || 0 });
         } else if (r.type === 'token') {
           setState('answering', 'external');
           win.webContents.send('answer-token', r.chunk);
         } else if (r.type === 'done') {
+          gotDone = true;
           setState('celebrating', 'external');
-          setTimeout(() => setState('idle', 'auto'), 2500);
+          setTimeout(() => setState('idle', 'manual'), 2500);
           win.webContents.send('answer-done', r.citations || []);
         } else if (r.type === 'error') {
+          gotError = true;
           setState('error', 'external');
           win.webContents.send('answer-error', r.error);
         }
       },
     });
+    // 兜底：后端流结束但未发送 done/error，强制回 idle（manual 优先级可覆盖任何状态）
+    if (!gotDone && !gotError) {
+      console.warn('ask-stream 结束但未收到 done/error，强制回 idle');
+      setState('idle', 'manual');
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('answer-error', '回复异常结束');
+      }
+    }
   } catch (err) {
     console.error('ask-stream 失败:', err);
     setState('error', 'external');
@@ -323,7 +340,8 @@ async function handleIngest(filePath) {
     const responses = await sendToPython({ action: 'ingest', file_path: filePath });
     const result = responses[0]?.data || {};
     let msg;
-    if (result.success) {
+    // already_exists 视为已存在提示，不显示为失败
+    if (result.success || result.error === 'already_exists') {
       msg = result.error === 'already_exists' ? `已存在：${result.file_name}` : `已入库：${result.file_name}`;
       setState('celebrating', 'external');
     } else {
@@ -331,16 +349,38 @@ async function handleIngest(filePath) {
       setState('error', 'external');
     }
     if (win && !win.isDestroyed()) win.webContents.send('show-bubble', msg);
-    setTimeout(() => setState('idle', 'auto'), 2500);
+    // 兜底：确保入库结束后状态回 idle（manual 可覆盖 ingesting 的 manual 优先级）
+    setTimeout(() => setState('idle', 'manual'), 2500);
   } catch (err) {
     console.error('ingest 失败:', err);
     setState('error', 'external');
     if (win && !win.isDestroyed()) win.webContents.send('show-bubble', `失败：${err.message}`);
-    setTimeout(() => setState('idle', 'auto'), 2500);
+    setTimeout(() => setState('idle', 'manual'), 2500);
   }
 }
 
 ipcMain.handle('ingest', async (event, filePath) => {
+  await handleIngest(filePath);
+});
+
+ipcMain.handle('ingest-text', async (event, text) => {
+  if (!text || !text.trim()) return;
+  const uploadsDir = path.join(__dirname, '..', 'storage', 'uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  const fileName = `pasted_text_${Date.now()}.md`;
+  const filePath = path.join(uploadsDir, fileName);
+  fs.writeFileSync(filePath, text.trim(), 'utf8');
+  await handleIngest(filePath);
+});
+
+ipcMain.handle('ingest-image', async (event, dataUrl, fileName) => {
+  if (!dataUrl || !fileName) return;
+  const uploadsDir = path.join(__dirname, '..', 'storage', 'uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+  const buffer = Buffer.from(base64, 'base64');
+  const filePath = path.join(uploadsDir, fileName);
+  fs.writeFileSync(filePath, buffer);
   await handleIngest(filePath);
 });
 
@@ -371,7 +411,8 @@ ipcMain.on('drag-end', () => {
 });
 
 ipcMain.on('bubble-visible', (event, visible) => {
-  // 气泡显示时保持可交互；隐藏后仍允许拖动
+  // 原版：气泡显示时保持可交互；隐藏后仍允许拖动
+  // 不调整窗口尺寸，避免宠物位置跳变
   if (win) {
     // macOS 上 focusable 动态切换可能闪烁，暂不处理
   }
@@ -381,6 +422,12 @@ ipcMain.on('bubble-visible', (event, visible) => {
 app.whenReady().then(async () => {
   settings = loadSettings(app.getPath('userData'));
   fsm = new StateMachine('idle');
+  fsm.onAutoReturn((state) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('state-changed', { state, gif: resolveStateGif(state) });
+    }
+    rebuildTray();
+  });
 
   startPythonBridge();
   try {

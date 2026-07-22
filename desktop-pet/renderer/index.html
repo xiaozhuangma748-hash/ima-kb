@@ -37,8 +37,8 @@
   /* 宠物容器：底部对齐，让猫咪从窗口下沿探出 */
   #pet-stage {
     position: absolute;
-    left: 0; right: 0; bottom: -20px;
-    height: 120px;
+    left: 0; right: 0; bottom: -15px;
+    height: 90px;
     display: flex;
     align-items: flex-end;
     justify-content: center;
@@ -48,7 +48,7 @@
   #pet-stage:active { cursor: grabbing; }
 
   #pet-img {
-    width: 120px; height: 120px;
+    width: 90px; height: 90px;
     image-rendering: pixelated;
     object-fit: contain;
     pointer-events: auto;
@@ -56,22 +56,22 @@
     -webkit-user-drag: none;
     user-drag: none;
     /* 底部轻微发光，增强“探出”层次感 */
-    filter: drop-shadow(0 4px 8px rgba(45, 32, 23, 0.25));
+    filter: drop-shadow(0 3px 6px rgba(45, 32, 23, 0.25));
   }
 
   #pet-img.drag-over {
-    filter: drop-shadow(0 0 0 3px rgba(232, 140, 100, 0.6));
+    filter: drop-shadow(0 0 0 2px rgba(232, 140, 100, 0.6));
   }
   #pet-img.eating {
     transform: scale(1.18);
-    filter: drop-shadow(0 0 14px rgba(232, 140, 100, 0.85));
+    filter: drop-shadow(0 0 10px rgba(232, 140, 100, 0.85));
     transition: transform 0.12s ease, filter 0.12s ease;
   }
 
   /* 气泡：默认隐藏，在宠物上方居中 */
   #bubble {
     position: absolute;
-    left: 50%; bottom: 110px;
+    left: 50%; bottom: 85px;
     transform: translateX(-50%) scale(0.96);
     width: 220px;
     min-height: 48px;
@@ -97,114 +97,191 @@
     transform: translateX(-50%) scale(1);
   }
 
-  /* 气泡小尾巴（指向猫咪头顶） */
-  #bubble::after {
-    content: '';
-    position: absolute;
-    bottom: -8px; left: 50%;
-    transform: translateX(-50%);
-    width: 0; height: 0;
-    border-left: 8px solid transparent;
-    border-right: 8px solid transparent;
-    border-top: 8px solid var(--pet-bg);
-  }
-
-  #bubble-input,
-  #bubble-followup {
+  #bubble-input {
+    flex: 0 0 auto;
     width: 100%;
-    padding: 6px 8px;
+    padding: 4px 5px;
     border: 1px solid var(--pet-border);
-    border-radius: 10px;
+    border-radius: 8px;
     font-size: 13px;
     outline: none;
     background: var(--pet-muted);
     color: var(--pet-fg);
     -webkit-user-select: text; user-select: text;
+    margin-top: 6px;
   }
-  #bubble-input::placeholder,
-  #bubble-followup::placeholder { color: var(--pet-muted-fg); }
-  #bubble-input:focus,
-  #bubble-followup:focus { border-color: var(--pet-primary); }
+  #bubble-input::placeholder { color: var(--pet-muted-fg); }
+  #bubble-input:focus { border-color: var(--pet-primary); }
+
+  #bubble-followup { display: none !important; }
+
+  /* 可滚动内容区（问题输入框以下全部固定，上方答案区滚动） */
+  #bubble-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    margin: 4px 0;
+    padding-right: 2px;
+  }
+  /* Webkit 滚动条 */
+  #bubble-scroll::-webkit-scrollbar { width: 3px; }
+  #bubble-scroll::-webkit-scrollbar-thumb {
+    background: rgba(140, 122, 107, 0.35);
+    border-radius: 2px;
+  }
 
   #bubble-answer {
-    margin: 8px 0;
     line-height: 1.5;
-    white-space: pre-wrap;
     word-wrap: break-word;
     -webkit-user-select: text; user-select: text;
   }
+  /* 阶段状态指示器（检索/重排/缓存） */
+  #bubble-answer .stage-hint {
+    color: var(--pet-muted-fg);
+    font-style: italic;
+    font-size: 10px;
+    margin: 4px 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  #bubble-answer .stage-hint .dots {
+    display: inline-block;
+    width: 18px;
+    height: 6px;
+    background: linear-gradient(90deg, var(--pet-primary) 25%, transparent 25%, transparent 50%, var(--pet-primary) 50%, var(--pet-primary) 75%, transparent 75%);
+    background-size: 6px 6px;
+    animation: stageDots 0.8s linear infinite;
+  }
+  @keyframes stageDots {
+    0% { background-position: 0 0; }
+    100% { background-position: 6px 0; }
+  }
+  /* markdown 渲染样式 */
+  #bubble-answer .md-h {
+    font-weight: 700;
+    font-size: 12px;
+    margin: 6px 0 3px 0;
+    color: var(--pet-primary);
+  }
+  #bubble-answer .md-p {
+    margin: 2px 0;
+  }
+  #bubble-answer .md-list {
+    margin: 3px 0;
+    padding-left: 2px;
+  }
+  #bubble-answer .md-li {
+    margin: 1px 0;
+    padding-left: 4px;
+  }
+  #bubble-answer .md-quote {
+    margin: 4px 0;
+    padding: 3px 6px;
+    border-left: 2px solid var(--pet-primary);
+    background: rgba(232, 140, 100, 0.08);
+    border-radius: 0 4px 4px 0;
+    color: var(--pet-muted-fg);
+    font-size: 10px;
+  }
+  #bubble-answer .md-hr {
+    border: none;
+    border-top: 1px dashed var(--pet-border);
+    margin: 6px 0;
+  }
+  #bubble-answer code {
+    background: var(--pet-muted);
+    padding: 0 3px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  #bubble-answer b {
+    font-weight: 700;
+    color: var(--pet-fg);
+  }
 
   #bubble-citations {
-    margin-top: 6px;
-    padding-top: 6px;
+    margin-top: 4px;
+    padding-top: 4px;
     border-top: 1px solid var(--pet-border);
     display: none;
   }
   #bubble-citations.expanded { display: block; }
-  #bubble-citations ul { margin: 4px 0 0 16px; padding: 0; }
+  #bubble-citations ul { margin: 3px 0 0 12px; padding: 0; }
   #bubble-citations a { color: var(--pet-primary); text-decoration: none; }
   #bubble-citations a:hover { text-decoration: underline; }
 
   #bubble-actions {
+    flex: 0 0 auto;
     display: flex;
     justify-content: flex-end;
-    gap: 6px;
-    margin-top: 8px;
+    gap: 4px;
+    margin-top: 6px;
   }
   .action-btn {
     background: transparent;
     border: 1px solid var(--pet-border);
-    border-radius: 6px;
-    padding: 2px 8px;
-    font-size: 11px;
+    border-radius: 5px;
+    padding: 2px 6px;
+    font-size: 10px;
     color: var(--pet-muted-fg);
     cursor: pointer;
   }
   .action-btn:hover { background: var(--pet-muted); color: var(--pet-fg); }
 
-  /* 输入框识别到文件路径时的入库提示 */
-  #path-hint {
+  /* 输入框识别到文件路径/文字时的入库提示 */
+  #path-hint,
+  #text-hint {
+    flex: 0 0 auto;
     display: none;
-    margin-top: 6px;
-    padding: 6px 8px;
-    background: rgba(232, 140, 100, 0.12);
-    border: 1px dashed var(--pet-primary);
-    border-radius: 8px;
-    font-size: 12px;
-    color: var(--pet-primary);
+    margin-top: 4px;
+    padding: 4px 6px;
+    border: 1px dashed;
+    border-radius: 6px;
+    font-size: 10px;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
   }
-  #path-hint.visible { display: flex; }
-  #btn-ingest-path {
-    background: var(--pet-primary);
-    color: white;
+  #path-hint { background: rgba(232, 140, 100, 0.12); border-color: var(--pet-primary); color: var(--pet-primary); }
+  #text-hint { background: rgba(140, 122, 107, 0.12); border-color: var(--pet-muted-fg); color: var(--pet-muted-fg); }
+  #path-hint.visible,
+  #text-hint.visible { display: flex; }
+  #btn-ingest-path,
+  #btn-ingest-text {
     border: none;
-    border-radius: 6px;
-    padding: 2px 10px;
-    font-size: 11px;
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-size: 10px;
+    color: white;
     cursor: pointer;
   }
+  #btn-ingest-path { background: var(--pet-primary); }
   #btn-ingest-path:hover { background: #d97a53; }
+  #btn-ingest-text { background: var(--pet-muted-fg); }
+  #btn-ingest-text:hover { background: var(--pet-fg); }
 
   /* 拖拽文件提示：啊~ 一口吃掉 */
   #drop-hint {
     position: absolute;
-    left: 50%; bottom: 145px;
+    left: 50%; bottom: 108px;
     transform: translateX(-50%);
     background: rgba(255, 250, 245, 0.92);
     border: 1px solid var(--pet-border);
-    border-radius: 14px;
-    padding: 4px 12px;
-    font-size: 12px;
+    border-radius: 10px;
+    padding: 3px 9px;
+    font-size: 10px;
     color: var(--pet-primary);
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.15s ease;
-    white-space: nowrap;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.4;
+    max-width: 170px;
     z-index: 20;
-    box-shadow: 0 4px 12px rgba(45, 32, 23, 0.12);
+    box-shadow: 0 3px 9px rgba(45, 32, 23, 0.12);
   }
   #drop-hint.visible { opacity: 1; }
 </style>
@@ -215,13 +292,18 @@
 
   <!-- 快速问答气泡 -->
   <div id="bubble">
-    <input type="text" id="bubble-input" placeholder="问点什么？也可以粘贴文件路径" autocomplete="off" autofocus>
-    <div id="bubble-answer"></div>
-    <div id="bubble-citations"></div>
-    <input type="text" id="bubble-followup" placeholder="继续问…" autocomplete="off" style="display:none">
+    <div id="bubble-scroll">
+      <div id="bubble-answer"></div>
+      <div id="bubble-citations"></div>
+    </div>
+    <input type="text" id="bubble-input" placeholder="问点什么？也可以粘贴文件路径入库" autocomplete="off" autofocus>
     <div id="path-hint">
       <span id="path-hint-text"></span>
       <button id="btn-ingest-path">入库</button>
+    </div>
+    <div id="text-hint">
+      <span id="text-hint-text">检测到文字，可直接入库</span>
+      <button id="btn-ingest-text">入库文字</button>
     </div>
     <div id="bubble-actions">
       <button id="btn-citations" class="action-btn" style="display:none">引用</button>
