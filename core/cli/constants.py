@@ -123,6 +123,9 @@ HELP_TEXT = """\
   /memory              记忆管理           /cross              跨会话记忆
   /pet                 虚拟宠物           /theme              切换主题
 
+[bold green]桌面宠物[/bold green]
+  /desktop [start|stop|status]  Electron 桌面宠物开关
+
 [bold green]系统[/bold green]
   /stats               知识库统计         /tag                标签管理
   /health              健康检查           /dedup              去重
@@ -189,6 +192,7 @@ COMMAND_LIST = [
     ("/help",    "显示帮助"),
     ("/h",       "= /help（别名）"),
     ("/pet",     "虚拟宠物（adopt/feed/play/train/wash/sleep/name/tasks/shop/buy/use/style/bag/reset）"),
+    ("/desktop", "Electron 桌面宠物（start/stop/status）"),
     ("/memory",  "记忆管理（show/clear/add/tasks）"),
     ("/todo",    "每日任务（add/done/cancel/history）"),
     ("/cross",   "跨会话记忆（list/add/remove/clear）"),
@@ -220,6 +224,11 @@ _SUB_MENU_NESTED = {
         'style': {'scholar': None, 'warrior': None, 'artisan': None, 'auto': None},
         'bag': None,
         'reset': {'stats': None, 'effects': None},
+    },
+    '/desktop': {
+        'start': None,
+        'stop': None,
+        'status': None,
     },
     '/graph': {
         'stats': None, 'build': None, 'neighbors': None, 'export': None,
@@ -307,6 +316,9 @@ _SUB_MENU_DESC = {
     ('/pet', 'reset'): '重置宠物',
     ('/pet', 'reset', 'stats'): '重置属性',
     ('/pet', 'reset', 'effects'): '重置效果',
+    ('/desktop', 'start'): '启动桌面宠物',
+    ('/desktop', 'stop'): '停止桌面宠物',
+    ('/desktop', 'status'): '查看运行状态',
     ('/graph', 'stats'): '统计信息',
     ('/graph', 'build'): '构建图谱',
     ('/graph', 'neighbors'): '查询邻居',
@@ -452,6 +464,7 @@ _COMMAND_DISPATCH = {
     "/smart": "_cmd_smart",
     "/graph": "_cmd_graph",
     "/pet": "_cmd_pet",
+    "/desktop": "_cmd_desktop",
     "/memory": "_cmd_memory",
     "/cross": "_cmd_cross",
     "/theme": "_cmd_theme",

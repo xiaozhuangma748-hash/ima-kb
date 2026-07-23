@@ -12,6 +12,16 @@ const EVENT_MIN_DWELL = {
   answering: 0, // 由外部决定何时结束
 };
 
+// 中间态最大驻留时长（毫秒）：超时后自动回 idle，防止永久卡住
+const INTERMEDIATE_TIMEOUT = {
+  listening: 60000,   // 60 秒
+  thinking: 60000,
+  retrieving: 60000,
+  ranking: 60000,
+  ingesting: 120000,  // 入库可能较慢
+  analyzing: 60000,
+};
+
 // 手动切换 > 外部事件 > 自动（闲置/唤醒）
 const SOURCE_PRIORITY = { manual: 3, external: 2, 'dnd': 3, 'dnd-off': 3, 'idle-auto': 1, 'wake-auto': 1, auto: 1 };
 
@@ -50,6 +60,18 @@ class StateMachine {
         this.lastSource = 'auto';
         if (this._onAutoReturn) this._onAutoReturn('idle');
       }, dwell);
+      return true;
+    }
+
+    // 中间态超时保护：超过最大驻留时间后强制回 idle
+    const timeout = INTERMEDIATE_TIMEOUT[next];
+    if (timeout !== undefined) {
+      this._dwellTimer = setTimeout(() => {
+        if (this.current !== next) return; // 已切换到其他状态则忽略
+        this.current = 'idle';
+        this.lastSource = 'auto';
+        if (this._onAutoReturn) this._onAutoReturn('idle');
+      }, timeout);
     }
     return true;
   }

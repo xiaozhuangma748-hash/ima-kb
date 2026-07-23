@@ -103,6 +103,8 @@ class ElectronIpcServer(IpcServer):
                 return self._handle_show_doc(request)
             if action == "ping":
                 return {"success": True, "data": "pong"}
+            if action == "set_state":
+                return self._handle_set_state(request)
             return {"success": False, "error": f"未知 action: {action}"}
         except Exception as e:
             logger.error(f"IPC 处理失败 (action={action}): {e}")
@@ -118,8 +120,24 @@ class ElectronIpcServer(IpcServer):
         history = request.get("history") or []
         citations = []
 
+        # 桌面宠物气泡场景：简洁模式，限制长度，禁用表格
+        compact_prompt = (
+            "你在桌面宠物的小气泡中回答，显示空间非常有限（约 190px 宽）。\n"
+            "请遵守：\n"
+            "1. 回答简洁，直接给结论，总长度不超过 200 字\n"
+            "2. 不要使用 Markdown 表格（太宽会溢出）\n"
+            "3. 用简短的列表或分点说明，每点不超过 30 字\n"
+            "4. 省略寒暄和重复问题\n"
+            "5. 关键事实保留 [n] 引用标记"
+        )
+
         try:
-            for event in self._pet_admin.ask_stream(question, history=history):
+            for event in self._pet_admin.ask_stream(
+                question,
+                history=history,
+                max_tokens=512,
+                extra_system_prompt=compact_prompt,
+            ):
                 etype = event.get("type")
                 if etype == "token":
                     yield {"type": "token", "chunk": event.get("text", "")}
@@ -199,6 +217,21 @@ class ElectronIpcServer(IpcServer):
         except Exception as e:
             logger.error(f"show_doc 失败: {e}")
             return {"success": False, "error": str(e)}
+
+    def _handle_set_state(self, request: dict):
+        """切换桌宠状态：通过 stdout 通知 Electron 主进程。"""
+        state = request.get("state", "")
+        valid_states = {
+            "idle", "listening", "thinking", "retrieving", "ranking",
+            "answering", "celebrating", "error", "sleeping",
+            "ingesting", "analyzing", "notifying",
+        }
+        if state not in valid_states:
+            return {"success": False, "error": f"无效状态: {state}"}
+        # 通过 stdout 发送 JSON，Electron main.js 监听并调用 setState
+        import json as json_module
+        print(json_module.dumps({"type": "set_state", "state": state}), flush=True)
+        return {"success": True, "state": state}
 
 
 def main() -> None:

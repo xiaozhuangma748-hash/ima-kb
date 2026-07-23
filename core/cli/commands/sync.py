@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from rich.table import Table
-from rich.prompt import Prompt
 
 from config import settings
 from core.cli.constants import console
@@ -34,11 +33,8 @@ class SyncMixin:
         if arg.strip().lower() == "reset":
             from core.sync.tracker import FileTracker
             tracker = FileTracker(storage_path=settings.storage_path)
-            confirm = Prompt.ask(
-                "确定清空所有文件追踪记录？下次同步将全量重建。",
-                choices=["y", "n"], default="n",
-            )
-            if confirm != "y":
+            from core.cli.terminal_helpers import repl_confirm
+            if not repl_confirm("确定清空所有文件追踪记录？下次同步将全量重建。"):
                 console.print("[dim]已取消[/dim]")
                 return
             count = tracker.reset()
@@ -135,11 +131,8 @@ class SyncMixin:
                         console.print(f"  [dim]{cid}[/dim]")
                     return
                 chunk_id = matched[0]
-            confirm = Prompt.ask(
-                f"确定删除 chunk [cyan]{chunk_id[:12]}[/cyan]？",
-                choices=["y", "n"], default="n",
-            )
-            if confirm != "y":
+            from core.cli.terminal_helpers import repl_confirm
+            if not repl_confirm(f"确定删除 chunk {chunk_id[:12]}？"):
                 console.print("[dim]已取消[/dim]")
                 return
             ok = self.storage.delete_chunk(chunk_id)

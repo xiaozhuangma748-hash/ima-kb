@@ -1,0 +1,23 @@
+/* cat-agent-showcase brand tokens */
+:root {
+  --cat-background: #FFFAF5;
+  --cat-foreground: #2D2017;
+  --cat-card: #FFFFFF;
+  --cat-card-foreground: #2D2017;
+  --cat-popover: #FFFFFF;
+  --cat-popover-foreground: #2D2017;
+  --cat-primary: #E88C64;
+  --cat-primary-foreground: #FFFFFF;
+  --cat-muted: #F5EDE6;
+  --cat-muted-foreground: #8C7A6B;
+  --cat-border: #E8DDD3;
+  --cat-input: #F0E8E0;
+  --cat-ring: #E88C64;
+  --cat-radius-sm: 8px;
+  --cat-radius-md: 12px;
+  --cat-radius-lg: 20px;
+  --cat-state-success: #5CAA6E;
+  --cat-state-warning: #D4A843;
+  --cat-state-error: #D4573E;
+  --cat-state-info: #5B8EC9;
+}

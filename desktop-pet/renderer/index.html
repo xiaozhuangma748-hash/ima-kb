@@ -85,14 +85,14 @@
     -webkit-backdrop-filter: blur(12px);
     pointer-events: auto;
     display: none;
+    flex-direction: column;
     opacity: 0;
     transition: opacity 0.18s ease, transform 0.18s ease;
-    overflow-y: auto;
     font-size: 13px;
     color: var(--pet-fg);
   }
   #bubble.visible {
-    display: block;
+    display: flex;
     opacity: 1;
     transform: translateX(-50%) scale(1);
   }
@@ -162,7 +162,8 @@
     font-weight: 700;
     font-size: 12px;
     margin: 6px 0 3px 0;
-    color: var(--pet-primary);
+    color: var(--pet-fg);
+    opacity: 0.85;
   }
   #bubble-answer .md-p {
     margin: 2px 0;

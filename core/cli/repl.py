@@ -23,9 +23,11 @@ from typing import List, Optional
 
 from rich.panel import Panel
 from rich.text import Text
-from rich.prompt import Prompt
 
-from config import settings
+
+from core.cli.terminal_helpers import repl_input as _repl_input
+
+from config import settings, PROJECT_ROOT
 from core.storage import Storage
 from core.qa.chain import RAGChain
 from core.pet.pet import Pet
@@ -38,10 +40,6 @@ from core.pet.administrator import PetAdministrator
 from core.memory.store import MemoryStore
 from core.memory.workflow import WorkflowTracker
 from core.memory.cross_session import CrossSessionMemory
-from core.retrieval.hybrid import HybridRetriever
-from core.retrieval.vector import VectorIndex
-from core.retrieval.rerank import Reranker
-from core.llm.client import get_llm
 
 from core.cli import constants
 from core.cli.constants import console, HELP_TEXT
@@ -120,6 +118,11 @@ class REPL(
         self.workflow_tracker: Optional[WorkflowTracker] = None
         self.cross_session_memory: Optional[CrossSessionMemory] = None
         self._admin_init_failed: bool = False
+        self._admin_init_lock = threading.Lock()
+        self._admin_init_ready = threading.Event()
+        self._admin_init_thread: Optional[threading.Thread] = None
+        self._admin_init_progress: str = ""
+        self._admin_init_percent: int = 0
         self._vector_available: Optional[bool] = None  # None=未检测, True/False=已检测
         if self.pet:
             try:
@@ -131,55 +134,133 @@ class REPL(
         self.cross_session_memory: Optional[CrossSessionMemory] = None
 
     def _init_administrator(self) -> None:
-        """延迟初始化 PetAdministrator（首次问答时调用）。"""
+        """延迟初始化 PetAdministrator（首次问答时调用），通过 QAService 统一组装。
+
+        如果后台预热线程正在运行，等待其完成（最多 5 秒）。
+        """
         if self.administrator is not None or self._admin_init_failed:
             return
         if not self.pet:
             return
-        try:
-            vector_index = None
-            try:
-                from core.retrieval.vector import VectorIndex
-                vector_index = VectorIndex()
-                self._vector_available = True
-                # 注入到 storage，使降级路径的 RAGChain 也能访问向量索引
-                self.storage.attach_vector_index(vector_index)
-            except Exception:
-                self._vector_available = False
-                console.print("[dim]! 向量检索不可用，使用纯 BM25 检索[/dim]")
-                vector_index = None
 
-            hybrid = HybridRetriever(
-                bm25_index=self.storage.bm25, vector_index=vector_index,
+        # 如果后台预热正在运行，等待完成
+        if self._admin_init_thread is not None and self._admin_init_thread.is_alive():
+            self._admin_init_ready.wait(timeout=60)
+            if self.administrator is not None or self._admin_init_failed:
+                return  # 预热已完成（成功或失败）
+
+        try:
+            from services.qa_service import QAService
+
+            # 复用 REPL 已初始化的 storage，确保记忆 store 与 Mixin 共享
+            service = QAService(
                 storage=self.storage,
+                memory_store=self.memory_store,
+                vector_index=None,  # 让 QAService 自动创建并 attach
             )
-            llm = get_llm() if settings.has_llm() else None
-            # 优先使用 Cross-Encoder（本地 bge-reranker-v2-m3，准确且快），
-            # 不可用时降级为 LLM Reranker
-            if llm:
-                from core.retrieval.rerank import create_reranker
-                reranker = create_reranker(llm=llm)
-            else:
-                reranker = None
-            if llm and reranker:
-                # 复用 TodoMixin 的 todo_mgr（懒加载的 TodoManager）
-                todo_mgr = getattr(self, "_todo_mgr", None)
-                if todo_mgr is None:
-                    from core.todo.manager import TodoManager
-                    todo_mgr = TodoManager()
-                    self._todo_mgr = todo_mgr
-                self.administrator = PetAdministrator(
-                    pet=self.pet,
-                    storage=self.storage,
-                    memory_store=self.memory_store,
-                    hybrid_retriever=hybrid,
-                    reranker=reranker,
-                    llm=llm,
-                    todo_manager=todo_mgr,
-                )
+            self._vector_available = service.vector_index is not None
+            if not service.is_ready:
+                # 宠物已领养但 LLM/Reranker 不可用：降级为普通问答
+                self._admin_init_failed = True
+                return
+
+            # 复用 QAService 组装的产物，保持与 Mixin 兼容
+            self.administrator = service.administrator
+            # memory_store 可能没有从 QAService 传回新实例（若 self.memory_store 为 None）
+            if self.memory_store is None:
+                self.memory_store = service.memory_store
+            # 复用 TodoMixin 的 todo_mgr（懒加载的 TodoManager）
+            todo_mgr = getattr(self, "_todo_mgr", None)
+            if todo_mgr is None:
+                from core.todo.manager import TodoManager
+                todo_mgr = TodoManager()
+                self._todo_mgr = todo_mgr
+            self.administrator.todo_manager = todo_mgr
         except Exception as e:
             console.print(f"[dim]宠物管理员初始化失败，降级为普通问答: {e}[/dim]")
             self._admin_init_failed = True
+
+    def _preheat_administrator(self) -> None:
+        """后台预热 PetAdministrator：线程加载模型 + 进度提示 + 降 CPU 优先级。"""
+        if not self.pet or self.administrator is not None or self._admin_init_failed:
+            return
+        with self._admin_init_lock:
+            if self._admin_init_thread is not None:
+                return
+
+            def _warmup():
+                import os as _os
+                # 降低线程 CPU 优先级，避免加载大模型时电脑卡顿
+                try:
+                    _os.nice(10)
+                except Exception:
+                    pass
+
+                try:
+                    self._load_vector_and_reranker()
+                except Exception:
+                    with self._admin_init_lock:
+                        self._admin_init_failed = True
+                    self._admin_init_ready.set()
+                    return
+                self._admin_init_progress = "完成"
+                self._admin_init_percent = 100
+                self._admin_init_ready.set()
+
+            self._admin_init_thread = threading.Thread(target=_warmup, daemon=True)
+            self._admin_init_thread.start()
+
+    def _load_vector_and_reranker(self) -> None:
+        """分步加载向量模型、重排序模型，组装 QAService。每步更新进度百分比。"""
+        from core.retrieval.vector import VectorIndex
+        from core.retrieval.rerank import create_reranker, Reranker
+        from core.llm.client import get_llm, LLMClient
+        from services.qa_service import QAService
+
+        # Step 1: 加载向量模型（最耗时，占 0-60%）
+        self._admin_init_progress = "加载向量模型"
+        self._admin_init_percent = 5
+        vi: Optional[VectorIndex] = None
+        try:
+            vi = VectorIndex()
+        except Exception:
+            pass
+        self._admin_init_percent = 40
+
+        # Step 2: 加载重排序模型（占 40-80%）
+        self._admin_init_progress = "加载重排序模型"
+        llm: Optional[LLMClient] = None
+        reranker: Optional[Reranker] = None
+        try:
+            llm = get_llm() if settings.has_llm() else None
+            if llm:
+                reranker = create_reranker(llm=llm)
+        except Exception:
+            pass
+        self._admin_init_percent = 75
+
+        # Step 3: 组装知识引擎（占 75-95%）
+        self._admin_init_progress = "组装知识引擎"
+        service = QAService(
+            storage=self.storage,
+            memory_store=self.memory_store,
+            vector_index=vi,
+            llm=llm,
+        )
+        self._admin_init_percent = 95
+
+        with self._admin_init_lock:
+            if not service.is_ready:
+                self._admin_init_failed = True
+                return
+            self._vector_available = service.vector_index is not None
+            self.administrator = service.administrator
+            if self.memory_store is None:
+                self.memory_store = service.memory_store
+            from core.todo.manager import TodoManager
+            todo_mgr = getattr(self, "_todo_mgr", None) or TodoManager()
+            self._todo_mgr = todo_mgr
+            self.administrator.todo_manager = todo_mgr
 
     # ---- 活跃会话管理 ----
 
@@ -299,7 +380,7 @@ class REPL(
             if choice == len(sessions):
                 # 新建会话
                 default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
-                name = Prompt.ask("[dim]新会话名称[/dim]", default=default_name)
+                name = _repl_input("[dim]新会话名称[/dim]", default=default_name)
                 ss.create_session(name)
                 self.active_session_name = name
                 self.history = []
@@ -330,7 +411,7 @@ class REPL(
         else:
             # 无历史会话：直接问新名称
             default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
-            name = Prompt.ask("[dim]新会话名称[/dim]", default=default_name)
+            name = _repl_input("[dim]新会话名称[/dim]", default=default_name)
             ss.create_session(name)
             self.active_session_name = name
             self.history = []
@@ -375,6 +456,8 @@ class REPL(
 
     def run(self) -> None:
         """启动 REPL 主循环。"""
+        # 后台预热检索模型（提前到启动页之前，趁选会话时加载）
+        self._preheat_administrator()
         # 初始化活跃会话（内部已处理启动页渲染 + 会话询问 + 刷新）
         self._init_active_session()
         # 跨天检查：提示用户处理昨日未完成任务
@@ -382,6 +465,32 @@ class REPL(
             self._check_carry_over()
         except Exception:
             pass  # 跨天检查失败不影响 REPL 启动
+
+        # 如果预热还没完成，显示步进进度条（类入库样式）
+        if self._admin_init_thread is not None and self._admin_init_thread.is_alive():
+            from rich.progress import (
+                Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn,
+            )
+            import time
+            with Progress(
+                SpinnerColumn(spinner_name="dots"),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(bar_width=20),
+                TaskProgressColumn(),
+                console=console,
+                transient=True,
+            ) as p:
+                task = p.add_task("[cyan]加载向量模型[/cyan]", total=100)
+                last_pct = 0
+                while not self._admin_init_ready.is_set():
+                    current_pct = self._admin_init_percent
+                    if current_pct != last_pct:
+                        desc = self._admin_init_progress or "加载模型中..."
+                        p.update(task, completed=current_pct, description=f"[cyan]{desc}[/cyan]")
+                        last_pct = current_pct
+                    time.sleep(0.1)
+                p.update(task, completed=100, description="[green]✓ 模型就绪[/green]")
+                time.sleep(0.3)
 
         while self.running:
             try:
@@ -406,8 +515,9 @@ class REPL(
                 # 普通对话
                 self._handle_chat(user_input)
 
-        # 退出时自动保存活跃会话
+        # 退出时自动保存活跃会话并停止桌面宠物
         self._save_active_session()
+        self._stop_desktop_pet()
 
     def _handle_read_input(self, user_input: str) -> None:
         """阅读模式下的输入处理。"""
@@ -531,12 +641,8 @@ class REPL(
                 choices_display = "/".join(choices_list)
                 valid = False
                 while not valid:
-                    try:
-                        val = Prompt.ask(
-                            f"请输入 {param_name} ({choices_display})",
-                            default="",
-                        ).strip()
-                    except (EOFError, KeyboardInterrupt):
+                    val = _repl_input(f"请输入 {param_name} ({choices_display})", default="")
+                    if val == "":
                         return None
                     if not val:
                         console.print("[dim]已取消[/dim]")
@@ -551,11 +657,8 @@ class REPL(
                 prompt_parts.append(val)
             else:
                 # 普通参数：自由输入
-                try:
-                    val = Prompt.ask(f"请输入 {ph}").strip()
-                except (EOFError, KeyboardInterrupt):
-                    return None
-                if not val:
+                val = _repl_input(f"请输入 {ph}", default="")
+                if val == "":
                     console.print("[dim]已取消[/dim]")
                     return None
                 prompt_parts.append(val)
@@ -652,7 +755,118 @@ class REPL(
             padding=(1, 2),
         ))
 
+    def _cmd_desktop(self, arg: str) -> None:
+        """Electron 桌面宠物开关：/desktop [start|stop|status]。"""
+        import os
+        import signal
+        import subprocess
+        import time
+        from pathlib import Path
+
+        parts = arg.split()
+        sub = parts[0].lower() if parts else "start"
+
+        pid_file = Path(PROJECT_ROOT) / "storage" / "desktop_pet.pid"
+
+        if sub in ("start", ""):
+            # 先检查是否已在运行
+            if pid_file.exists():
+                try:
+                    pid = int(pid_file.read_text().strip())
+                    os.kill(pid, 0)
+                    console.print("[yellow]桌面宠物已在运行中[/yellow]")
+                    return
+                except (ProcessLookupError, ValueError, OSError):
+                    pid_file.unlink(missing_ok=True)
+
+            script = Path(PROJECT_ROOT) / "bin" / "ima-desktop"
+            if not script.exists():
+                console.print("[red]找不到桌面宠物启动脚本: ima-desktop[/red]")
+                return
+
+            try:
+                process = subprocess.Popen(
+                    [str(script)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                pid_file.write_text(str(process.pid))
+                console.print(f"[green]✓ 桌面宠物启动中[/green] [dim]PID {process.pid}[/dim]")
+            except Exception as e:
+                console.print(f"[red]启动失败:[/red] {e}")
+
+        elif sub == "stop":
+            if not pid_file.exists():
+                console.print("[yellow]桌面宠物未在运行[/yellow]")
+                return
+
+            try:
+                pid = int(pid_file.read_text().strip())
+            except (ValueError, OSError):
+                pid_file.unlink(missing_ok=True)
+                console.print("[yellow]桌面宠物未在运行[/yellow]")
+                return
+
+            try:
+                # 发送 SIGTERM 给整个进程组，确保 npm + electron 一起退出
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+                time.sleep(0.5)
+                try:
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                console.print("[green]✓ 桌面宠物已停止[/green]")
+            except ProcessLookupError:
+                console.print("[yellow]桌面宠物进程已不存在[/yellow]")
+            except Exception as e:
+                console.print(f"[red]停止失败:[/red] {e}")
+            finally:
+                pid_file.unlink(missing_ok=True)
+
+        elif sub == "status":
+            running = False
+            pid = None
+            if pid_file.exists():
+                try:
+                    pid = int(pid_file.read_text().strip())
+                    os.kill(pid, 0)
+                    running = True
+                except (ProcessLookupError, ValueError, OSError):
+                    pass
+            socket_exists = Path("/tmp/ima-desktop-pet.sock").exists()
+            if running or socket_exists:
+                console.print(f"[green]桌面宠物运行中[/green]" + (f" [dim]PID {pid}[/dim]" if pid else ""))
+            else:
+                console.print("[dim]桌面宠物未运行[/dim]")
+
+        else:
+            console.print("[yellow]用法: /desktop [start|stop|status][/yellow]")
+
     def _cmd_exit(self, arg: str) -> None:
         """退出 REPL。"""
+        self._stop_desktop_pet()
         self.running = False
         console.print("[dim]再见[/dim]")
+
+    def _stop_desktop_pet(self) -> None:
+        """停止桌面宠物进程。"""
+        import os
+        import signal
+        from pathlib import Path
+
+        pid_file = Path(PROJECT_ROOT) / "storage" / "desktop_pet.pid"
+        if not pid_file.exists():
+            return
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            import time
+            time.sleep(0.3)
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            pid_file.unlink(missing_ok=True)
+        except (ProcessLookupError, ValueError, OSError):
+            pid_file.unlink(missing_ok=True)

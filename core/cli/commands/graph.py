@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 from rich.table import Table
-from rich.prompt import Prompt
 from rich.progress import (
     Progress,
     SpinnerColumn,
@@ -327,11 +326,8 @@ class GraphMixin:
         if len(targets) == 1:
             n, degree, node_data = targets[0]
             console.print(f"  [dim]类型: {node_data.get('type', '?')} · 连接: {degree}[/dim]")
-            confirm = Prompt.ask(
-                f"确定删除节点 [cyan]{n}[/cyan] 及其 {degree} 条连边？",
-                choices=["y", "n"], default="n",
-            )
-            if confirm != "y":
+            from core.cli.terminal_helpers import repl_confirm
+            if not repl_confirm(f"确定删除节点 {n} 及其 {degree} 条连边？"):
                 console.print("[dim]已取消[/dim]")
                 return
             ok = gs.delete_node(n)
@@ -347,11 +343,8 @@ class GraphMixin:
         for i, (n, degree, node_data) in enumerate(targets, 1):
             console.print(f"  {i}. [cyan]{n}[/cyan] [dim](类型: {node_data.get('type', '?')} · 连接: {degree})[/dim]")
         console.print()
-        confirm = Prompt.ask(
-            f"确定删除以上 {len(targets)} 个节点？",
-            choices=["y", "n"], default="n",
-        )
-        if confirm != "y":
+        from core.cli.terminal_helpers import repl_confirm
+        if not repl_confirm(f"确定删除以上 {len(targets)} 个节点？"):
             console.print("[dim]已取消[/dim]")
             return
         ok_count = 0

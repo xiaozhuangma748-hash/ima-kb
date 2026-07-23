@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="zh" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cat Agent States</title>
+    <style id="theme-vars">
+/* cat-agent-showcase brand tokens */
+:root {
+  --cat-background: #FFFAF5;
+  --cat-foreground: #2D2017;
+  --cat-card: #FFFFFF;
+  --cat-card-foreground: #2D2017;
+  --cat-popover: #FFFFFF;
+  --cat-popover-foreground: #2D2017;
+  --cat-primary: #E88C64;
+  --cat-primary-foreground: #FFFFFF;
+  --cat-muted: #F5EDE6;
+  --cat-muted-foreground: #8C7A6B;
+  --cat-border: #E8DDD3;
+  --cat-input: #F0E8E0;
+  --cat-ring: #E88C64;
+  --cat-radius-sm: 8px;
+  --cat-radius-md: 12px;
+  --cat-radius-lg: 20px;
+  --cat-state-success: #5CAA6E;
+  --cat-state-warning: #D4A843;
+  --cat-state-error: #D4573E;
+  --cat-state-info: #5B8EC9;
+}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--cat-background);
+    --color-foreground: var(--cat-foreground);
+    --color-card: var(--cat-card);
+    --color-card-foreground: var(--cat-card-foreground);
+    --color-popover: var(--cat-popover);
+    --color-popover-foreground: var(--cat-popover-foreground);
+    --color-primary: var(--cat-primary);
+    --color-primary-foreground: var(--cat-primary-foreground);
+    --color-muted: var(--cat-muted);
+    --color-muted-foreground: var(--cat-muted-foreground);
+    --color-border: var(--cat-border);
+    --color-input: var(--cat-input);
+    --color-ring: var(--cat-ring);
+    --radius-sm: var(--cat-radius-sm);
+    --radius-md: var(--cat-radius-md);
+    --radius-lg: var(--cat-radius-lg);
+  }
+  @layer base {
+    body { background: var(--cat-background); color: var(--cat-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--cat-background); }
+      .text-background { color: var(--cat-background); }
+      .border-background { border-color: var(--cat-background); }
+      .ring-background { --tw-ring-color: var(--cat-background); }
+      .bg-foreground { background-color: var(--cat-foreground); }
+      .text-foreground { color: var(--cat-foreground); }
+      .border-foreground { border-color: var(--cat-foreground); }
+      .ring-foreground { --tw-ring-color: var(--cat-foreground); }
+      .bg-card { background-color: var(--cat-card); }
+      .text-card { color: var(--cat-card); }
+      .border-card { border-color: var(--cat-card); }
+      .ring-card { --tw-ring-color: var(--cat-card); }
+      .bg-card-foreground { background-color: var(--cat-card-foreground); }
+      .text-card-foreground { color: var(--cat-card-foreground); }
+      .border-card-foreground { border-color: var(--cat-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--cat-card-foreground); }
+      .bg-popover { background-color: var(--cat-popover); }
+      .text-popover { color: var(--cat-popover); }
+      .border-popover { border-color: var(--cat-popover); }
+      .ring-popover { --tw-ring-color: var(--cat-popover); }
+      .bg-popover-foreground { background-color: var(--cat-popover-foreground); }
+      .text-popover-foreground { color: var(--cat-popover-foreground); }
+      .border-popover-foreground { border-color: var(--cat-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--cat-popover-foreground); }
+      .bg-primary { background-color: var(--cat-primary); }
+      .text-primary { color: var(--cat-primary); }
+      .border-primary { border-color: var(--cat-primary); }
+      .ring-primary { --tw-ring-color: var(--cat-primary); }
+      .bg-primary-foreground { background-color: var(--cat-primary-foreground); }
+      .text-primary-foreground { color: var(--cat-primary-foreground); }
+      .border-primary-foreground { border-color: var(--cat-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--cat-primary-foreground); }
+      .bg-muted { background-color: var(--cat-muted); }
+      .text-muted { color: var(--cat-muted); }
+      .border-muted { border-color: var(--cat-muted); }
+      .ring-muted { --tw-ring-color: var(--cat-muted); }
+      .bg-muted-foreground { background-color: var(--cat-muted-foreground); }
+      .text-muted-foreground { color: var(--cat-muted-foreground); }
+      .border-muted-foreground { border-color: var(--cat-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--cat-muted-foreground); }
+      .bg-border { background-color: var(--cat-border); }
+      .text-border { color: var(--cat-border); }
+      .border-border { border-color: var(--cat-border); }
+      .ring-border { --tw-ring-color: var(--cat-border); }
+      .bg-input { background-color: var(--cat-input); }
+      .text-input { color: var(--cat-input); }
+      .border-input { border-color: var(--cat-input); }
+      .ring-input { --tw-ring-color: var(--cat-input); }
+      .bg-ring { background-color: var(--cat-ring); }
+      .text-ring { color: var(--cat-ring); }
+      .border-ring { border-color: var(--cat-ring); }
+      .ring-ring { --tw-ring-color: var(--cat-ring); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <style>
+      @keyframes cat-float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-12px); }
+      }
+      .state-btn {
+        border-left: 4px solid transparent;
+        transition: background-color .15s ease, border-color .15s ease;
+      }
+      .state-btn:hover { background-color: color-mix(in srgb, var(--cat-muted) 60%, transparent); }
+      .state-btn.is-active {
+        border-left-color: var(--cat-primary);
+        background-color: var(--cat-muted);
+      }
+      .lifecycle-arrow { color: var(--cat-muted-foreground); font-weight: 700; }
+      .state-list-scroll::-webkit-scrollbar { width: 6px; }
+      .state-list-scroll::-webkit-scrollbar-thumb { background: var(--cat-border); border-radius: 3px; }
+      .state-list-scroll::-webkit-scrollbar-track { background: transparent; }
+    </style>
+    <main>
+      <!-- ===== HERO ===== -->
+      <section class="max-w-6xl mx-auto px-6 pt-20 pb-16 flex flex-col lg:flex-row items-center gap-12 lg:gap-20">
+        <!-- Left: Text -->
+        <div class="flex-1 flex flex-col gap-6 text-center lg:text-left">
+          <h1 class="text-5xl lg:text-6xl font-extrabold tracking-tight leading-tight text-foreground">
+            Cat Agent States
+          </h1>
+          <p class="text-xl text-muted-foreground leading-relaxed max-w-md">
+            12 个像素猫咪动画状态，为 AI Agent 界面而生
+          </p>
+          <div class="mt-2">
+            <button class="inline-flex items-center gap-2 bg-foreground text-background px-5 py-2.5 rounded-full text-sm font-mono tracking-wide cursor-default">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 2-2-2-2"/><path d="m8 18-2-2 2-2"/><path d="m14.5 4-5 16"/></svg>
+              npm install cat-agent-states
+            </button>
+          </div>
+          <div class="flex flex-wrap justify-center lg:justify-start gap-3 mt-2">
+            <span class="inline-flex items-center gap-1.5 border border-border rounded-full px-4 py-1.5 text-sm text-muted-foreground bg-card">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+              108KB 总体积
+            </span>
+            <span class="inline-flex items-center gap-1.5 border border-border rounded-full px-4 py-1.5 text-sm text-muted-foreground bg-card">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+              零配置
+            </span>
+            <span class="inline-flex items-center gap-1.5 border border-border rounded-full px-4 py-1.5 text-sm text-muted-foreground bg-card">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/></svg>
+              12 个状态
+            </span>
+          </div>
+        </div>
+        <!-- Right: Hero Cat -->
+        <div class="flex-shrink-0 flex items-center justify-center">
+          <div class="relative">
+            <div class="absolute inset-0 bg-primary/10 rounded-full scale-125"></div>
+            <img
+              src="../assets/cat_idle.gif"
+              alt="Pixel cat idle animation"
+              width="200"
+              height="200"
+              class="relative z-10 rounded-full"
+              style="image-rendering: pixelated; animation: cat-float 3s ease-in-out infinite;"
+            />
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== INTERACTIVE STATE SWITCHER ===== -->
+      <section class="max-w-6xl mx-auto px-6 pb-20">
+        <div class="text-center mb-10">
+          <h2 class="text-3xl font-bold text-foreground">点点看，每个状态是什么猫</h2>
+          <p class="text-sm text-muted-foreground mt-2">点击右侧任一状态，左侧猫咪与代码同步切换</p>
+        </div>
+        <div class="grid lg:grid-cols-5 gap-6">
+          <!-- Left: Preview Stage (3/5 = 60%) -->
+          <div class="lg:col-span-3 border border-border rounded-lg bg-card p-6 lg:p-8 flex flex-col items-center gap-5">
+            <!-- display area with coral-tinted circle -->
+            <div class="relative flex items-center justify-center" style="width: 300px; height: 260px;">
+              <div class="absolute inset-0 bg-primary/10 rounded-full" style="transform: scale(1.15);"></div>
+              <img id="preview-cat" src="../assets/cat_thinking.gif" alt="thinking cat" width="240" height="240" class="relative z-10" style="image-rendering: pixelated;" />
+            </div>
+            <!-- state name -->
+            <div class="text-center">
+              <div id="preview-name" class="text-3xl font-extrabold text-foreground tracking-tight">thinking</div>
+              <div id="preview-cn" class="text-base text-foreground/80 mt-1">思考气泡</div>
+              <div id="preview-en" class="text-xs text-muted-foreground mt-0.5">LLM call in progress</div>
+            </div>
+            <!-- live code snippet (terminal style) -->
+            <code class="bg-foreground text-background rounded-md px-4 py-2.5 text-sm font-mono inline-flex items-center gap-1.5">
+              <span class="text-muted-foreground/50 select-none">&rsaquo;</span>
+              &lt;CatAgent state=<span id="code-state" class="text-primary">"thinking"</span> /&gt;
+            </code>
+          </div>
+
+          <!-- Right: Selector Panel (2/5 = 40%) -->
+          <div class="lg:col-span-2 border border-border rounded-lg bg-card p-4 flex flex-col gap-3">
+            <div class="flex items-center justify-between px-1 pb-2 border-b border-border">
+              <h3 class="text-xs font-bold text-foreground uppercase tracking-wider">选择状态</h3>
+              <span class="text-xs text-muted-foreground">12 个</span>
+            </div>
+            <div id="state-list" class="state-list-scroll flex flex-col gap-1 overflow-y-auto pr-1" style="max-height: 480px;">
+              <!-- state buttons generated by JS -->
+            </div>
+            <!-- legend -->
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pt-2 border-t border-border text-[10px] text-muted-foreground">
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background: var(--cat-muted-foreground);"></span>等待</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background: var(--cat-state-info);"></span>处理中</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background: var(--cat-state-success);"></span>完成</span>
+              <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background: var(--cat-state-error);"></span>异常</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== AGENT LIFECYCLE FLOW ===== -->
+      <section class="max-w-6xl mx-auto px-6 pb-20">
+        <div class="text-center mb-10">
+          <h2 class="text-3xl font-bold text-foreground">Agent 工作流程</h2>
+          <p class="text-sm text-muted-foreground mt-2">12 个状态在 Agent 生命周期中的位置</p>
+        </div>
+        <div class="flex flex-wrap items-stretch gap-3">
+          <!-- Phase 1: 待机 -->
+          <div class="flex-1 min-w-[200px] border border-border rounded-lg p-4 flex flex-col gap-3" style="background: color-mix(in srgb, var(--cat-muted-foreground) 8%, var(--cat-card));">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full" style="background: var(--cat-muted-foreground);"></span>
+              <h3 class="text-xs font-bold text-foreground uppercase tracking-wider">待机 · Standby</h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="flex flex-col items-center gap-1">
+                <img src="../assets/cat_idle.gif" alt="idle" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                <span class="text-[11px] text-muted-foreground">idle</span>
+              </div>
+              <div class="flex flex-col items-center gap-1">
+                <img src="../assets/cat_sleeping.gif" alt="sleeping" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                <span class="text-[11px] text-muted-foreground">sleeping</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- arrow between phases -->
+          <div class="lifecycle-arrow hidden lg:flex items-center text-2xl px-1">&rarr;</div>
+
+          <!-- Phase 2: 接收 -->
+          <div class="flex-1 min-w-[140px] border border-border rounded-lg p-4 flex flex-col gap-3 bg-card">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full" style="background: var(--cat-muted-foreground);"></span>
+              <h3 class="text-xs font-bold text-foreground uppercase tracking-wider">接收 · Input</h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="flex flex-col items-center gap-1">
+                <img src="../assets/cat_listening.gif" alt="listening" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                <span class="text-[11px] text-muted-foreground">listening</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- arrow between phases -->
+          <div class="lifecycle-arrow hidden lg:flex items-center text-2xl px-1">&rarr;</div>
+
+          <!-- Phase 3: 处理 -->
+          <div class="flex-[2] min-w-[280px] border rounded-lg p-4 flex flex-col gap-3" style="border-color: color-mix(in srgb, var(--cat-state-info) 35%, var(--cat-border)); background: color-mix(in srgb, var(--cat-state-info) 8%, var(--cat-card));">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full" style="background: var(--cat-state-info);"></span>
+              <h3 class="text-xs font-bold text-foreground uppercase tracking-wider">处理 · Processing</h3>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="flex flex-col items-center gap-1">
+                <img src="../assets/cat_thinking.gif" alt="thinking" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                <span class="text-[11px] text-muted-foreground">thinking</span>
+              </div>
+              <span class="lifecycle-arrow text-lg">&rarr;</span>
+              <div class="flex flex-col items-center gap-1">
+                <img src="../assets/cat_retrieving.gif" alt="retrieving" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                <span class="text-[11px] text-muted-foreground">retrieving</span>
+              </div>
+              <span class="lifecycle-arrow text-lg">&rarr;</span>
+              <div class="flex flex-col items-center gap-1">
+                <img src="../assets/cat_ranking.gif" alt="ranking" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                <span class="text-[11px] text-muted-foreground">ranking</span>
+              </div>
+              <span class="lifecycle-arrow text-lg">&rarr;</span>
+              <div class="flex flex-col items-center gap-1">
+                <img src="../assets/cat_analyzing.gif" alt="analyzing" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                <span class="text-[11px] text-muted-foreground">analyzing</span>
+              </div>
+              <span class="lifecycle-arrow text-lg">&rarr;</span>
+              <div class="flex flex-col items-center gap-1">
+                <img src="../assets/cat_ingesting.gif" alt="ingesting" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                <span class="text-[11px] text-muted-foreground">ingesting</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- arrow between phases -->
+          <div class="lifecycle-arrow hidden lg:flex items-center text-2xl px-1">&rarr;</div>
+
+          <!-- Phase 4: 输出与终态 -->
+          <div class="flex-1 min-w-[200px] border border-border rounded-lg p-4 flex flex-col gap-3 bg-card">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full" style="background: var(--cat-state-success);"></span>
+              <h3 class="text-xs font-bold text-foreground uppercase tracking-wider">输出与终态 · Output</h3>
+            </div>
+            <div class="flex flex-col gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="flex flex-col items-center gap-1">
+                  <img src="../assets/cat_answering.gif" alt="answering" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                  <span class="text-[11px] text-muted-foreground">answering</span>
+                </div>
+                <span class="lifecycle-arrow text-lg">&rarr;</span>
+                <div class="flex flex-col items-center gap-1">
+                  <img src="../assets/cat_notifying.gif" alt="notifying" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                  <span class="text-[11px] text-muted-foreground">notifying</span>
+                </div>
+              </div>
+              <div class="border-t border-border pt-3 flex flex-wrap items-center gap-3">
+                <div class="flex flex-col items-center gap-1">
+                  <img src="../assets/cat_celebrating.gif" alt="celebrating" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                  <span class="text-[11px]" style="color: var(--cat-state-success);">celebrating</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                  <img src="../assets/cat_error.gif" alt="error" width="56" height="56" style="image-rendering: pixelated;" class="rounded" />
+                  <span class="text-[11px]" style="color: var(--cat-state-error);">error</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== CODE USAGE ===== -->
+      <section class="max-w-6xl mx-auto px-6 pb-20">
+        <h2 class="text-3xl font-bold text-foreground mb-10 text-center">快速接入</h2>
+
+        <!-- Tabs -->
+        <div class="flex justify-center mb-0">
+          <div class="relative inline-flex border-b border-border" id="code-tabs">
+            <button data-dom-id="tab-react" data-tab="react" class="px-6 py-3 text-sm font-medium text-foreground transition-colors relative z-10 cursor-pointer">React</button>
+            <button data-dom-id="tab-vanilla" data-tab="vanilla" class="px-6 py-3 text-sm font-medium text-muted-foreground transition-colors relative z-10 cursor-pointer">Vanilla JS</button>
+            <button data-dom-id="tab-html" data-tab="html" class="px-6 py-3 text-sm font-medium text-muted-foreground transition-colors relative z-10 cursor-pointer">HTML</button>
+            <!-- Sliding underline -->
+            <span id="tab-indicator" class="absolute bottom-0 left-0 h-0.5 bg-primary transition-all duration-300 ease-in-out" style="width: 60px;"></span>
+          </div>
+        </div>
+
+        <!-- Code Blocks -->
+        <div class="border border-border rounded-b-lg rounded-tr-lg bg-foreground overflow-hidden">
+          <div data-dom-id="code-react" class="code-panel p-6">
+            <pre class="text-sm leading-relaxed text-background font-mono overflow-x-auto"><code>import { CatAgent } from 'cat-agent-states';
+
+function App() {
+  return &lt;CatAgent state="thinking" size={120} /&gt;;
+}</code></pre>
+          </div>
+          <div data-dom-id="code-vanilla" class="code-panel p-6 hidden">
+            <pre class="text-sm leading-relaxed text-background font-mono overflow-x-auto"><code>import { setState } from 'cat-agent-states';
+setState('celebrating');</code></pre>
+          </div>
+          <div data-dom-id="code-html" class="code-panel p-6 hidden">
+            <pre class="text-sm leading-relaxed text-background font-mono overflow-x-auto"><code>&lt;img src="cat-agent-states/cat_idle.gif"
+     style="image-rendering: pixelated"
+     width="120" /&gt;</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== FOOTER ===== -->
+      <footer class="max-w-6xl mx-auto px-6 pt-6 pb-8">
+        <div class="border-t border-border pt-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-muted-foreground">
+          <span>MIT License</span>
+          <span>Made with care</span>
+        </div>
+      </footer>
+    </main>
+
+    <script>
+      // ===== Interactive State Switcher =====
+      (function () {
+        var STATES = [
+          { key: 'idle',        cn: '呼吸等待',   en: 'User reading, agent waiting', cat: '等待' },
+          { key: 'listening',   cn: '倾听声波',   en: 'Voice input',                cat: '等待' },
+          { key: 'thinking',    cn: '思考气泡',   en: 'LLM call in progress',       cat: '处理中' },
+          { key: 'retrieving',  cn: '翻书检索',   en: 'RAG vector search',          cat: '处理中' },
+          { key: 'ranking',     cn: '排名卡片',   en: 'Re-ranking results',         cat: '处理中' },
+          { key: 'answering',   cn: '打字输出',   en: 'Streaming output',           cat: '处理中' },
+          { key: 'celebrating', cn: '庆祝跳跃',   en: 'Task complete',              cat: '完成' },
+          { key: 'notifying',   cn: '灯泡提醒',   en: 'Memory surfacing',           cat: '完成' },
+          { key: 'ingesting',   cn: '吃文件入库', en: 'File upload indexing',       cat: '处理中' },
+          { key: 'analyzing',   cn: '算盘分析',   en: 'Data processing',            cat: '处理中' },
+          { key: 'sleeping',    cn: '睡眠闭眼',   en: '60s no activity',            cat: '等待' },
+          { key: 'error',       cn: '错误警告',   en: 'Tool or LLM failed',         cat: '异常' }
+        ];
+        var CAT_COLORS = {
+          '等待': 'var(--cat-muted-foreground)',
+          '处理中': 'var(--cat-state-info)',
+          '完成': 'var(--cat-state-success)',
+          '异常': 'var(--cat-state-error)'
+        };
+        var list = document.getElementById('state-list');
+        var previewCat = document.getElementById('preview-cat');
+        var previewName = document.getElementById('preview-name');
+        var previewCn = document.getElementById('preview-cn');
+        var previewEn = document.getElementById('preview-en');
+        var codeState = document.getElementById('code-state');
+
+        function selectState(key) {
+          var state = null;
+          for (var i = 0; i < STATES.length; i++) {
+            if (STATES[i].key === key) { state = STATES[i]; break; }
+          }
+          if (!state) return;
+          previewCat.src = '../assets/' + ('cat_' + state.key) + '.gif';
+          previewCat.alt = state.key + ' cat';
+          previewName.textContent = state.key;
+          previewCn.textContent = state.cn;
+          previewEn.textContent = state.en;
+          codeState.textContent = '"' + state.key + '"';
+          var btns = list.querySelectorAll('.state-btn');
+          for (var j = 0; j < btns.length; j++) {
+            if (btns[j].dataset.state === key) btns[j].classList.add('is-active');
+            else btns[j].classList.remove('is-active');
+          }
+        }
+
+        // build selector buttons
+        for (var i = 0; i < STATES.length; i++) {
+          (function (s) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.dataset.state = s.key;
+            btn.className = 'state-btn flex items-center gap-3 p-2 rounded-md text-left w-full';
+            btn.innerHTML =
+              '<img src="../assets/' + ('cat_' + s.key) + '.gif" alt="' + s.key + '" width="48" height="48" style="image-rendering: pixelated;" class="rounded" />' +
+              '<div class="flex-1 min-w-0">' +
+                '<div class="font-bold text-foreground text-sm">' + s.key + '</div>' +
+                '<div class="text-xs text-muted-foreground truncate">' + s.cn + ' &middot; ' + s.en + '</div>' +
+              '</div>' +
+              '<span class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: ' + CAT_COLORS[s.cat] + ';" title="' + s.cat + '"></span>';
+            btn.addEventListener('click', function () { selectState(s.key); });
+            list.appendChild(btn);
+          })(STATES[i]);
+        }
+
+        // default selected
+        selectState('thinking');
+      })();
+    </script>
+
+    <script>
+      // Tab switching with sliding underline
+      (function () {
+        var tabs = document.querySelectorAll('#code-tabs [data-tab]');
+        var panels = document.querySelectorAll('.code-panel');
+        var indicator = document.getElementById('tab-indicator');
+
+        function activateTab(targetTab) {
+          tabs.forEach(function (btn) {
+            if (btn.dataset.tab === targetTab) {
+              btn.classList.remove('text-muted-foreground');
+              btn.classList.add('text-foreground');
+            } else {
+              btn.classList.remove('text-foreground');
+              btn.classList.add('text-muted-foreground');
+            }
+          });
+
+          panels.forEach(function (panel) {
+            var panelKey = panel.dataset.domId.replace('code-', '');
+            if (panelKey === targetTab) {
+              panel.classList.remove('hidden');
+            } else {
+              panel.classList.add('hidden');
+            }
+          });
+
+          var activeBtn = document.querySelector('[data-tab="' + targetTab + '"]');
+          if (activeBtn && indicator) {
+            indicator.style.width = activeBtn.offsetWidth + 'px';
+            indicator.style.transform = 'translateX(' + (activeBtn.offsetLeft) + 'px)';
+          }
+        }
+
+        tabs.forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            activateTab(btn.dataset.tab);
+          });
+        });
+
+        activateTab('react');
+
+        window.addEventListener('resize', function () {
+          var activeBtn = document.querySelector('#code-tabs [data-tab].text-foreground');
+          if (activeBtn && indicator) {
+            indicator.style.width = activeBtn.offsetWidth + 'px';
+            indicator.style.transform = 'translateX(' + (activeBtn.offsetLeft) + 'px)';
+          }
+        });
+      })();
+    </script>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

@@ -283,7 +283,9 @@ class PetAdministrator:
     def ask_stream(self, query: str, style_override: Optional[str] = None,
                    history: Optional[List[Dict]] = None,
                    summary: Optional[str] = None,
-                   cross_session_context: Optional[str] = None):
+                   cross_session_context: Optional[str] = None,
+                   max_tokens: int = 1024,
+                   extra_system_prompt: Optional[str] = None):
         """流式问答生成器。yield 事件 dict:
         - {"type": "stage", "stage": "检索", "count": N}
         - {"type": "stage", "stage": "重排", "count": N}
@@ -397,6 +399,8 @@ class PetAdministrator:
         # 取最近 10 条历史（5 轮对话），避免 token 超限
         recent_history = (history or [])[-10:]
         messages = [{"role": "system", "content": system_prompt}]
+        if extra_system_prompt:
+            messages.append({"role": "system", "content": extra_system_prompt})
         if cross_session_context:
             messages.append({"role": "system", "content": f"## 跨会话记忆\n{cross_session_context}"})
         if summary:
@@ -410,7 +414,7 @@ class PetAdministrator:
             for token in self.llm.chat_stream(
                 messages=messages,
                 temperature=0.3,
-                max_tokens=1024,
+                max_tokens=max_tokens,
             ):
                 answer_text += token
                 yield {"type": "token", "text": token}

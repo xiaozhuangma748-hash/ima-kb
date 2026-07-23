@@ -41,6 +41,19 @@ def _load_activities() -> list[dict]:
     return []
 
 
+def _parse_activity_time(time_str: str):
+    """解析活动记录的时间字符串，兼容新旧格式。
+
+    新格式（v4.1+）：2026-07-23 14:30:00
+    旧格式：07-23 14:30:00（补上当前年份）
+    """
+    from datetime import datetime
+    try:
+        return datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return datetime.strptime(f"{datetime.now().year}-{time_str}", "%Y-%m-%d %H:%M:%S")
+
+
 def _record_activity(act_type: str, desc: str, session: Optional[str] = None) -> None:
     """记录一条活动（最多保留 50 条，自动清理 7 天前的记录，同类型+描述去重）。
 
@@ -52,15 +65,15 @@ def _record_activity(act_type: str, desc: str, session: Optional[str] = None) ->
     from datetime import datetime, timedelta
     import json
     entries = _load_activities()
-    # 清理 7 天前的旧记录
-    cutoff = (datetime.now() - timedelta(days=7)).strftime("%m-%d")
-    entries = [e for e in entries if e.get("time", "") >= cutoff]
+    # 清理 7 天前的旧记录（用 datetime 比较，避免跨年字符串比较 bug）
+    cutoff_date = datetime.now() - timedelta(days=7)
+    entries = [e for e in entries if _parse_activity_time(e.get("time", "")) >= cutoff_date]
 
     # 去重：同会话 + 同类型 + 同描述只保留最新一条
     new_entry = {
         "type": act_type,
         "desc": desc,
-        "time": datetime.now().strftime("%m-%d %H:%M:%S"),
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "session": session or "",
     }
     entries = [
@@ -109,6 +122,7 @@ def _make_row(parts: list[tuple], width: int) -> Text:
 def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"] = None,
                           session_name: Optional[str] = None) -> None:
     """渲染启动页（Claude Code 风格）。"""
+    from datetime import datetime
     t = get_theme()
     term_cols = shutil.get_terminal_size((80, 24)).columns
     W = term_cols - 4  # 内宽 = 终端宽 - 2(border) - 2(左右各1空格)
@@ -160,17 +174,16 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
     right_rows.append(Text(""))
 
     all_entries = _load_activities()
-    # 按当前会话过滤（session 为空表示旧记录，也显示）
+    # 按当前会话过滤，只显示属于当前会话的记录
     if session_name:
         recent_entries = [
             e for e in all_entries
-            if e.get("session", "") == session_name or e.get("session", "") == ""
+            if e.get("session", "") == session_name
         ]
     else:
         recent_entries = all_entries
     if recent_entries:
-        from datetime import datetime
-        today = datetime.now().strftime("%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
         for e in recent_entries[:3]:
             e_time = e.get("time", "")
             time_str = e_time.split(" ", 1)[-1] if e_time.startswith(today) and " " in e_time else e_time
@@ -204,7 +217,7 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
     # 底部统计信息
     right_rows.append(Text(""))
     doc_count = stats.get("documents", 0)
-    today_count = len([e for e in recent_entries if e.get("time", "").startswith(datetime.now().strftime("%m-%d"))]) if recent_entries else 0
+    today_count = len([e for e in recent_entries if e.get("time", "").startswith(datetime.now().strftime("%Y-%m-%d"))]) if recent_entries else 0
     stat_text = f"  {doc_count} 篇文档 · 今日 {today_count} 次操作"
     stat_row = Text(stat_text, style="dim")
     right_rows.append(_pad_to_width(stat_row, right_w))

@@ -95,7 +95,8 @@ def test_decompose_success_returns_multiple():
     llm = MagicMock()
     llm.chat.return_value = '["什么是海葬？", "什么是树葬？", "海葬和树葬有什么区别？"]'
 
-    result = decompose_query("海葬和树葬的区别及各自费用", llm, enabled=True)
+    # 18 字以上且含"和/区别"复合信号，满足新的分解门槛
+    result = decompose_query("请详细说明海葬和树葬的区别及各自的具体费用是多少", llm, enabled=True)
 
     assert len(result) == 3
     assert "什么是海葬？" in result
@@ -116,8 +117,8 @@ def test_decompose_limits_to_four_subqueries():
     llm = MagicMock()
     llm.chat.return_value = '["q1", "q2", "q3", "q4", "q5", "q6"]'
 
-    # query 必须 > _DECOMPOSE_MIN_QUERY_LEN(12) 才触发分解
-    result = decompose_query("这是一个比较复杂的查询包含多个方面", llm, enabled=True)
+    # query 必须 >= _DECOMPOSE_MIN_QUERY_LEN(18) 且含复合信号才触发分解
+    result = decompose_query("请对比分析杭州和上海两地在生态安葬政策上的具体差异有哪些", llm, enabled=True)
     assert len(result) == 4
 
 
@@ -175,9 +176,9 @@ def test_transform_query_hyde_only_no_decompose():
         '根据殡葬管理条例规定节地生态安葬是指骨灰海葬树葬等形式',  # hyde 调用
     ]
 
-    # query > _DECOMPOSE_MIN_QUERY_LEN(12) 触发 decompose，
-    # 但 decompose 返回单元素，所以会走 HyDE
-    result = transform_query("这是一个比较长的查询触发分解", llm=llm, enable_hyde=True, enable_decompose=True)
+    # query 长度 >=18 且含复合信号触发 decompose，
+    # 但 decompose 返回单元素（不分解），所以会走 HyDE
+    result = transform_query("请详细说明海葬和树葬这两种安葬方式之间的主要区别是什么", llm=llm, enable_hyde=True, enable_decompose=True)
 
     assert result.used_hyde is True
     assert result.used_decompose is False
@@ -190,8 +191,8 @@ def test_transform_query_decompose_skips_hyde():
     llm = MagicMock()
     llm.chat.return_value = '["子问题1", "子问题2", "子问题3"]'
 
-    # query > 12 字触发分解，分解返回多元素，跳过 HyDE
-    result = transform_query("这是一个比较复杂的查询包含多个方面", llm=llm, enable_hyde=True, enable_decompose=True)
+    # query 长度 >=18 且含复合信号触发分解，分解返回多元素，跳过 HyDE
+    result = transform_query("请对比分析杭州和上海在生态安葬与海葬补贴政策上的差异", llm=llm, enable_hyde=True, enable_decompose=True)
 
     assert result.used_decompose is True
     assert result.used_hyde is False  # 分解时不做 HyDE

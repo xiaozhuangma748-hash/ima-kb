@@ -13,8 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from config import settings
-from core.storage import Storage
-from core.llm.client import get_llm
+from services.qa_service import QAService
 
 router = APIRouter(tags=["qa"])
 
@@ -29,47 +28,29 @@ def _build_sse_event(event_type: str, data: dict) -> str:
 async def qa_stream(request: Request):
     """SSE 流式问答。"""
     from web.app import _get_shared_storage, _get_shared_vector_index
-    from core.pet.administrator import PetAdministrator
-    from core.pet.storage import PetStorage
-    from core.memory.store import MemoryStore
-    from core.retrieval.hybrid import HybridRetriever
-    from core.retrieval.rerank import Reranker
-    from core.todo.manager import TodoManager
 
     body = await request.json()
     question = body.get("question", "").strip()
     history = body.get("history", [])
+    # 人格风格：scholar / warrior / artisan / neutral（Web 端可选，透传给 PetAdministrator）
+    persona = body.get("persona", "").strip() or None
 
     if not question:
         return {"error": "请输入问题"}
 
-    # 复用全局共享组件（避免每请求重新加载索引/模型）
+    # 通过 QAService 统一组装，复用 Web 共享组件
     storage = _get_shared_storage(request.app)
-    pet_storage = PetStorage()
-    pet = pet_storage.load()
-
-    if not pet:
-        return {"error": "请先领养宠物"}
-
-    memory = MemoryStore()
-
     vector_index = _get_shared_vector_index(request.app)
-    hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index, storage=storage)
-    llm = get_llm() if settings.has_llm() else None
-    reranker = Reranker(llm) if llm else None
 
-    if not llm or not reranker:
-        return {"error": "LLM 不可用，请检查配置"}
-
-    admin = PetAdministrator(
-        pet=pet,
+    service = QAService(
         storage=storage,
-        memory_store=memory,
-        hybrid_retriever=hybrid,
-        reranker=reranker,
-        llm=llm,
-        todo_manager=TodoManager(),
+        vector_index=vector_index,
     )
+
+    if not service.has_pet:
+        return {"error": "请先领养宠物"}
+    if not service.is_ready:
+        return {"error": "LLM 不可用，请检查配置"}
 
     async def event_stream():
         """异步 SSE 流：同步生成器放到线程中运行，不阻塞 event loop。
@@ -86,20 +67,17 @@ async def qa_stream(request: Request):
         def _run_in_thread():
             """在线程中运行同步生成器，把事件推入队列。"""
             try:
-                for event in admin.ask_stream(question, history=history):
+                for event in service.ask_stream(
+            question, history=history, style_override=persona
+        ):
                     if event["type"] == "stage":
                         msg = f"data: {json.dumps({'type': 'stage', 'stage': event['stage'], 'count': event.get('count', 0)}, ensure_ascii=False)}\n\n"
                     elif event["type"] == "token":
                         msg = f"data: {json.dumps({'type': 'token', 'text': event['text']}, ensure_ascii=False)}\n\n"
                     elif event["type"] == "done":
                         result = event["result"]
-                        # 保存宠物状态
-                        pet_storage.save(admin.pet)
-                        # 保存记忆
-                        try:
-                            memory.save()
-                        except Exception:
-                            pass
+                        # 保存宠物状态和记忆
+                        service.save_state()
                         # 构造引用数据
                         citations_data = []
                         for c in result.citations:

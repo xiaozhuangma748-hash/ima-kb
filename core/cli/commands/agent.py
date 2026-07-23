@@ -18,6 +18,12 @@ from rich.padding import Padding
 from rich.spinner import Spinner
 from rich.text import Text
 
+# 桌宠状态联动（失败静默，不影响 CLI 正常使用）
+try:
+    from core.desktop.cli_sync import _try_set_state as _try_pet_state
+except ImportError:
+    _try_pet_state = None
+
 from core.llm.client import get_llm, LLMError
 from core.cli.constants import console
 
@@ -157,8 +163,8 @@ class _ThinkingStatus:
     def __rich_console__(self, console, options):
         elapsed = time.time() - self._start
         desc = f"Thinking {elapsed:.1f}s"
-        # 动态图标 + 1 空格 + Thinking X.Xs
-        spinner = Spinner("dots", text=Text(f" {desc}", style="dim"), style="cyan")
+        # 动态图标 + 1 空格 + Thinking X.Xs（青色粗体，清晰可见）
+        spinner = Spinner("dots", text=Text(f" {desc}", style="bold cyan"), style="cyan")
         # 整体左缩进 2 空格，使 spinner 与步骤竖线对齐
         lines = [Padding(spinner, (0, 0, 0, 2))]
         with self._lock:
@@ -287,7 +293,7 @@ class AgentMixin:
                     # Show Thoughts: 用左侧竖线标识步骤边界（第一步除外）
                     if step_n[0] > 1:
                         console.print()  # 步骤间空行
-                    console.print(f"  [bright_black]│[/bright_black] [dim]Step {step_n[0]}[/dim]")
+                    console.print(f"  [bright_black]│[/bright_black] [bold]Step {step_n[0]}[/bold]")
                     # 启动 Thinking spinner（高刷新率支持打字机效果）
                     thinking_status = _ThinkingStatus(llm_start[0])
                     spinner[0] = Live(
@@ -311,7 +317,7 @@ class AgentMixin:
                     # fallback：停止 spinner 后静态打印
                     _stop_spinner()
                     elapsed = time.time() - llm_start[0]
-                    console.print(f"  [dim]◷ Thinking {elapsed:.1f}s[/dim]")
+                    console.print(f"  [bold cyan]◷ Thinking {elapsed:.1f}s[/bold cyan]")
                     if content.strip():
                         indented_lines = _wrap_indented(content, indent=4)
                         for line in indented_lines:
@@ -462,6 +468,11 @@ class AgentMixin:
         mode_hint = " · Show Thoughts" if show_thoughts else " · Hide Thoughts"
         console.print(f"\n[bold magenta]Agent[/bold magenta] · Task: [cyan]{arg}[/cyan][dim]{mode_hint}[/dim]\n")
 
+        # 桌宠状态联动
+        if _try_pet_state:
+            _try_pet_state("listening")
+            _try_pet_state("thinking")
+
         on_step, stop_spinner, t0, step_n, final_displayed = self._make_agent_on_step(show_thoughts=show_thoughts)
 
         try:
@@ -481,13 +492,20 @@ class AgentMixin:
             console.print()
             # 宠物经验埋点：agent 行为
             self._pet_gain_exp(15, "agent")
+            # 桌宠状态联动
+            if _try_pet_state:
+                _try_pet_state("celebrating")
         except LLMError as e:
             stop_spinner()
+            if _try_pet_state:
+                _try_pet_state("error")
             err_msg = str(e).replace("[", "\\[")
             console.print(f"\n[red]LLM 调用失败: {err_msg}[/red]")
             console.print("[dim]  请检查 API_KEY 和网络连接[/dim]")
         except Exception as e:
             stop_spinner()
+            if _try_pet_state:
+                _try_pet_state("error")
             err_msg = str(e).replace("[", "\\[")
             err_lower = err_msg.lower()
             # 识别网络类错误，给出排查建议

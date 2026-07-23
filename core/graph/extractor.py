@@ -88,6 +88,10 @@ EXTRACTOR_SYSTEM_PROMPT = """你是一个信息抽取专家。请从给定文档
 2. 关系的 source 总是文档标题
 3. 严格输出 JSON，不要任何解释文字
 4. **如果文档内容极少或无实质性信息，返回空实体和空关系**：{"entities": [], "relations": []}
+
+## 严格输出要求
+- 只输出一个 JSON 对象，不要任何解释、前缀或 markdown 代码块标记
+- 必须确保输出是合法 JSON（双引号、无尾随逗号）
 """
 
 MAX_CONTENT_PREVIEW = 1200  # 内容预览长度

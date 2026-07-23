@@ -27,12 +27,14 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 # HyDE 系统提示：要求 LLM 生成一段简短的"假设答案"作为检索查询
-_HYDE_SYSTEM_PROMPT = """你是一个殡葬政策知识库助手。
-请根据用户问题，生成一段 100-200 字的"假设答案"。
-这段假设答案即使内容不准确也没关系，关键是：
-1. 使用与正式文档类似的表述风格（政策性、正式）
-2. 包含问题中关键实体的相关术语
-3. 看起来像是从政策文档中摘录的片段
+# 注意：保持领域无关（本知识库是通用个人知识库，不绑定殡葬），
+# 避免对非殡葬资料产生领域偏置，影响 HyDE 召回质量。
+_HYDE_SYSTEM_PROMPT = """你是一个知识库检索辅助助手。
+请根据用户问题，生成一段 100-200 字的"假设答案"（hypothetical answer）。
+这段假设答案即使内容不完全准确也没关系，关键是：
+1. 使用与正式文档类似的表述风格（严谨、书面）
+2. 包含问题中关键实体的相关术语和同义表述
+3. 看起来像是从知识库文档中摘录的片段
 
 只输出假设答案正文，不要任何解释或前缀。
 """
@@ -108,8 +110,18 @@ _DECOMPOSE_SYSTEM_PROMPT = """你是一个查询分解助手。
 输出：["什么是节地生态安葬"]
 """
 
-# 触发子问题分解的最小 query 长度
-_DECOMPOSE_MIN_QUERY_LEN = 12
+# 触发子问题分解的最小 query 长度（太短的单句强行拆分反而增加检索噪声）
+_DECOMPOSE_MIN_QUERY_LEN = 18
+# 触发分解必须包含的疑问/复合连词信号（避免把普通长句拆成子问题）
+_DECOMPOSE_TRIGGERS = (
+    "？", "?", "的区别", "和", "与", "及", "以及",
+    "怎么", "如何", "为什么", "哪些", "分别", "对比", "比较",
+)
+
+
+def _looks_decomposable(query: str) -> bool:
+    """启发式：query 是否像需要拆分的复合问题。"""
+    return any(t in query for t in _DECOMPOSE_TRIGGERS)
 # 子问题分解最大 token 数
 _DECOMPOSE_MAX_TOKENS = 400
 
@@ -129,7 +141,10 @@ def decompose_query(
     Returns:
         子问题列表（简单问题返回 [query]）
     """
-    if not enabled or len(query) < _DECOMPOSE_MIN_QUERY_LEN or llm is None:
+    if not enabled or llm is None:
+        return [query]
+    # 长度 + 复合信号双重门槛：短 query 或单一意图不分解
+    if len(query) < _DECOMPOSE_MIN_QUERY_LEN or not _looks_decomposable(query):
         return [query]
 
     try:
@@ -187,9 +202,10 @@ def _parse_sub_queries(response: str) -> List[str]:
     if len(numbered) >= 2:
         return [q.strip() for q in numbered if q.strip()]
 
-    # 3. 换行分隔
+    # 3. 换行分隔（兜底）：仅当每行都像独立问句时才接受，避免把模型
+    #    的一句解释误拆成"子问题"
     lines = [line.strip() for line in text.split("\n") if line.strip() and not line.startswith("#")]
-    if len(lines) >= 2:
+    if len(lines) >= 2 and all(("？" in ln or "?" in ln or ln.endswith("？") or ln.endswith("?")) for ln in lines):
         return lines
 
     return []

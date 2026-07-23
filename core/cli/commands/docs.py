@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Optional
 
 from rich.table import Table
-from rich.prompt import Prompt
 from rich.live import Live
 from rich.spinner import Spinner
 from rich.progress import (
@@ -40,6 +39,9 @@ from rich.progress import (
     TaskProgressColumn,
     TextColumn,
 )
+
+
+from core.cli.terminal_helpers import repl_confirm as _repl_confirm
 
 from config import settings
 from core.ingestion.parser import parse, is_supported, SUPPORTED_EXTENSIONS, ParseError
@@ -639,11 +641,7 @@ class DocsMixin:
         # 列出所有待删除文档
         if len(targets) == 1:
             s, doc_id, doc = targets[0]
-            confirm = Prompt.ask(
-                f"确定删除 [cyan]{doc.title}[/cyan]？",
-                choices=["y", "n"], default="n"
-            )
-            if confirm != "y":
+            if not _repl_confirm(f"确定删除 {doc.title}？"):
                 console.print("[dim]已取消[/dim]")
                 return
             if self.storage.delete_document(doc_id):
@@ -657,11 +655,7 @@ class DocsMixin:
         for i, (s, doc_id, doc) in enumerate(targets, 1):
             console.print(f"  {i}. [cyan]{doc.title}[/cyan] [dim]({s})[/dim]")
         console.print()
-        confirm = Prompt.ask(
-            f"确定删除以上 {len(targets)} 个文档？",
-            choices=["y", "n"], default="n"
-        )
-        if confirm != "y":
+        if not _repl_confirm(f"确定删除以上 {len(targets)} 个文档？"):
             console.print("[dim]已取消[/dim]")
             return
         ok_count = 0
@@ -717,11 +711,7 @@ class DocsMixin:
 
         # 确认
         console.print(f"[dim]将重新解析: {file_path.name}[/dim]")
-        confirm = Prompt.ask(
-            "确定重新解析？（会先删除旧文档记录）",
-            choices=["y", "n"], default="n",
-        )
-        if confirm != "y":
+        if not _repl_confirm("确定重新解析？（会先删除旧文档记录）"):
             console.print("[dim]已取消[/dim]")
             return
 

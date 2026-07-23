@@ -32,8 +32,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from rich.table import Table
 
 from config import settings
-from core.ingestion.parser import parse, is_supported, SUPPORTED_EXTENSIONS, ParseError
-from core.ingestion.chunker import chunk_document
+from core.ingestion.parser import is_supported, SUPPORTED_EXTENSIONS, ParseError
 from core.storage import Storage
 
 console = Console()
@@ -45,104 +44,51 @@ def _ensure_dirs() -> None:
 
 
 def _ingest_one(storage: Storage, file_path: Path, verbose: bool = False, auto_tag: bool = True) -> bool:
-    """入库单个文件。
+    """入库单个文件（CLI 版，带进度条）。
 
-    Args:
-        storage: 存储实例
-        file_path: 文件路径
-        verbose: 详细输出
-        auto_tag: 是否调用 LLM 自动打标签
-
-    Returns:
-        True 成功 / False 失败
+    核心逻辑由 IngestService 提供，此处只负责 CLI 进度渲染。
     """
+    from services.ingest_service import IngestService
+
     if not is_supported(file_path):
         console.print(f"  [yellow]跳过不支持的格式[/yellow]: {file_path.name}")
         return False
 
-    try:
-        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    with console.status(f"[cyan]入库中...[/cyan] {file_path.name}", spinner="dots"):
+        service = IngestService(storage=storage)
+        result = service.ingest_file(file_path, auto_tag=auto_tag, copy_file=True)
 
-        steps = ["解析", "分块", "去重", "标签", "保存"]
-        with Progress(
-            SpinnerColumn(spinner_name="dots"),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=20),
-            TaskProgressColumn(),
-            console=console,
-            transient=True,
-        ) as progress:
-            task = progress.add_task(f"[cyan]{file_path.name}[/cyan]", total=len(steps))
-
-            # 1. 解析
-            progress.update(task, description=f"[cyan]解析[/cyan] {file_path.name}")
-            parsed = parse(file_path)
-            progress.advance(task)
-
-            if not parsed.text.strip():
-                progress.stop()
-                if parsed.meta.get("ocr_unavailable"):
-                    console.print(
-                        f"  [yellow]跳过图片[/yellow]（OCR 未安装）: {file_path.name}  "
-                        f"[dim]用 brew install tesseract tesseract-lang 启用[/dim]"
-                    )
-                else:
-                    console.print(f"  [yellow]跳过空内容[/yellow]: {file_path.name}")
-                return False
-
-            # 2. 分块
-            progress.update(task, description=f"[cyan]分块[/cyan] {file_path.name}")
-            chunks = chunk_document(
-                parsed,
-                chunk_size=settings.chunk_size,
-                chunk_overlap=settings.chunk_overlap,
-            )
-            progress.advance(task)
-
-            # 3. 存储去重检查
-            progress.update(task, description=f"[cyan]去重[/cyan] {file_path.name}")
-            import hashlib
-            content_hash = hashlib.sha256(parsed.text.encode("utf-8")).hexdigest()
-            doc_id = content_hash[:32]
-            if storage.get_document(doc_id) is not None:
-                progress.stop()
-                console.print(f"  [cyan]已存在（跳过）[/cyan]: {file_path.name}")
-                return False
-            progress.advance(task)
-
-            # 4. 自动打标签（可选）
-            progress.update(task, description=f"[cyan]标签[/cyan] {file_path.name}")
-            tags: list[str] = []
-            if auto_tag and settings.has_llm():
-                try:
-                    from core.classify.tagger import Tagger
-                    tagger = Tagger()
-                    tags = tagger.generate_tags_for_document(parsed)
-                except Exception as e:
-                    if verbose:
-                        console.print(f"     [yellow]标签生成失败[/yellow]: {type(e).__name__}: {e}")
-            progress.advance(task)
-
-            # 5. 保存
-            progress.update(task, description=f"[cyan]保存[/cyan] {file_path.name}")
-            record = storage.save_document(parsed, chunks, copy_file=True, tags=tags)
-            progress.advance(task)
-
-        tag_str = f"  [dim]标签: {', '.join(tags)}[/dim]" if tags else ""
+    if result.status == "success":
+        tag_str = f"  [dim]标签: {', '.join(result.tags)}[/dim]" if result.tags else ""
         console.print(
             f"  [green]✓[/green] {file_path.name}  "
-            f"[dim]分块 {record.chunk_count} 块 / {record.total_tokens} tokens[/dim]{tag_str}"
+            f"[dim]分块 {result.chunks} 块 / {result.tokens} tokens[/dim]{tag_str}"
         )
-        if verbose and chunks:
-            console.print(f"     [dim]预览首块: {chunks[0].content[:80]}...[/dim]")
         return True
+    elif result.status == "skipped":
+        if result.error_type == "empty":
+            console.print(f"  [yellow]跳过空内容[/yellow]: {file_path.name}")
+        elif result.error_type == "duplicate":
+            console.print(f"  [cyan]已存在（跳过）[/cyan]: {file_path.name}")
+        else:
+            console.print(f"  [yellow]跳过[/yellow]: {file_path.name} - {result.error}")
+        return False
+    else:
+        console.print(f"  [red]{result.error_type}失败[/red]: {file_path.name} - {result.error}")
+        return False
 
-    except ParseError as e:
-        console.print(f"  [red]解析失败[/red]: {file_path.name} - {e}")
-        return False
-    except Exception as e:
-        console.print(f"  [red]入库失败[/red]: {file_path.name} - {type(e).__name__}: {e}")
-        return False
+
+# ============================================================
+# 桌面宠物状态联动（失败静默）
+# ============================================================
+
+def _sync_pet_state(state: str) -> None:
+    """发送桌面宠物状态切换 IPC 命令，失败静默。"""
+    try:
+        from core.desktop.cli_sync import _try_set_state
+        _try_set_state(state)
+    except Exception:
+        pass
 
 
 # ============================================================
@@ -158,36 +104,26 @@ def _run_headless(question: str, output: str = "text") -> None:
         ima -p "问题" -o json      # JSON 格式输出
     """
     import json as json_module
-    from core.pet.administrator import PetAdministrator
-    from core.memory.store import MemoryStore
-    from core.retrieval.hybrid import HybridRetriever
-    from core.retrieval.vector import VectorIndex
-    from core.retrieval.rerank import Reranker
-    from core.pet.storage import PetStorage
-    from core.llm.client import get_llm
+    from services.qa_service import QAService
 
-    storage = Storage()
-    pet_storage = PetStorage()
-    pet = pet_storage.load()
-    if not pet:
+    service = QAService()
+    if not service.has_pet:
         click.echo("请先运行 'ima' 并使用 /pet adopt 领养宠物")
         return
+    if not service.is_ready:
+        click.echo("LLM 不可用，请检查配置")
+        return
 
-    memory = MemoryStore()
-    try:
-        vector_index = VectorIndex()
-    except Exception:
-        vector_index = None
-    hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index, storage=storage)
-    llm = get_llm()
-    reranker = Reranker(llm)
+    # 桌面宠物状态联动
+    _sync_pet_state("listening")
+    _sync_pet_state("thinking")
 
-    admin = PetAdministrator(
-        pet=pet, storage=storage, memory_store=memory,
-        hybrid_retriever=hybrid, reranker=reranker, llm=llm,
-    )
     with console.status("[bold yellow]AI 检索 + 思考中...[/bold yellow]", spinner="dots"):
-        result = admin.ask(question)
+        result = service.ask(question)
+    service.save_state()
+
+    # 桌面宠物状态联动：完成
+    _sync_pet_state("celebrating")
 
     if output == "json":
         # JSON 输出（便于管道/脚本消费）
@@ -317,6 +253,30 @@ def cli_init() -> None:
     run_wizard()
 
 
+@cli.command(name="desktop", help="启动桌面宠物（Electron 版，双击猫咪可问答/拖文件入库）")
+def cli_desktop() -> None:
+    """启动 IMA 桌面宠物（Electron）。
+
+    \b
+    示例：
+      ima desktop                   # 启动桌面宠物
+    """
+    import subprocess
+
+    script = Path(__file__).parent / "bin" / "ima-desktop"
+    if not script.exists():
+        console.print("[red]找不到桌面宠物启动脚本: ima-desktop[/red]")
+        sys.exit(1)
+
+    try:
+        subprocess.run([str(script)], check=True)
+    except KeyboardInterrupt:
+        console.print("\n[dim]桌面宠物已退出[/dim]")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]桌面宠物退出异常 (code={e.returncode})[/red]")
+        sys.exit(e.returncode)
+
+
 @cli.command(help="交互式对话模式（终端常驻 REPL，推荐）")
 def chat() -> None:
     """进入交互式 REPL 模式。"""
@@ -381,28 +341,22 @@ def ingest(path: str, verbose: bool) -> None:
 @click.argument("text")
 def cli_note(text: str) -> None:
     """将一段文本直接入库。"""
-    from core.ingestion.quick import save_text
-    from core.ingestion.parser import parse
-    from core.ingestion.chunker import chunk_document
+    from services.ingest_service import IngestService
 
-    storage = Storage()
-    file_path = save_text(text)
-    console.print(f"[dim]临时文件: {file_path.name}[/dim]")
-
-    parsed = parse(file_path)
-    chunks = chunk_document(parsed, chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
-    record = storage.save_document(parsed, chunks, copy_file=False)
-    console.print(f"[green]✓ 已入库[/green]  ID: {record.id[:8]}  标题: {record.title}")
+    service = IngestService()
+    result = service.ingest_text(content=text, source="note")
+    if result.status == "success":
+        console.print(f"[green]✓ 已入库[/green]  ID: {result.doc_id[:8]}  标题: {result.title}")
+    else:
+        console.print(f"[yellow]{result.status}[/yellow]: {result.error}")
 
 
 @cli.command(name="clip", help="剪贴板入库（截图/文字/URL 自动识别）")
 def cli_clip() -> None:
     """从剪贴板入库。"""
     from core.ingestion.quick import save_clipboard
-    from core.ingestion.parser import parse
-    from core.ingestion.chunker import chunk_document
+    from services.ingest_service import IngestService
 
-    storage = Storage()
     file_path, content_type = save_clipboard()
     if file_path is None:
         console.print(f"[yellow]剪贴板内容无效: {content_type}[/yellow]")
@@ -412,14 +366,12 @@ def cli_clip() -> None:
     type_label = {"image": "截图", "text": "文本", "url": "网页"}.get(content_type, "内容")
     console.print(f"[dim]检测到: {type_label}[/dim]")
 
-    with console.status("[bold yellow]解析中...[/bold yellow]", spinner="dots"):
-        parsed = parse(file_path)
-    if not parsed.text.strip():
-        console.print("[yellow]剪贴板内容为空[/yellow]")
-        sys.exit(1)
-    chunks = chunk_document(parsed, chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
-    record = storage.save_document(parsed, chunks, copy_file=False)
-    console.print(f"[green]✓ {type_label}已入库[/green]  ID: {record.id[:8]}")
+    service = IngestService()
+    result = service.ingest_file(file_path, copy_file=False)
+    if result.status == "success":
+        console.print(f"[green]✓ {type_label}已入库[/green]  ID: {result.doc_id[:8]}")
+    else:
+        console.print(f"[yellow]{result.status}[/yellow]: {result.error}")
 
 
 @cli.command(name="url", help="网页入库（自动提取正文）")
@@ -427,10 +379,8 @@ def cli_clip() -> None:
 def cli_url(url: str) -> None:
     """抓取网页正文并入库。"""
     from core.ingestion.quick import save_url
-    from core.ingestion.parser import parse
-    from core.ingestion.chunker import chunk_document
+    from services.ingest_service import IngestService
 
-    storage = Storage()
     if not (url.startswith("http://") or url.startswith("https://")):
         url = "https://" + url
 
@@ -439,11 +389,12 @@ def cli_url(url: str) -> None:
         file_path = save_url(url)
     console.print(f"[dim]已提取正文: {file_path.name}[/dim]")
 
-    with console.status("[bold yellow]解析中...[/bold yellow]", spinner="dots"):
-        parsed = parse(file_path)
-    chunks = chunk_document(parsed, chunk_size=settings.chunk_size, chunk_overlap=settings.chunk_overlap)
-    record = storage.save_document(parsed, chunks, copy_file=False)
-    console.print(f"[green]✓ 网页已入库[/green]  ID: {record.id[:8]}  标题: {record.title}")
+    service = IngestService()
+    result = service.ingest_file(file_path, original_name=url, copy_file=False)
+    if result.status == "success":
+        console.print(f"[green]✓ 网页已入库[/green]  ID: {result.doc_id[:8]}  标题: {result.title}")
+    else:
+        console.print(f"[yellow]{result.status}[/yellow]: {result.error}")
 
 
 @cli.command(name="list", help="列出所有文档")
@@ -581,45 +532,28 @@ def search(query: str, limit: int, tag: Optional[str], raw: bool, plain: bool) -
 def cli_ask(question: str, model: str = None) -> None:
     """CLI 一次性问答（不进 REPL）。
 
-    使用 PetAdministrator 编排：混合检索 + LLM 重排 + 记忆 + 人格。
+    使用 QAService 编排：混合检索 + LLM 重排 + 记忆 + 人格。
     """
     if model:
         os.environ["LLM_MODEL_OVERRIDE"] = model
-    from core.pet.administrator import PetAdministrator
-    from core.memory.store import MemoryStore
-    from core.retrieval.hybrid import HybridRetriever
-    from core.retrieval.vector import VectorIndex
-    from core.retrieval.rerank import Reranker
-    from core.pet.storage import PetStorage
-    from core.llm.client import get_llm
+    from services.qa_service import QAService
 
-    storage = Storage()
-    pet_storage = PetStorage()
-    pet = pet_storage.load()
-    if not pet:
+    service = QAService()
+    if not service.has_pet:
         click.echo("请先运行 'ima' 并使用 /pet adopt 领养宠物")
         return
+    if not service.is_ready:
+        click.echo("LLM 不可用，请检查配置")
+        return
 
-    memory = MemoryStore()
-    try:
-        vector_index = VectorIndex()
-    except Exception:
-        vector_index = None
-    hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index, storage=storage)
-    llm = get_llm()
-    reranker = Reranker(llm)
-
-    admin = PetAdministrator(
-        pet=pet, storage=storage, memory_store=memory,
-        hybrid_retriever=hybrid, reranker=reranker, llm=llm,
-    )
     with console.status("[bold yellow]AI 检索 + 思考中...[/bold yellow]", spinner="dots"):
-        result = admin.ask(question)
+        result = service.ask(question)
     console.print(Markdown(result.text))
     if result.citations:
         console.print("\n[bold cyan]引用溯源[/bold cyan]")
         for c in result.citations:
             console.print(f"  [bold]{c.marker}[/bold] [cyan]{c.title}[/cyan] [dim]§{c.paragraph_num}[/dim]")
+    service.save_state()
 
 
 @cli.command(name="rebuild", help="重建索引（BM25 + 可选向量）")

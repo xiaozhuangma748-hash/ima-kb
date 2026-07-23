@@ -18,6 +18,12 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.text import Text
 
+# 桌宠状态联动（失败静默，不影响 CLI 正常使用）
+try:
+    from core.desktop.cli_sync import _try_set_state as _try_pet_state
+except ImportError:
+    _try_pet_state = None
+
 from core.ui.theme import get_theme
 from core.llm.client import LLMError
 from core.qa.chain import RAGChain
@@ -341,6 +347,10 @@ class ChatMixin:
                         _cross_ctx = self.cross_session_memory.get_context()
                     except Exception:
                         pass
+                # 桌面宠物状态联动
+                if _try_pet_state:
+                    _try_pet_state("listening")
+                    _try_pet_state("thinking")
                 for event in self.administrator.ask_stream(
                     user_input, history=self.history, summary=self.conversation_summary,
                     cross_session_context=_cross_ctx,
@@ -350,6 +360,13 @@ class ChatMixin:
                         stage_text = {"检索": "混合检索", "重排": "LLM 重排"}.get(
                             event["stage"], event["stage"]
                         )
+                        # 桌面宠物状态联动
+                        if _try_pet_state:
+                            _stage = event.get("stage", "")
+                            if "检索" in _stage:
+                                _try_pet_state("retrieving")
+                            elif "重排" in _stage:
+                                _try_pet_state("ranking")
                         # 停掉上一个 spinner（切换阶段）
                         if live is not None:
                             live.stop()
@@ -364,6 +381,9 @@ class ChatMixin:
                     elif event["type"] == "token":
                         # 逐 token 输出 — 首次 token 前停掉 spinner 并启动 Live
                         if not getattr(self, "_stream_started", False):
+                            # 桌面宠物状态联动
+                            if _try_pet_state:
+                                _try_pet_state("answering")
                             if live is not None:
                                 live.stop()
                                 live = None
@@ -408,6 +428,9 @@ class ChatMixin:
                         result = event["result"]
                         self._stream_started = False
                         _total_time = _time.time() - _t0
+                        # 桌面宠物状态联动：完成 → 庆祝 → 回到空闲
+                        if _try_pet_state:
+                            _try_pet_state("celebrating")
                 # 安全兜底：循环结束确保 spinner 和 Live 已停
                 if live is not None:
                     live.stop()
@@ -453,10 +476,12 @@ class ChatMixin:
                             pass
                     self._record_workflow("qa")
                     _record_activity("qa", user_input[:40], getattr(self, 'active_session_name', None))
-                    # 恢复能量
-                    if self.pet is not None:
-                        self.pet.energy = min(100, self.pet.energy + 2)
-                        self.pet_storage.save(self.pet)
+                    # 恢复能量 + 同步经验（PetAdministrator 内部已将 gain_exp 写入其 pet 副本）
+                    if self.pet is not None and self.administrator is not None:
+                        self.administrator.pet.energy = min(100, self.administrator.pet.energy + 2)
+                        self.pet_storage.save(self.administrator.pet)
+                        # 重新加载，确保 REPL 的 pet 引用与磁盘一致
+                        self.pet = self.pet_storage.load()
                     # 自动保存会话
                     self._auto_save_session()
                     # 跨会话记忆自动提取（每轮都触发，详细反馈）
@@ -475,6 +500,9 @@ class ChatMixin:
                 err_msg = str(e).replace("[", "\\[")
                 console.print(f"[yellow]管理员问答失败，降级为普通问答: {err_msg}[/yellow]")
                 self._stream_started = False
+                # 桌面宠物状态联动：异常
+                if _try_pet_state:
+                    _try_pet_state("error")
 
         # 数据分析追问模式：如果刚 /analyze 过，且用户输入像追问
         if self.current_analysis is not None:
@@ -512,6 +540,11 @@ class ChatMixin:
         # 使用改进的 RAGChain：混合检索 + 重排序 + 多轮上下文扩展
         import time as _time
         _t0 = _time.time()
+        # 桌面宠物状态联动（RAGChain 降级路径）
+        if _try_pet_state:
+            _try_pet_state("listening")
+            _try_pet_state("thinking")
+            _try_pet_state("retrieving")
         with console.status("[bold yellow]混合检索知识库...[/bold yellow]", spinner="dots"):
             answer = self.rag.ask(user_input, history=self.history)
         _think_time = _time.time() - _t0
@@ -536,7 +569,7 @@ class ChatMixin:
                 first_token = True
                 stream_live = None
                 stream_text = ""
-                for token in self.rag.llm.chat_stream(messages, temperature=0.5):
+                for token in self.rag.llm.chat_stream(messages, temperature=0.3):
                     if first_token:
                         console.print("[bold yellow]>[/bold yellow] [bold cyan]AI[/bold cyan]")
                         stream_live = Live(Text(""), console=console, refresh_per_second=12, transient=True)
@@ -558,6 +591,8 @@ class ChatMixin:
                 # token 使用量（纯对话降级路径，直接读 LLM 客户端）
                 self._print_token_usage()
             except LLMError:
+                if _try_pet_state:
+                    _try_pet_state("error")
                 console.print("[yellow]（AI 暂时无法回答）[/yellow]\n")
                 return
         else:
@@ -607,6 +642,9 @@ class ChatMixin:
         if self.pet:
             self.pet.energy = min(100, self.pet.energy + 2)
             self.pet_storage.save(self.pet)
+        # 桌面宠物状态联动：完成
+        if _try_pet_state:
+            _try_pet_state("celebrating")
         _record_activity("qa", user_input[:40], getattr(self, 'active_session_name', None))
         # 自动保存会话
         self._auto_save_session()

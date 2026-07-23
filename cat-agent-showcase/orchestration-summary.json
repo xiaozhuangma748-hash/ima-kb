@@ -1,0 +1,49 @@
+{
+  "project": {
+    "name": "Cat Agent States 展示页",
+    "designRead": "Component showcase / developer audience / playful warm / balanced density / avoid dark tech AI aesthetic",
+    "designDials": { "layoutVariance": 3, "motionIntensity": 2, "visualDensity": 3 },
+    "deviceType": "desktop",
+    "creativeRecipe": {
+      "businessTone": "playful-developer-showcase",
+      "layoutArchetype": "asymmetric-hero-plus-card-grid",
+      "visualSignature": "warm cream surface with coral accent, pixel cat as interactive hero centerpiece",
+      "densityTarget": "balanced",
+      "avoidOneThing": "dark tech/neon AI aesthetic"
+    },
+    "styleContinuityAnchors": {
+      "colorSystem": "warm cream (#FFFAF5) base, coral (#E88C64) primary, soft brown text (#2D2017)",
+      "shapeSystem": "rounded corners (8/12/20px), soft card surfaces with border, no harsh edges",
+      "typographySystem": "system sans-serif stack, clean and readable",
+      "spacingSystem": "generous padding, breathing room between cards",
+      "componentLanguage": "bordered cards with hover lift, inline code tags, subtle dividers",
+      "surfaceAndDepth": "white cards on cream background, no shadows on static elements",
+      "imageryAndIconography": "pixel art GIFs with image-rendering: pixelated, Lucide icons for UI",
+      "interactionTone": "gentle hover transitions, playful click interactions"
+    },
+    "cssPreflightEvidence": {
+      "applies": true,
+      "status": "passed",
+      "brandPrefix": "cat",
+      "checks": {
+        "themeVars": "present",
+        "semanticTokenFallback": "present",
+        "themeInline": "present",
+        "tailwindCdn": "present",
+        "htmlClass": "present",
+        "semanticMappings": "resolved"
+      },
+      "retryCount": 0,
+      "blockingReason": null
+    }
+  },
+  "pages": [
+    {
+      "nodeId": "page-showcase",
+      "htmlSrc": "pages/showcase.html",
+      "title": "展示页",
+      "visualNorthStar": "An inviting, warm showcase that makes developers want to use this pixel cat in their own projects",
+      "sections": ["hero", "state-grid", "code-usage", "footer"]
+    }
+  ]
+}

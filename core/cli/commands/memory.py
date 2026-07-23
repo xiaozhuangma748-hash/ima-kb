@@ -20,7 +20,6 @@
 """
 from __future__ import annotations
 
-from rich.prompt import Prompt
 from rich.table import Table
 from prompt_toolkit.styles import Style as PtStyle
 
@@ -509,11 +508,8 @@ class MemoryMixin:
 
     def _memory_clear(self) -> None:
         """清空所有记忆。"""
-        confirm = Prompt.ask(
-            "确定清空所有记忆（profile + tasks + workflow）？",
-            choices=["y", "n"], default="n",
-        )
-        if confirm != "y":
+        from core.cli.terminal_helpers import repl_confirm
+        if not repl_confirm("确定清空所有记忆（profile + tasks + workflow）？"):
             console.print("[dim]已取消[/dim]")
             return
         self.memory_store.clear()

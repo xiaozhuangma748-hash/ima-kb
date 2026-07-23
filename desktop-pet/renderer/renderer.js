@@ -6,7 +6,8 @@ const petStage = document.getElementById('pet-stage');
 const dropHint = document.getElementById('drop-hint');
 const bubble = document.getElementById('bubble');
 const bubbleInput = document.getElementById('bubble-input');
-const bubbleFollowup = document.getElementById('bubble-followup');
+const bubbleScroll = document.getElementById('bubble-scroll');
+
 const bubbleAnswer = document.getElementById('bubble-answer');
 const bubbleCitations = document.getElementById('bubble-citations');
 const btnCitations = document.getElementById('btn-citations');
@@ -14,12 +15,17 @@ const btnClose = document.getElementById('btn-close');
 const pathHint = document.getElementById('path-hint');
 const pathHintText = document.getElementById('path-hint-text');
 const btnIngestPath = document.getElementById('btn-ingest-path');
+const textHint = document.getElementById('text-hint');
+const btnIngestText = document.getElementById('btn-ingest-text');
 
 let currentPath = null;
+let currentText = null;
 
 let isAnswerMode = false;
 let currentCitations = [];
-let history = []; // {role, content}
+let history = []; // {role, content}，按 OpenAI 多轮对话格式 [user, assistant, user, assistant, ...]
+let answerBuffer = ''; // 累积流式 token，done 后做 markdown 渲染
+let pendingQuestion = ''; // 当前正在等待回答的问题，onAnswerDone 后才追加到 history
 
 function escapeHtml(s) {
   if (s == null) return '';
@@ -27,6 +33,80 @@ function escapeHtml(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+// === 轻量 Markdown 渲染：去掉 ## ** * > 等符号，保留排版 ===
+function inlineFmt(text) {
+  // 先把 **xxx** 替换为占位符，escape 后再还原为 <b>
+  const bolds = [];
+  text = text.replace(/\*\*([^*]+)\*\*/g, (_, g1) => {
+    bolds.push(g1);
+    return `\u0000${bolds.length - 1}\u0000`;
+  });
+  // `code` → 占位
+  const codes = [];
+  text = text.replace(/`([^`]+)`/g, (_, g1) => {
+    codes.push(g1);
+    return `\u0001${codes.length - 1}\u0001`;
+  });
+  text = escapeHtml(text);
+  text = text.replace(/\u0000(\d+)\u0000/g, (_, i) => `<b>${escapeHtml(bolds[i])}</b>`);
+  text = text.replace(/\u0001(\d+)\u0001/g, (_, i) => `<code>${escapeHtml(codes[i])}</code>`);
+  return text;
+}
+
+function markdownToHtml(md) {
+  if (!md) return '';
+  const lines = String(md).split('\n');
+  let html = '';
+  let inList = false;
+  const closeList = () => { if (inList) { html += '</div>'; inList = false; } };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let m;
+
+    // 标题 # ~ ######
+    if ((m = line.match(/^#{1,6}\s+(.*)$/))) {
+      closeList();
+      html += `<div class="md-h">${inlineFmt(m[1])}</div>`;
+      continue;
+    }
+    // 无序列表 * - +
+    if ((m = line.match(/^\s*[\*\-\+]\s+(.*)$/))) {
+      if (!inList) { html += '<div class="md-list">'; inList = true; }
+      html += `<div class="md-li">• ${inlineFmt(m[1])}</div>`;
+      continue;
+    }
+    // 有序列表 1. 2.
+    if ((m = line.match(/^\s*\d+\.\s+(.*)$/))) {
+      if (!inList) { html += '<div class="md-list">'; inList = true; }
+      html += `<div class="md-li">${inlineFmt(m[1])}</div>`;
+      continue;
+    }
+    // 引用 >
+    if ((m = line.match(/^\s*>\s?(.*)$/))) {
+      closeList();
+      html += `<div class="md-quote">${inlineFmt(m[1])}</div>`;
+      continue;
+    }
+    // 分割线 --- ***
+    if (/^\s*([-*]){3,}\s*$/.test(line)) {
+      closeList();
+      html += '<hr class="md-hr">';
+      continue;
+    }
+    // 空行
+    if (line.trim() === '') {
+      closeList();
+      continue;
+    }
+    // 普通段落
+    closeList();
+    html += `<div class="md-p">${inlineFmt(line)}</div>`;
+  }
+  closeList();
+  return html;
 }
 
 // === Python 事件监听 ===
@@ -38,30 +118,80 @@ window.petAPI.onPetInfo((info) => {
   console.log('[pet] info:', info);
 });
 
-window.petAPI.onAnswerToken((chunk) => {
+// 阶段状态指示器（检索/重排/缓存），首个 token 到来时自动清除
+const STAGE_TEXT = {
+  '检索': '混合检索知识库',
+  '重排': 'LLM 重排结果',
+  '缓存': '命中缓存，快速回答',
+};
+
+function renderStageHint(stage, count) {
+  const text = STAGE_TEXT[stage] || stage;
+  const countStr = count > 0 ? ` (${count} 条)` : '';
+  const qHtml = pendingQuestion
+    ? `<div class="md-h">问：${escapeHtml(pendingQuestion)}</div>`
+    : '';
+  bubbleAnswer.innerHTML = qHtml +
+    `<div class="stage-hint"><span class="dots"></span>${escapeHtml(text)}${countStr}</div>`;
+  // 滚动到提示位置
+  if (bubbleScroll) bubbleScroll.scrollTop = bubbleScroll.scrollHeight;
+}
+
+window.petAPI.onAnswerStage((data) => {
+  console.log('[renderer] onAnswerStage:', data.stage, data.count, 'isAnswerMode:', isAnswerMode);
   if (!isAnswerMode) {
-    bubbleAnswer.innerHTML = '';
+    renderStageHint(data.stage, data.count);
+  }
+});
+
+window.petAPI.onAnswerToken((chunk) => {
+  console.log('[renderer] onAnswerToken chunk="' + chunk + '" len=' + (chunk ? chunk.length : 0) + ' isAnswerMode=' + isAnswerMode);
+  if (!isAnswerMode) {
+    answerBuffer = '';
     isAnswerMode = true;
   }
-  bubbleAnswer.innerHTML += escapeHtml(chunk);
-  scrollToBottom();
+  answerBuffer += chunk;
+  // 流式阶段：问题保留在顶部，纯文本答案追加在问题下方（避免半截 markdown 抖动）
+  const qHtml = pendingQuestion
+    ? `<div class="md-h">问：${escapeHtml(pendingQuestion)}</div>`
+    : '';
+  bubbleAnswer.innerHTML = qHtml + escapeHtml(answerBuffer);
+  console.log('[renderer] bubbleAnswer.innerHTML len:', bubbleAnswer.innerHTML.length);
+  updateScrollHeight();
 });
 
 window.petAPI.onAnswerDone((citations) => {
+  console.log('[renderer] onAnswerDone citations:', citations ? citations.length : 0, 'answerBuffer len:', answerBuffer.length);
+  // 完成后再做一次 markdown 渲染，去掉 ## ** * > 等符号
+  // 问题保留在顶部，答案追加在问题下方
+  const qHtml = pendingQuestion
+    ? `<div class="md-h">问：${escapeHtml(pendingQuestion)}</div>`
+    : '';
+  bubbleAnswer.innerHTML = qHtml + markdownToHtml(answerBuffer);
+  console.log('[renderer] onAnswerDone final innerHTML len:', bubbleAnswer.innerHTML.length);
+  // 完成后才追加完整问答到 history，避免调用前 push 导致后端 messages 重复
+  if (pendingQuestion) {
+    history.push({ role: 'user', content: pendingQuestion });
+    history.push({ role: 'assistant', content: answerBuffer });
+    trimHistory();
+    pendingQuestion = '';
+  }
   currentCitations = citations || [];
   if (currentCitations.length > 0) {
     renderCitations(currentCitations);
     btnCitations.style.display = 'inline-block';
     btnCitations.textContent = '引用';
   }
-  showFollowup();
-  scrollToBottom();
+  // 答案完成后滚到顶部，让用户从开头阅读（长答案不会被裁掉）
+  if (bubbleScroll) bubbleScroll.scrollTop = 0;
 });
 
 window.petAPI.onAnswerError((err) => {
+  console.error('[renderer] onAnswerError:', err);
+  // 错误时不追加 history（与 CLI 一致），清空 pendingQuestion 避免下次混淆
+  pendingQuestion = '';
   bubbleAnswer.innerHTML = `<span style="color:var(--pet-error)">${escapeHtml(err)}</span>`;
-  showFollowup();
-  scrollToBottom();
+  if (bubbleScroll) bubbleScroll.scrollTop = 0;
 });
 
 window.petAPI.onShowBubble((msg) => {
@@ -72,8 +202,7 @@ window.petAPI.onShowBubble((msg) => {
     return;
   }
   showBubble();
-  bubbleAnswer.innerHTML = escapeHtml(msg);
-  showFollowup();
+  bubbleAnswer.innerHTML = markdownToHtml(String(msg));
 });
 
 // === 气泡控制 ===
@@ -86,11 +215,14 @@ function showBubble() {
   bubbleCitations.innerHTML = '';
   bubbleCitations.classList.remove('expanded');
   btnCitations.style.display = 'none';
-  bubbleFollowup.style.display = 'none';
   pathHint.classList.remove('visible');
+  textHint.classList.remove('visible');
   currentPath = null;
+  currentText = null;
   isAnswerMode = false;
   currentCitations = [];
+  answerBuffer = '';
+  if (bubbleScroll) bubbleScroll.scrollTop = 0;
   window.petAPI.bubbleVisible(true);
 }
 
@@ -100,14 +232,21 @@ function hideBubble() {
 }
 
 function scrollToBottom() {
-  bubble.scrollTop = bubble.scrollHeight;
+  if (bubbleScroll) {
+    bubbleScroll.scrollTop = bubbleScroll.scrollHeight;
+  }
 }
 
-function showFollowup() {
-  bubbleFollowup.style.display = 'block';
-  bubbleFollowup.value = '';
-  setTimeout(() => bubbleFollowup.focus(), 50);
+function updateScrollHeight() {
+  if (bubbleScroll) {
+    const h = bubbleScroll.scrollHeight;
+    if (bubbleScroll.scrollTop + bubbleScroll.clientHeight < h) {
+      bubbleScroll.scrollTop = h;
+    }
+  }
 }
+
+
 
 function renderCitations(citations) {
   let html = '<b>引用溯源</b><ul>';
@@ -123,20 +262,41 @@ function renderCitations(citations) {
 
 function submitQuestion(question) {
   if (!question.trim()) return;
-  history.push({ role: 'user', content: question });
+  // 注意：不要在调用前 push user 到 history！
+  // 后端 ask_stream 会再 append query 到 messages 末尾，调用前 push 会导致
+  // 当前问题在 messages 中出现两次，LLM 看到重复输入可能输出重复内容。
+  // 改为暂存 pendingQuestion，在 onAnswerDone 完成后追加 user + assistant。
+  pendingQuestion = question;
   trimHistory();
 
   // UI 切换到答案模式
-  bubbleInput.style.display = 'none';
   bubbleAnswer.innerHTML = '<i>思考中…</i>';
   bubbleCitations.innerHTML = '';
   bubbleCitations.classList.remove('expanded');
   btnCitations.style.display = 'none';
-  bubbleFollowup.style.display = 'none';
   isAnswerMode = false;
   currentCitations = [];
+  answerBuffer = ''; // 显式清空，防止上轮答案残留（onAnswerToken 的清空依赖首个 token 到达）
+  // 把当前问题追加到答案区顶部，形成问答时间线（在"思考中…"上方）
+  appendQuestionToHistory(question);
 
+  // 输入框保持原位不动（程序化赋值不触发 input 事件，需手动清理路径/文字检测状态）
+  bubbleInput.value = '';
+  currentPath = null;
+  currentText = null;
+  pathHint.classList.remove('visible');
+  textHint.classList.remove('visible');
+  bubbleInput.focus();
   window.petAPI.askStream(question, history);
+}
+
+function appendQuestionToHistory(question) {
+  // 在答案区顶部追加历史问题记录，形成问答时间线
+  const prev = bubbleAnswer.innerHTML.trim();
+  const qHtml = `<div class="md-h">问：${escapeHtml(question)}</div>`;
+  // 避免重复追加相同问题（如双击触发）
+  if (prev.startsWith(qHtml)) return;
+  bubbleAnswer.innerHTML = qHtml + prev;
 }
 
 function trimHistory() {
@@ -163,16 +323,29 @@ function extractFilePath(text) {
   return null;
 }
 
-function checkPathInput(inputEl) {
-  const path = extractFilePath(inputEl.value);
+function checkPathInput() {
+  const value = bubbleInput.value.trim();
+  const path = extractFilePath(value);
   if (path) {
     currentPath = path;
+    currentText = null;
     const fileName = path.split('/').pop() || path;
     pathHintText.textContent = `检测到文件：${fileName}`;
     pathHint.classList.add('visible');
+    textHint.classList.remove('visible');
+    return;
+  }
+
+  currentPath = null;
+  pathHint.classList.remove('visible');
+
+  // 非路径且有一定长度的文字，提供直接入库
+  if (value.length >= 10) {
+    currentText = value;
+    textHint.classList.add('visible');
   } else {
-    currentPath = null;
-    pathHint.classList.remove('visible');
+    currentText = null;
+    textHint.classList.remove('visible');
   }
 }
 
@@ -181,12 +354,24 @@ function ingestCurrentPath() {
   const path = currentPath;
   const fileName = path.split('/').pop() || path;
   bubbleInput.value = '';
-  bubbleFollowup.value = '';
   pathHint.classList.remove('visible');
+  textHint.classList.remove('visible');
   hideBubble(); // 关闭问答气泡，用 drop-hint 反馈进度
   setDropHint(`正在吃掉 ${fileName}…`, true);
   currentPath = null;
   window.petAPI.ingest(path);
+}
+
+function ingestCurrentText() {
+  if (!currentText) return;
+  const text = currentText;
+  bubbleInput.value = '';
+  pathHint.classList.remove('visible');
+  textHint.classList.remove('visible');
+  hideBubble(); // 关闭问答气泡，用 drop-hint 反馈进度
+  setDropHint('正在整理文字…', true);
+  currentText = null;
+  window.petAPI.ingestText(text);
 }
 
 // === 事件绑定 ===
@@ -194,6 +379,16 @@ img.addEventListener('dblclick', (e) => {
   e.preventDefault();
   e.stopPropagation();
   showBubble();
+});
+
+// 输入框内 Shift+Enter 换行；Enter 提交
+bubbleInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    submitQuestion(bubbleInput.value);
+  } else if (e.key === 'Escape') {
+    hideBubble();
+  }
 });
 
 btnClose.addEventListener('click', (e) => {
@@ -207,37 +402,41 @@ btnCitations.addEventListener('click', (e) => {
   btnCitations.textContent = expanded ? '收起' : '引用';
 });
 
-bubbleInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    submitQuestion(bubbleInput.value);
-  } else if (e.key === 'Escape') {
-    hideBubble();
-  }
-});
-
-bubbleFollowup.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    const q = bubbleFollowup.value;
-    if (!q.trim()) return;
-    // 把上一轮答案加入历史，再追问
-    history.push({ role: 'assistant', content: bubbleAnswer.innerText });
-    trimHistory();
-    submitQuestion(q);
-  } else if (e.key === 'Escape') {
-    hideBubble();
-  }
-});
-
 // 输入框粘贴/输入文件路径时自动识别并提示入库
-bubbleInput.addEventListener('input', () => checkPathInput(bubbleInput));
-bubbleFollowup.addEventListener('input', () => checkPathInput(bubbleFollowup));
+bubbleInput.addEventListener('input', checkPathInput);
 
 btnIngestPath.addEventListener('click', (e) => {
   e.preventDefault();
   e.stopPropagation();
   ingestCurrentPath();
+});
+
+btnIngestText.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  ingestCurrentText();
+});
+
+// 监听粘贴事件：支持剪贴板图片直接入库
+bubbleInput.addEventListener('paste', (e) => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.indexOf('image') === -1) continue;
+    const blob = item.getAsFile();
+    if (!blob) continue;
+    e.preventDefault();
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const ext = blob.name ? blob.name.split('.').pop() : 'png';
+      const fileName = `pasted_image_${Date.now()}.${ext}`;
+      hideBubble();
+      setDropHint('正在吃掉图片…', true);
+      window.petAPI.ingestImage(event.target.result, fileName);
+    };
+    reader.readAsDataURL(blob);
+    break;
+  }
 });
 
 document.addEventListener('keydown', (e) => {

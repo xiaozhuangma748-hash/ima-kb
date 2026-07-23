@@ -24,7 +24,6 @@ from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich.prompt import Prompt
 
 from core.memory.profile import ProfileManager
 from core.pet.interact import InteractError
@@ -392,11 +391,8 @@ class PetMixin:
             console.print("  [cyan]/pet reset effects[/cyan]  清空所有限时效果")
             return
         if target == "stats":
-            confirm = Prompt.ask(
-                f"确定清空 {self.pet.name} 的行为统计？这会影响分系判定。",
-                choices=["y", "n"], default="n",
-            )
-            if confirm != "y":
+            from core.cli.terminal_helpers import repl_confirm
+            if not repl_confirm(f"确定清空 {self.pet.name} 的行为统计？这会影响分系判定。"):
                 console.print("[dim]已取消[/dim]")
                 return
             self.pet.reset_stats()

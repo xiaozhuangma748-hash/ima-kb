@@ -65,7 +65,22 @@ function startPythonBridge() {
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
   });
-  pythonProcess.stdout.on('data', (d) => console.log('[python]', d.toString().trim()));
+  pythonProcess.stdout.on('data', (d) => {
+    const lines = d.toString().trim().split('\n');
+    for (const line of lines) {
+      if (!line) continue;
+      try {
+        const msg = JSON.parse(line);
+        if (msg.type === 'set_state') {
+          setState(msg.state, 'external');
+        } else {
+          console.log('[python]', line);
+        }
+      } catch (e) {
+        console.log('[python]', line);
+      }
+    }
+  });
   pythonProcess.stderr.on('data', (d) => console.error('[python]', d.toString().trim()));
   pythonProcess.on('exit', (code) => {
     console.log(`Python 后端已退出 (code=${code})`);
@@ -298,6 +313,7 @@ ipcMain.handle('ask-stream', async (event, question, history) => {
   try {
     await sendToPython({ action: 'ask_stream', question, history }, {
       onEvent: (r) => {
+        console.log('[main] onEvent:', r.type, r.type === 'token' ? 'chunk_len=' + (r.chunk ? r.chunk.length : 0) : '');
         if (!win || win.isDestroyed()) return;
         if (r.type === 'stage') {
           const stageMap = { 检索: 'retrieving', 重排: 'ranking', 缓存: 'thinking' };

@@ -73,7 +73,7 @@ def cmd_state(state: str) -> int:
         print(f"✓ 桌宠状态已切换: {state}")
         return 0
     else:
-        print("✗ 桌宠未运行，请先启动: ./ima-desktop")
+        print("✗ 桌宠未运行，请先启动: ./bin/ima-desktop")
         return 1
 
 
@@ -256,7 +256,7 @@ def cmd_status() -> int:
             return 0
         else:
             print("✗ 桌面宠物未运行")
-            print("  启动: ./ima-desktop")
+            print("  启动: ./bin/ima-desktop")
             return 1
     except Exception as e:
         print(f"✗ 检查失败: {e}")

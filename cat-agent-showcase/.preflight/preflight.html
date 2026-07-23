@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preflight</title>
+    <style id="theme-vars">
+/* cat-agent-showcase brand tokens */
+:root {
+  --cat-background: #FFFAF5;
+  --cat-foreground: #2D2017;
+  --cat-card: #FFFFFF;
+  --cat-card-foreground: #2D2017;
+  --cat-popover: #FFFFFF;
+  --cat-popover-foreground: #2D2017;
+  --cat-primary: #E88C64;
+  --cat-primary-foreground: #FFFFFF;
+  --cat-muted: #F5EDE6;
+  --cat-muted-foreground: #8C7A6B;
+  --cat-border: #E8DDD3;
+  --cat-input: #F0E8E0;
+  --cat-ring: #E88C64;
+  --cat-radius-sm: 8px;
+  --cat-radius-md: 12px;
+  --cat-radius-lg: 20px;
+  --cat-state-success: #5CAA6E;
+  --cat-state-warning: #D4A843;
+  --cat-state-error: #D4573E;
+  --cat-state-info: #5B8EC9;
+}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--cat-background);
+    --color-foreground: var(--cat-foreground);
+    --color-card: var(--cat-card);
+    --color-card-foreground: var(--cat-card-foreground);
+    --color-popover: var(--cat-popover);
+    --color-popover-foreground: var(--cat-popover-foreground);
+    --color-primary: var(--cat-primary);
+    --color-primary-foreground: var(--cat-primary-foreground);
+    --color-muted: var(--cat-muted);
+    --color-muted-foreground: var(--cat-muted-foreground);
+    --color-border: var(--cat-border);
+    --color-input: var(--cat-input);
+    --color-ring: var(--cat-ring);
+    --radius-sm: var(--cat-radius-sm);
+    --radius-md: var(--cat-radius-md);
+    --radius-lg: var(--cat-radius-lg);
+  }
+  @layer base {
+    body { background: var(--cat-background); color: var(--cat-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--cat-background); }
+      .text-background { color: var(--cat-background); }
+      .border-background { border-color: var(--cat-background); }
+      .ring-background { --tw-ring-color: var(--cat-background); }
+      .bg-foreground { background-color: var(--cat-foreground); }
+      .text-foreground { color: var(--cat-foreground); }
+      .border-foreground { border-color: var(--cat-foreground); }
+      .ring-foreground { --tw-ring-color: var(--cat-foreground); }
+      .bg-card { background-color: var(--cat-card); }
+      .text-card { color: var(--cat-card); }
+      .border-card { border-color: var(--cat-card); }
+      .ring-card { --tw-ring-color: var(--cat-card); }
+      .bg-card-foreground { background-color: var(--cat-card-foreground); }
+      .text-card-foreground { color: var(--cat-card-foreground); }
+      .border-card-foreground { border-color: var(--cat-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--cat-card-foreground); }
+      .bg-popover { background-color: var(--cat-popover); }
+      .text-popover { color: var(--cat-popover); }
+      .border-popover { border-color: var(--cat-popover); }
+      .ring-popover { --tw-ring-color: var(--cat-popover); }
+      .bg-popover-foreground { background-color: var(--cat-popover-foreground); }
+      .text-popover-foreground { color: var(--cat-popover-foreground); }
+      .border-popover-foreground { border-color: var(--cat-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--cat-popover-foreground); }
+      .bg-primary { background-color: var(--cat-primary); }
+      .text-primary { color: var(--cat-primary); }
+      .border-primary { border-color: var(--cat-primary); }
+      .ring-primary { --tw-ring-color: var(--cat-primary); }
+      .bg-primary-foreground { background-color: var(--cat-primary-foreground); }
+      .text-primary-foreground { color: var(--cat-primary-foreground); }
+      .border-primary-foreground { border-color: var(--cat-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--cat-primary-foreground); }
+      .bg-muted { background-color: var(--cat-muted); }
+      .text-muted { color: var(--cat-muted); }
+      .border-muted { border-color: var(--cat-muted); }
+      .ring-muted { --tw-ring-color: var(--cat-muted); }
+      .bg-muted-foreground { background-color: var(--cat-muted-foreground); }
+      .text-muted-foreground { color: var(--cat-muted-foreground); }
+      .border-muted-foreground { border-color: var(--cat-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--cat-muted-foreground); }
+      .bg-border { background-color: var(--cat-border); }
+      .text-border { color: var(--cat-border); }
+      .border-border { border-color: var(--cat-border); }
+      .ring-border { --tw-ring-color: var(--cat-border); }
+      .bg-input { background-color: var(--cat-input); }
+      .text-input { color: var(--cat-input); }
+      .border-input { border-color: var(--cat-input); }
+      .ring-input { --tw-ring-color: var(--cat-input); }
+      .bg-ring { background-color: var(--cat-ring); }
+      .text-ring { color: var(--cat-ring); }
+      .border-ring { border-color: var(--cat-ring); }
+      .ring-ring { --tw-ring-color: var(--cat-ring); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main>
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

@@ -1,0 +1,226 @@
+{
+  "data": [
+    {
+      "id": "page-showcase",
+      "title": "展示页",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/showcase.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-showcase-interactive",
+      "title": "交互式状态展示",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 620,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/showcase-interactive.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "page-showcase-ambient",
+      "title": "氛围增强展示",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 1240,
+        "y": 0,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/showcase-ambient.html",
+        "interactions": []
+      }
+    },
+    {
+      "id": "image-001",
+      "title": "猫咪待机动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 0,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_idle.gif"
+      }
+    },
+    {
+      "id": "image-002",
+      "title": "猫咪倾听动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 620,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_listening.gif"
+      }
+    },
+    {
+      "id": "image-003",
+      "title": "猫咪思考动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 1240,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_thinking.gif"
+      }
+    },
+    {
+      "id": "image-004",
+      "title": "猫咪检索动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 1860,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_retrieving.gif"
+      }
+    },
+    {
+      "id": "image-005",
+      "title": "猫咪排名动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 2480,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_ranking.gif"
+      }
+    },
+    {
+      "id": "image-006",
+      "title": "猫咪回答动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 3100,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_answering.gif"
+      }
+    },
+    {
+      "id": "image-007",
+      "title": "猫咪庆祝动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 3720,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_celebrating.gif"
+      }
+    },
+    {
+      "id": "image-008",
+      "title": "猫咪报错动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 4340,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_error.gif"
+      }
+    },
+    {
+      "id": "image-009",
+      "title": "猫咪睡眠动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 4960,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_sleeping.gif"
+      }
+    },
+    {
+      "id": "image-010",
+      "title": "猫咪入库动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 5580,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_ingesting.gif"
+      }
+    },
+    {
+      "id": "image-011",
+      "title": "猫咪分析动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 6200,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_analyzing.gif"
+      }
+    },
+    {
+      "id": "image-012",
+      "title": "猫咪提醒动画",
+      "type": "image",
+      "version": 1,
+      "createdAt": 1753027200000,
+      "canvasData": {
+        "x": 6820,
+        "y": 717
+      },
+      "devMetadata": {
+        "imageSrc": "assets/cat_notifying.gif"
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "desktop",
+    "projectName": "Cat Agent States 展示页",
+    "visualEditorEnabled": true
+  }
+}

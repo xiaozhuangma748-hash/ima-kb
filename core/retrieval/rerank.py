@@ -88,13 +88,27 @@ class Reranker:
 候选文档：
 {chr(10).join(candidate_texts)}
 
-请只返回 JSON 数组，格式如下：
-[{{"index": 0, "score": 8.5, "reason": "高度相关"}}]
+请只返回一个 JSON 对象，格式如下：
+{{"results": [{{"index": 0, "score": 8.5, "reason": "高度相关"}}]}}
 
 不要返回其他内容。"""
 
-        messages = [{"role": "user", "content": prompt}]
-        response = self.llm.chat(messages, temperature=0.0, max_tokens=1000)
+        # 加一个精简 system 角色明确"只返回 JSON 对象"，并启用 JSON 模式
+        # （部分 OpenAI 兼容端点不支持 response_format，失败则忽略该参数回退普通调用）
+        messages = [
+            {"role": "system", "content": "你是一个相关性打分器。只返回 JSON 对象（含 results 数组），不要任何解释或 markdown 代码块。"},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            response = self.llm.chat(
+                messages,
+                temperature=0.0,
+                max_tokens=1000,
+                response_format={"type": "json_object"},
+            )
+        except Exception:
+            # 端点不支持 response_format 时回退普通调用
+            response = self.llm.chat(messages, temperature=0.0, max_tokens=1000)
 
         # 健壮解析：先尝试直接解析，失败则提取 JSON 片段
         return self._parse_scores(response)
@@ -104,13 +118,16 @@ class Reranker:
         """从 LLM 响应中解析打分 JSON，支持多种格式。
 
         策略：
-        1. 直接 json.loads
+        1. 直接 json.loads（支持 {"results": [...]} 或裸数组/字典）
         2. 提取第一个 [...] 或 {...} 片段
         3. 清理 markdown code block 标记
         """
         # 1. 直接尝试
         try:
             data = json.loads(response)
+            # 兼容 {"results": [...]} 包裹形式
+            if isinstance(data, dict) and "results" in data and isinstance(data["results"], list):
+                data = data["results"]
             return Reranker._normalize_scores(data)
         except (json.JSONDecodeError, TypeError):
             pass

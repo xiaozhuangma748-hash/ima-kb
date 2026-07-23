@@ -18,7 +18,6 @@ from __future__ import annotations
 from typing import Optional
 
 from rich.table import Table
-from rich.prompt import Prompt
 
 from core.todo.manager import TodoManager, TodoItem, VALID_PRIORITIES
 from core.cli.constants import console
@@ -381,11 +380,8 @@ class TodoMixin:
         if not items:
             console.print("[dim]今日无任务[/dim]")
             return
-        confirm = Prompt.ask(
-            f"确定清空今日所有任务（共 {len(items)} 条）？",
-            choices=["y", "n"], default="n",
-        )
-        if confirm != "y":
+        from core.cli.terminal_helpers import repl_confirm
+        if not repl_confirm(f"确定清空今日所有任务（共 {len(items)} 条）？"):
             console.print("[dim]已取消[/dim]")
             return
         count = self.todo_mgr.clear_day()
@@ -430,7 +426,8 @@ class TodoMixin:
         console.print("  [cyan]3[/cyan] 逐个询问")
         console.print("  [cyan]4[/cyan] 暂不处理（下次再问）")
 
-        choice = Prompt.ask("\n选择", choices=["1", "2", "3", "4"], default="1")
+        from core.cli.terminal_helpers import repl_input
+        choice = repl_input("选择 (1/2/3/4)", default="1")
 
         if choice == "1":
             moved = self.todo_mgr.carry_over(pending)
@@ -453,11 +450,8 @@ class TodoMixin:
             pri = _PRIORITY_TAG.get(item.priority, "med")
             console.print(f"\n  [ ] [{pri}] {item.description}")
             console.print(f"  [dim]  {item.id}[/dim]")
-            choice = Prompt.ask(
-                "处理方式",
-                choices=["1", "2", "3", "4", "5"],
-                default="1",
-            )
+            from core.cli.terminal_helpers import repl_input
+            choice = repl_input("处理方式 (1/2/3/4/5)", default="1")
             if choice == "1":
                 carry_items.append(item)
             elif choice == "2":
