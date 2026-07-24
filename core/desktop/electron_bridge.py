@@ -103,6 +103,8 @@ class ElectronIpcServer(IpcServer):
                 return self._handle_show_doc(request)
             if action == "ping":
                 return {"success": True, "data": "pong"}
+            if action == "push_content":
+                return self._handle_push_content(request)
             if action == "set_state":
                 return self._handle_set_state(request)
             return {"success": False, "error": f"未知 action: {action}"}
@@ -232,6 +234,21 @@ class ElectronIpcServer(IpcServer):
         import json as json_module
         print(json_module.dumps({"type": "set_state", "state": state}), flush=True)
         return {"success": True, "state": state}
+
+    def _handle_push_content(self, request: dict):
+        """CLI 推送内容到桌面宠物（通过 stdout 通知 Electron 主进程转发）。"""
+        import json as json_module
+        content = request.get("content", "")
+        msg_type = request.get("msg_type", "info")
+        if not content:
+            return {"success": False, "error": "content 为空"}
+        # 通过 stdout 发送 JSON，Electron main.js 监听并转发给 renderer
+        print(json_module.dumps({
+            "type": "push_content",
+            "content": content,
+            "msg_type": msg_type,
+        }), flush=True)
+        return {"success": True}
 
 
 def main() -> None:

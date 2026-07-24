@@ -18,11 +18,13 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from rich.text import Text
 
-# 桌宠状态联动（失败静默，不影响 CLI 正常使用）
+# 桌宠状态联动 + 内容推送（失败静默，不影响 CLI 正常使用）
 try:
     from core.desktop.cli_sync import _try_set_state as _try_pet_state
+    from core.desktop.cli_sync import _try_push_content as _try_pet_push
 except ImportError:
     _try_pet_state = None
+    _try_pet_push = None
 
 from core.ui.theme import get_theme
 from core.llm.client import LLMError

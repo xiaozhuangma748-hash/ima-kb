@@ -49,6 +49,30 @@ def _try_set_state(state: str) -> bool:
         return False
 
 
+def _try_push_content(content: str, msg_type: str = "info") -> bool:
+    """尝试通过 IPC 推送内容到桌面宠物气泡（失败静默）。
+
+    在 CLI 命令输出结果时，同步推送到桌宠气泡显示。
+    桌宠未运行则静默跳过，不影响 CLI 正常输出。
+
+    Args:
+        content: 要显示的内容（纯文本或简单 markdown）
+        msg_type: 消息类型 (success / error / info / markdown)
+
+    Returns:
+        True 表示推送成功；False 表示桌宠未运行或推送失败。
+    """
+    try:
+        from core.desktop.ipc import IpcClient
+        client = IpcClient()
+        if not client.is_server_running():
+            return False
+        return client.push_content(content, msg_type)
+    except Exception as e:
+        logger.debug(f"IPC push_content 失败（桌宠可能未运行）: {e}")
+        return False
+
+
 def cmd_state(state: str) -> int:
     """手动切换桌宠状态。
 

@@ -162,6 +162,17 @@ class IpcServer:
             elif action == "ping":
                 return {"success": True, "data": "pong"}
 
+            elif action == "push_content":
+                # CLI 推送内容到桌面宠物（操作反馈、通知等）
+                # 不需要 bridge，直接由 IpcServer 处理
+                # Electron 端通过 stdout JSON 或直接 forward 给 renderer
+                content = request.get("content", "")
+                msg_type = request.get("msg_type", "info")
+                # 通过 set_state 的同样路径通知 Electron
+                # IpcServer 无法直接访问 Electron renderer，
+                # 所以用 notify 机制：在响应中带上内容，Electron 的 sendToPython 会收到
+                return {"success": True, "data": {"content": content, "msg_type": msg_type}}
+
             else:
                 return {"success": False, "error": f"未知 action: {action}"}
 
@@ -242,3 +253,20 @@ class IpcClient:
         """便捷方法：获取知识库统计。"""
         result = self.send("get_stats")
         return result.get("data", {})
+
+    def push_content(self, content: str, msg_type: str = "info") -> bool:
+        """推送内容到桌面宠物（操作反馈、通知等）。
+
+        Args:
+            content: 要显示的内容（纯文本或简单 markdown）
+            msg_type: 消息类型 (success / error / info / markdown)
+
+        Returns:
+            True 表示推送成功；False 表示桌宠未运行或推送失败。
+        """
+        try:
+            result = self.send("push_content", content=content, msg_type=msg_type)
+            return result.get("success", False)
+        except Exception as e:
+            logger.debug(f"push_content 失败（桌宠可能未运行）: {e}")
+            return False

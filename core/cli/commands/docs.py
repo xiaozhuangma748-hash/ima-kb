@@ -43,6 +43,12 @@ from rich.progress import (
 
 from core.cli.terminal_helpers import repl_confirm as _repl_confirm
 
+# 桌宠内容推送（失败静默）
+try:
+    from core.desktop.cli_sync import _try_push_content as _try_pet_push
+except ImportError:
+    _try_pet_push = None
+
 from config import settings
 from core.ingestion.parser import parse, is_supported, SUPPORTED_EXTENSIONS, ParseError
 from core.ingestion.chunker import chunk_document
@@ -255,8 +261,12 @@ class DocsMixin:
             if self._ingest_one(file_path):
                 self._pet_gain_exp(10, "ingest")
                 console.print("[green]✓ 文本已入库[/green]")
+                if _try_pet_push:
+                    _try_pet_push("✓ 文本已入库", "success")
         except Exception as e:
             console.print(f"[red]入库失败: {e}[/red]")
+            if _try_pet_push:
+                _try_pet_push(f"✗ 入库失败: {e}", "error")
 
     def _cmd_clip(self, arg: str = "") -> None:
         """剪贴板入库：自动识别截图/文字/URL。"""
@@ -274,6 +284,8 @@ class DocsMixin:
         if self._ingest_one(file_path):
             self._pet_gain_exp(10, "ingest")
             console.print(f"[green]✓ {type_label}已入库[/green]")
+            if _try_pet_push:
+                _try_pet_push(f"✓ {type_label}已入库", "success")
 
     def _cmd_url(self, arg: str) -> None:
         """网页入库：/url https://...。"""
@@ -291,12 +303,16 @@ class DocsMixin:
                 file_path = save_url(url)
             except Exception as e:
                 console.print(f"[red]抓取失败: {e}[/red]")
+                if _try_pet_push:
+                    _try_pet_push(f"✗ 抓取失败: {e}", "error")
                 return
 
         console.print(f"[dim]已提取网页正文: {file_path.name}[/dim]")
         if self._ingest_one(file_path):
             self._pet_gain_exp(15, "ingest")
             console.print("[green]✓ 网页已入库[/green]")
+            if _try_pet_push:
+                _try_pet_push("✓ 网页已入库", "success")
 
     def _ingest_one(self, file_path: Path) -> bool:
         """入库单个文件。"""
@@ -349,6 +365,8 @@ class DocsMixin:
                 if self.storage.get_document(doc_id) is not None:
                     progress.stop()
                     console.print(f"  [cyan]已存在（跳过）[/cyan]: {file_path.name}")
+                    if _try_pet_push:
+                        _try_pet_push(f"已存在：{file_path.name}", "info")
                     return False
                 progress.advance(task)
 
@@ -374,12 +392,18 @@ class DocsMixin:
                 f"  [green]✓[/green] {file_path.name}  "
                 f"[dim]分块 {record.chunk_count} / {record.total_tokens} tokens[/dim]{tag_str}"
             )
+            if _try_pet_push:
+                _try_pet_push(f"✓ 已入库：{file_path.name} · {record.chunk_count} 块 / {record.total_tokens} tokens", "success")
             return True
         except ParseError as e:
             console.print(f"  [red]解析失败[/red]: {file_path.name} - {e}")
+            if _try_pet_push:
+                _try_pet_push(f"✗ 解析失败：{file_path.name}", "error")
             return False
         except Exception as e:
             console.print(f"  [red]入库失败[/red]: {file_path.name} - {type(e).__name__}: {e}")
+            if _try_pet_push:
+                _try_pet_push(f"✗ 入库失败：{file_path.name}", "error")
             return False
 
     # ---- 数据表分析 ----
@@ -816,6 +840,11 @@ class DocsMixin:
             if len(tags) > 10:
                 console.print(f"    [dim]... 还有 {len(tags) - 10} 个标签[/dim]")
         console.print()
+        if _try_pet_push:
+            _try_pet_push(
+                f"📊 知识库统计\n文档 {s['documents']} · 分块 {s['chunks']} · {s['total_tokens']:,} tokens",
+                "markdown"
+            )
 
     def _cmd_rebuild(self, arg: str = "") -> None:
         """重建索引：/rebuild [--vector]

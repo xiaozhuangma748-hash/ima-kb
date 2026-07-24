@@ -73,6 +73,11 @@ function startPythonBridge() {
         const msg = JSON.parse(line);
         if (msg.type === 'set_state') {
           setState(msg.state, 'external');
+        } else if (msg.type === 'push_content') {
+          // CLI 推送的内容，转发给渲染进程
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('pet-content', { content: msg.content, msg_type: msg.msg_type });
+          }
         } else {
           console.log('[python]', line);
         }

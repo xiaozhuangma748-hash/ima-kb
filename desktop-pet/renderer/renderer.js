@@ -205,6 +205,26 @@ window.petAPI.onShowBubble((msg) => {
   bubbleAnswer.innerHTML = markdownToHtml(String(msg));
 });
 
+// === CLI 推送内容处理 ===
+window.petAPI.onPetContent((data) => {
+  console.log('[renderer] onPetContent:', data.msg_type, data.content.substring(0, 80));
+  const { content, msg_type } = data;
+
+  if (msg_type === 'success') {
+    // 成功反馈：用 drop-hint 轻提示，3 秒后自动消失
+    setDropHint(content, true);
+    setTimeout(() => setDropHint('', false), 3000);
+  } else if (msg_type === 'error') {
+    // 错误反馈：用 drop-hint 显示红色错误
+    setDropHint(content, true);
+    setTimeout(() => setDropHint('', false), 5000);
+  } else if (msg_type === 'info' || msg_type === 'markdown') {
+    // 信息/markdown：在气泡中显示
+    showBubble();
+    bubbleAnswer.innerHTML = msg_type === 'markdown' ? markdownToHtml(content) : escapeHtml(content);
+  }
+});
+
 // === 气泡控制 ===
 function showBubble() {
   bubble.classList.add('visible');

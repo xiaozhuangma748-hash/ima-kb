@@ -30,6 +30,12 @@ from core.cli import constants
 from core.cli.constants import console
 from core.cli.welcome import _render_welcome_panel
 
+# 桌宠内容推送（失败静默）
+try:
+    from core.desktop.cli_sync import _try_push_content as _try_pet_push
+except ImportError:
+    _try_pet_push = None
+
 
 class MemoryMixin:
     """记忆管理与主题切换相关命令。"""
@@ -74,6 +80,8 @@ class MemoryMixin:
             "completion-menu.progress-bar": f"bg:{secondary}",
         })
         console.print(f"[green]✓ 已切换主题[/green] [bold]{new_t.label}[/bold]")
+        if _try_pet_push:
+            _try_pet_push(f"✓ 主题已切换：{new_t.label}", "success")
         console.print(f"[dim]{new_t.desc}[/dim]\n")
         # 重新渲染欢迎面板（传入当前会话名，避免丢失"上次会话"标签）
         stats = self.storage.stats()

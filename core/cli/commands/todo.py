@@ -22,6 +22,12 @@ from rich.table import Table
 from core.todo.manager import TodoManager, TodoItem, VALID_PRIORITIES
 from core.cli.constants import console
 
+# 桌宠内容推送（失败静默）
+try:
+    from core.desktop.cli_sync import _try_push_content as _try_pet_push
+except ImportError:
+    _try_pet_push = None
+
 
 # 优先级显示标记
 _PRIORITY_MARK = {"high": "[red]高[/red]", "medium": "[yellow]中[/yellow]", "low": "[dim]低[/dim]"}
@@ -145,6 +151,8 @@ class TodoMixin:
             return
 
         console.print(f"[green]v 已添加[/green] [dim]({item.id})[/dim]")
+        if _try_pet_push:
+            _try_pet_push(f"✓ 已添加任务：{item.description}", "success")
         pri_label = _PRIORITY_MARK.get(item.priority, item.priority)
         console.print(f"  [{pri_label}] {item.description}")
         if item.note:

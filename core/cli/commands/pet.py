@@ -28,6 +28,12 @@ from rich.text import Text
 from core.memory.profile import ProfileManager
 from core.pet.interact import InteractError
 from core.pet.shop import ShopError
+
+# 桌宠内容推送（失败静默）
+try:
+    from core.desktop.cli_sync import _try_push_content as _try_pet_push
+except ImportError:
+    _try_pet_push = None
 from core.cli.constants import console
 from core.cli.welcome import _render_bar
 
@@ -135,6 +141,8 @@ class PetMixin:
             except Exception as e:
                 console.print(f"[dim]记忆系统初始化失败: {e}[/dim]")
         console.print(f"[bold green]✓ 领养成功！[/bold green] 你的宠物叫 [magenta]{name}[/magenta]")
+        if _try_pet_push:
+            _try_pet_push(f"✓ 领养成功！{name}", "success")
         self._pet_show_status()
 
     def _pet_interact(self, action: str) -> None:
@@ -254,6 +262,8 @@ class PetMixin:
         self.pet.name = new_name
         self.pet_storage.save(self.pet)
         console.print(f"[green]✓ {old} 改名为 {new_name}[/green]")
+        if _try_pet_push:
+            _try_pet_push(f"✓ {old} 改名为 {new_name}", "success")
 
     def _pet_show_tasks(self) -> None:
         """显示每日任务。"""
@@ -369,6 +379,8 @@ class PetMixin:
             mgr.update_style_preference(s)
             label = {"scholar": "学者", "warrior": "战士", "artisan": "工匠", "auto": "自动"}.get(s, s)
             console.print(f"[green]✓ 人格风格已切换为[/green] [bold cyan]{label}[/bold cyan]")
+            if _try_pet_push:
+                _try_pet_push(f"✓ 风格切换：{label}", "success")
             if s == "auto":
                 console.print("[dim]（auto = 跟随宠物分系）[/dim]")
         except Exception as e:
