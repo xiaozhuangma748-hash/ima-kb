@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('petAPI', {
   onAnswerError: (cb) => ipcRenderer.on('answer-error', (e, data) => cb(data)),
   onShowBubble: (cb) => ipcRenderer.on('show-bubble', (e, data) => cb(data)),
   onPetContent: (cb) => ipcRenderer.on('pet-content', (e, data) => cb(data)),
+  onCliToken: (cb) => ipcRenderer.on('cli-token', (e, text) => cb(text)),
+  onCliDone: (cb) => ipcRenderer.on('cli-done', (e, answer) => cb(answer)),
+  onCliStage: (cb) => ipcRenderer.on('cli-stage', (e, data) => cb(data)),
 
   // 渲染进程 → 主进程（调用）
   askStream: (question, history) => ipcRenderer.invoke('ask-stream', question, history),

@@ -225,6 +225,53 @@ window.petAPI.onPetContent((data) => {
   }
 });
 
+// === CLI 流式问答镜像 ===
+let cliAnswerBuffer = '';
+let cliActive = false;
+
+window.petAPI.onCliStage((data) => {
+  console.log('[renderer] onCliStage:', data.stage, 'cliActive:', cliActive);
+  // 如果桌宠自身正在问答，不抢占
+  if (isAnswerMode) return;
+  if (!cliActive) {
+    cliActive = true;
+    cliAnswerBuffer = '';
+    showBubble();
+    bubbleInput.style.display = 'none';
+  }
+  renderStageHint(data.stage, data.count);
+});
+
+window.petAPI.onCliToken((text) => {
+  console.log('[renderer] onCliToken:', text.substring(0, 30), 'cliActive:', cliActive);
+  // 如果桌宠自身正在问答，不抢占
+  if (isAnswerMode) return;
+  if (!cliActive) {
+    cliActive = true;
+    cliAnswerBuffer = '';
+    showBubble();
+    bubbleInput.style.display = 'none';
+  }
+  cliAnswerBuffer += text;
+  // 流式阶段：纯文本显示（避免半截 markdown 抖动）
+  const tag = '<span style="color:var(--pet-muted-fg);font-size:11px">[CLI]</span> ';
+  bubbleAnswer.innerHTML = tag + escapeHtml(cliAnswerBuffer);
+  updateScrollHeight();
+});
+
+window.petAPI.onCliDone((answer) => {
+  console.log('[renderer] onCliDone, answer len:', answer.length, 'cliActive:', cliActive);
+  if (!cliActive) return;
+  // 完成后做 markdown 渲染
+  const tag = '<span style="color:var(--pet-muted-fg);font-size:11px">[CLI]</span> ';
+  const finalText = answer || cliAnswerBuffer;
+  bubbleAnswer.innerHTML = tag + markdownToHtml(finalText);
+  cliActive = false;
+  // 恢复输入框
+  bubbleInput.style.display = 'block';
+  if (bubbleScroll) bubbleScroll.scrollTop = 0;
+});
+
 // === 气泡控制 ===
 function showBubble() {
   bubble.classList.add('visible');

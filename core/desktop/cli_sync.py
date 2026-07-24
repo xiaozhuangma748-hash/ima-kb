@@ -73,6 +73,83 @@ def _try_push_content(content: str, msg_type: str = "info") -> bool:
         return False
 
 
+class _StreamPusher:
+    """流式 token 推送器（复用持久 IPC 连接，避免高频建连开销）。
+
+    用法::
+
+        pusher = _StreamPusher()
+        if pusher.connect():
+            pusher.push_stage("检索")
+            pusher.push_token("你好")
+            pusher.push_token("世界")
+            pusher.push_done("你好世界")
+            pusher.close()
+    """
+
+    def __init__(self):
+        self._sock = None
+        self._connected = False
+
+    def connect(self) -> bool:
+        """连接到桌宠 IPC。失败返回 False。"""
+        import os as _os
+        from core.desktop.ipc import SOCKET_PATH
+        if not _os.path.exists(SOCKET_PATH):
+            return False
+        try:
+            import socket as _socket
+            self._sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            self._sock.settimeout(5)
+            self._sock.connect(SOCKET_PATH)
+            self._connected = True
+            return True
+        except Exception as e:
+            logger.debug(f"_StreamPusher 连接失败: {e}")
+            self._connected = False
+            return False
+
+    def _send(self, data: dict) -> None:
+        """发送一行 JSON，定期排空接收缓冲区防止 socket 阻塞。"""
+        if not self._connected or self._sock is None:
+            return
+        import json as _json
+        import select as _select
+        line = (_json.dumps(data, ensure_ascii=False) + "\n").encode()
+        try:
+            self._sock.sendall(line)
+            # 排空服务端响应，防止缓冲区满
+            while True:
+                ready, _, _ = _select.select([self._sock], [], [], 0)
+                if not ready:
+                    break
+                data = self._sock.recv(4096)
+                if not data:
+                    break
+        except Exception as e:
+            logger.debug(f"_StreamPusher 发送失败: {e}")
+            self._connected = False
+
+    def push_stage(self, stage: str, count: int = 0) -> None:
+        self._send({"action": "push_stage", "stage": stage, "count": count})
+
+    def push_token(self, text: str) -> None:
+        self._send({"action": "push_token", "text": text})
+
+    def push_done(self, answer: str = "") -> None:
+        self._send({"action": "push_done", "answer": answer})
+
+    def close(self) -> None:
+        """关闭连接。"""
+        self._connected = False
+        if self._sock:
+            try:
+                self._sock.close()
+            except Exception:
+                pass
+            self._sock = None
+
+
 def cmd_state(state: str) -> int:
     """手动切换桌宠状态。
 

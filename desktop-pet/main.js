@@ -78,6 +78,21 @@ function startPythonBridge() {
           if (win && !win.isDestroyed()) {
             win.webContents.send('pet-content', { content: msg.content, msg_type: msg.msg_type });
           }
+        } else if (msg.type === 'push_token') {
+          // CLI 流式 token，转发给渲染进程
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('cli-token', msg.text);
+          }
+        } else if (msg.type === 'push_done') {
+          // CLI 流式完成
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('cli-done', msg.answer || '');
+          }
+        } else if (msg.type === 'push_stage') {
+          // CLI 阶段提示
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('cli-stage', { stage: msg.stage, count: msg.count || 0 });
+          }
         } else {
           console.log('[python]', line);
         }

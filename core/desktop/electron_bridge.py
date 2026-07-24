@@ -105,6 +105,12 @@ class ElectronIpcServer(IpcServer):
                 return {"success": True, "data": "pong"}
             if action == "push_content":
                 return self._handle_push_content(request)
+            if action == "push_token":
+                return self._handle_push_token(request)
+            if action == "push_done":
+                return self._handle_push_done(request)
+            if action == "push_stage":
+                return self._handle_push_stage(request)
             if action == "set_state":
                 return self._handle_set_state(request)
             return {"success": False, "error": f"未知 action: {action}"}
@@ -247,6 +253,36 @@ class ElectronIpcServer(IpcServer):
             "type": "push_content",
             "content": content,
             "msg_type": msg_type,
+        }), flush=True)
+        return {"success": True}
+
+    def _handle_push_token(self, request: dict):
+        """CLI 流式 token 推送到桌面宠物气泡。"""
+        import json as json_module
+        text = request.get("text", "")
+        if text:
+            print(json_module.dumps({
+                "type": "push_token",
+                "text": text,
+            }), flush=True)
+        return {"success": True}
+
+    def _handle_push_done(self, request: dict):
+        """CLI 流式完成推送。"""
+        import json as json_module
+        print(json_module.dumps({
+            "type": "push_done",
+            "answer": request.get("answer", ""),
+        }), flush=True)
+        return {"success": True}
+
+    def _handle_push_stage(self, request: dict):
+        """CLI 阶段提示推送。"""
+        import json as json_module
+        print(json_module.dumps({
+            "type": "push_stage",
+            "stage": request.get("stage", ""),
+            "count": request.get("count", 0),
         }), flush=True)
         return {"success": True}
 

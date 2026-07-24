@@ -353,6 +353,15 @@ class ChatMixin:
                 if _try_pet_state:
                     _try_pet_state("listening")
                     _try_pet_state("thinking")
+                # 桌面宠物流式镜像
+                _stream_pusher = None
+                try:
+                    from core.desktop.cli_sync import _StreamPusher
+                    _stream_pusher = _StreamPusher()
+                    if not _stream_pusher.connect():
+                        _stream_pusher = None
+                except Exception:
+                    _stream_pusher = None
                 for event in self.administrator.ask_stream(
                     user_input, history=self.history, summary=self.conversation_summary,
                     cross_session_context=_cross_ctx,
@@ -369,6 +378,9 @@ class ChatMixin:
                                 _try_pet_state("retrieving")
                             elif "重排" in _stage:
                                 _try_pet_state("ranking")
+                        # 桌面宠物流式镜像
+                        if _stream_pusher:
+                            _stream_pusher.push_stage(event.get("stage", ""), event.get("count", 0))
                         # 停掉上一个 spinner（切换阶段）
                         if live is not None:
                             live.stop()
@@ -412,6 +424,9 @@ class ChatMixin:
                             self._stream_live.start()
                             self._stream_text = ""
                         self._stream_text += event["text"]
+                        # 桌面宠物流式镜像
+                        if _stream_pusher:
+                            _stream_pusher.push_token(event["text"])
                         # 用 Markdown 实时渲染（表格、标题、列表等格式正确显示）
                         # 同时清理 LLM 可能生成的 LaTeX 公式语法和越界 [n] 引用标记
                         sanitized = self._sanitize_latex(self._stream_text)
@@ -433,6 +448,11 @@ class ChatMixin:
                         # 桌面宠物状态联动：完成 → 庆祝 → 回到空闲
                         if _try_pet_state:
                             _try_pet_state("celebrating")
+                        # 桌面宠物流式镜像：推送最终结果
+                        if _stream_pusher:
+                            _stream_pusher.push_done(getattr(self, "_stream_text", ""))
+                            _stream_pusher.close()
+                            _stream_pusher = None
                 # 安全兜底：循环结束确保 spinner 和 Live 已停
                 if live is not None:
                     live.stop()
@@ -440,6 +460,10 @@ class ChatMixin:
                 if getattr(self, "_stream_live", None) is not None:
                     self._stream_live.stop()
                     self._stream_live = None
+                # 安全兜底：关闭流式推送器
+                if _stream_pusher is not None:
+                    _stream_pusher.close()
+                    _stream_pusher = None
                 # 不再重新渲染：Live + Markdown 已在流式过程中完成渲染
                 # （避免流式纯文本 + done 后 Markdown 重新渲染导致的重复输出）
                 console.print()  # 流式结束后换行

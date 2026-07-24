@@ -270,3 +270,30 @@ class IpcClient:
         except Exception as e:
             logger.debug(f"push_content 失败（桌宠可能未运行）: {e}")
             return False
+
+    def push_token(self, text: str) -> bool:
+        """推送流式 token 到桌面宠物气泡。"""
+        try:
+            result = self.send("push_token", text=text)
+            return result.get("success", False)
+        except Exception as e:
+            logger.debug(f"push_token 失败: {e}")
+            return False
+
+    def push_done(self, answer: str = "") -> bool:
+        """推送流式完成信号。"""
+        try:
+            result = self.send("push_done", answer=answer)
+            return result.get("success", False)
+        except Exception as e:
+            logger.debug(f"push_done 失败: {e}")
+            return False
+
+    def push_stage(self, stage: str, count: int = 0) -> bool:
+        """推送阶段提示。"""
+        try:
+            result = self.send("push_stage", stage=stage, count=count)
+            return result.get("success", False)
+        except Exception as e:
+            logger.debug(f"push_stage 失败: {e}")
+            return False
