@@ -481,6 +481,7 @@ function submitCliCommand(cmdText) {
     if (result && result.success) {
       const md = result.output || '(无输出)';
       bubbleAnswer.innerHTML = markdownToHtml(md);
+      scrollToBottom();
     } else {
       bubbleAnswer.innerHTML = `<span style="color:#e84c3d">${escapeHtml(result?.error || '执行失败')}</span>`;
     }
@@ -505,6 +506,8 @@ btnExpand.addEventListener('click', (e) => {
   e.stopPropagation();
   const expanded = bubble.classList.toggle('expanded');
   btnExpand.textContent = expanded ? '收起' : '展开';
+  // 通知主进程调整窗口尺寸，避免气泡被窗口边界截断
+  window.petAPI.resizeWindow(expanded);
 });
 
 // 输入框粘贴/输入文件路径时自动识别并提示入库

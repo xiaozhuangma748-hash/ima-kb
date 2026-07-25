@@ -464,6 +464,17 @@ ipcMain.handle('exec-cli-command', async (event, cmdText) => {
   }
 });
 
+// P5: 动态调整窗口尺寸以适配气泡展开
+ipcMain.on('resize-window', (event, { expanded }) => {
+  if (!win) return;
+  const targetW = expanded ? 440 : WIN_W;
+  const targetH = expanded ? 620 : WIN_H;
+  // 以宠物底部为锚点，向下扩展
+  const [x, y] = win.getPosition();
+  const dy = WIN_H - targetH;
+  win.setBounds({ x, y: y + dy, width: targetW, height: targetH });
+});
+
 // === App 生命周期 ===
 app.whenReady().then(async () => {
   settings = loadSettings(app.getPath('userData'));
