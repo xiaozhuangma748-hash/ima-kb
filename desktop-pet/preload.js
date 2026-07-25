@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('petAPI', {
   bubbleVisible: (visible) => ipcRenderer.send('bubble-visible', visible),
   // P5: 动态调整窗口尺寸
   resizeWindow: (expanded) => ipcRenderer.send('resize-window', { expanded }),
+  // 动态鼠标穿透切换
+  setMouseEvents: (enable) => ipcRenderer.send('set-mouse-events', enable),
   // P4: 桌宠命令面板
   execCliCommand: (cmd) => ipcRenderer.invoke('exec-cli-command', cmd),
 });

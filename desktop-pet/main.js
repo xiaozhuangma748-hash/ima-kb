@@ -220,6 +220,10 @@ function createWindow() {
 
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // 默认让整个窗口透明区穿透鼠标事件（macOS 透明窗口默认会吞掉透明像素的点击）
+  // forward: true 使得穿透模式下 mousemove 仍能转发给 renderer，
+  // renderer 检测鼠标在交互元素上时动态切回可交互模式
+  win.setIgnoreMouseEvents(true, { forward: true });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   win.once('ready-to-show', () => {
@@ -453,6 +457,15 @@ ipcMain.on('bubble-visible', (event, visible) => {
   // 不调整窗口尺寸，避免宠物位置跳变
   if (win) {
     // macOS 上 focusable 动态切换可能闪烁，暂不处理
+  }
+});
+
+// 动态鼠标穿透：renderer 检测鼠标位置后通知主进程切换
+// enable=true → 透明区穿透（默认）
+// enable=false → 恢复可交互（鼠标在猫咪/气泡上）
+ipcMain.on('set-mouse-events', (event, enable) => {
+  if (win && !win.isDestroyed()) {
+    win.setIgnoreMouseEvents(enable, { forward: true });
   }
 });
 

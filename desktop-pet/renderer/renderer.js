@@ -748,4 +748,54 @@ petStage.addEventListener('drop', async (e) => {
   window.petAPI.ingest(filePath);
 });
 
+// === 动态鼠标穿透 ===
+// 窗口默认 setIgnoreMouseEvents(true, {forward:true})，透明区点击穿透到桌面。
+// 这里检测鼠标是否在交互元素（猫咪/气泡/徽章）上，动态切回可交互模式。
+let mouseEventsIgnored = true;
+let lastIgnoreState = true; // 仅在状态变化时发 IPC，减少通信
+
+function isPointInRect(x, y, rect) {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function updateMousePassthrough(x, y) {
+  // 检查鼠标是否在任何交互元素的 bounding rect 内
+  let shouldInteract = false;
+
+  // 猫咪
+  const petRect = petStage.getBoundingClientRect();
+  if (isPointInRect(x, y, petRect)) shouldInteract = true;
+
+  // 气泡（仅可见时）
+  if (bubble.classList.contains('visible')) {
+    const bubbleRect = bubble.getBoundingClientRect();
+    if (isPointInRect(x, y, bubbleRect)) shouldInteract = true;
+  }
+
+  // 未读徽章（仅可见时）
+  if (badgeEl && badgeEl.classList.contains('visible')) {
+    const badgeRect = badgeEl.getBoundingClientRect();
+    if (isPointInRect(x, y, badgeRect)) shouldInteract = true;
+  }
+
+  const newIgnore = !shouldInteract;
+  if (newIgnore !== lastIgnoreState) {
+    lastIgnoreState = newIgnore;
+    window.petAPI.setMouseEvents(newIgnore);
+  }
+}
+
+// mousemove 在穿透模式下仍能触发（forward: true 保证）
+window.addEventListener('mousemove', (e) => {
+  updateMousePassthrough(e.clientX, e.clientY);
+});
+
+// 鼠标离开窗口时恢复穿透（保险）
+window.addEventListener('mouseleave', () => {
+  if (!lastIgnoreState) {
+    lastIgnoreState = true;
+    window.petAPI.setMouseEvents(true);
+  }
+});
+
 console.log('[ima-desktop-electron] renderer loaded');

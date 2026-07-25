@@ -25,8 +25,8 @@
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
   }
 
-  /* 全屏透明层：仅作为视觉铺底；点击穿透到后面（pointer-events: none）
-     拖拽/拖放改由 #pet-stage（猫咪）自身接收，见 renderer.js */
+  /* 全屏透明层：点击穿透由主进程 setIgnoreMouseEvents 管理，
+     CSS 层保持默认 auto，不需要再设 pointer-events: none */
   #transparent-backdrop {
     position: fixed; inset: 0;
     pointer-events: none;
