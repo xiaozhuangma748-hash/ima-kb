@@ -26,9 +26,11 @@ let dnd = false;
 let dragState = { active: false, offsetX: 0, offsetY: 0 };
 let bubbleVisible = false; // 气泡是否展开
 
-// 窗口尺寸常量（原版：260×360，上方透明区留给气泡，下方显示宠物）
-const WIN_W = 260;
-const WIN_H = 360;
+// 窗口尺寸常量：一次性开到能容纳展开气泡的最大尺寸，固定不动
+// （上方透明区留给气泡，下方显示宠物）。展开只切气泡 CSS，不 resize 窗口，
+// 这样猫咪在屏幕上的绝对位置恒定，不会因气泡变大而跳动。
+const WIN_W = 460;
+const WIN_H = 640;
 
 const IDLE_THRESHOLD_SEC = 300; // 5 分钟无操作 → sleeping
 
@@ -469,15 +471,15 @@ ipcMain.handle('exec-cli-command', async (event, cmdText) => {
   }
 });
 
-// P5: 动态调整窗口尺寸以适配气泡展开
+// P5: 气泡展开/收起 —— 窗口已一次性开到最大尺寸（WIN_W×WIN_H）且固定不动，
+// 展开只切气泡自身 CSS，不 resize 窗口（否则猫咪屏幕位置会跳动）。
+// 此 handler 保留为兼容接口，但不再调整窗口尺寸。
 ipcMain.on('resize-window', (event, { expanded }) => {
-  if (!win) return;
-  const targetW = expanded ? 440 : WIN_W;
-  const targetH = expanded ? 620 : WIN_H;
-  // 以宠物底部为锚点，向下扩展
-  const [x, y] = win.getPosition();
-  const dy = WIN_H - targetH;
-  win.setBounds({ x, y: y + dy, width: targetW, height: targetH });
+  // no-op: 窗口尺寸固定，猫咪位置恒定
+  if (win && !win.isDestroyed()) {
+    // 可选：展开时把窗口提到最前，确保不被其他窗口遮挡
+    // win.setAlwaysOnTop(true, 'screen-saver');
+  }
 });
 
 // === App 生命周期 ===

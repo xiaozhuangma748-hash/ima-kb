@@ -650,10 +650,11 @@ let dragLastX = 0;
 let dragLastY = 0;
 const DRAG_THRESHOLD = 3; // 像素，超过才算拖拽
 
-// 整个窗口透明区域都可拖拽（气泡内除外）
-document.body.addEventListener('mousedown', (e) => {
+// 拖动整窗：挂到猫咪元素（#pet-stage）上。
+// body 已设 pointer-events:none 实现点击穿透，不能再靠 body 收 mousedown。
+function onPetMouseDown(e) {
+  // 气泡内、输入框/按钮/链接不触发拖拽
   if (e.target.closest('#bubble')) return;
-  // 避免在输入框、按钮等可交互元素上触发拖拽
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
   dragging = true;
   dragStartX = e.screenX;
@@ -661,7 +662,8 @@ document.body.addEventListener('mousedown', (e) => {
   dragLastX = e.screenX;
   dragLastY = e.screenY;
   window.petAPI.dragStart(e.screenX, e.screenY);
-});
+}
+petStage.addEventListener('mousedown', onPetMouseDown);
 
 window.addEventListener('mousemove', (e) => {
   if (!dragging) return;
@@ -693,31 +695,28 @@ function clearDropState() {
   setDropHint('', false);
 }
 
-document.body.addEventListener('dragover', (e) => {
+// 拖拽入库：挂到猫咪元素（#pet-stage）。body 已 pointer-events:none，
+// 拖放事件不再冒泡到 body，必须直接绑在可交互的猫咪上。
+petStage.addEventListener('dragover', (e) => {
   // 必须 preventDefault，否则 drop 不会触发
   e.preventDefault();
-  console.log('[dnd] dragover target:', e.target.id || e.target.tagName);
-  if (e.target.closest('#bubble')) {
-    clearDropState();
-    return;
-  }
+  e.dataTransfer.dropEffect = 'copy';
+  console.log('[dnd] dragover on pet');
   img.classList.add('drag-over', 'eating');
   setDropHint('啊~ 丢给我！', true);
 });
 
-document.body.addEventListener('dragleave', (e) => {
-  // 只有真正离开 body 时才清除（避免进入子元素时误触发）
-  if (e.relatedTarget && document.body.contains(e.relatedTarget)) return;
+petStage.addEventListener('dragleave', (e) => {
+  // 离开猫咪区域才清除
+  if (e.relatedTarget && petStage.contains(e.relatedTarget)) return;
   clearDropState();
 });
 
-document.body.addEventListener('drop', async (e) => {
+petStage.addEventListener('drop', async (e) => {
   e.preventDefault();
   e.stopPropagation();
   clearDropState();
-  console.log('[dnd] drop target:', e.target.id || e.target.tagName);
-
-  if (e.target.closest('#bubble')) return;
+  console.log('[dnd] drop on pet');
 
   let filePath = null;
   let fileName = '';

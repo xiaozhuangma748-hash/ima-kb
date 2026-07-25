@@ -25,11 +25,11 @@
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
   }
 
-  /* 全屏透明层：接收拖放和拖拽事件；
-     宠物/气泡区域通过自身 pointer-events 覆盖 */
+  /* 全屏透明层：仅作为视觉铺底；点击穿透到后面（pointer-events: none）
+     拖拽/拖放改由 #pet-stage（猫咪）自身接收，见 renderer.js */
   #transparent-backdrop {
     position: fixed; inset: 0;
-    pointer-events: auto;
+    pointer-events: none;
     cursor: grab;
   }
   #transparent-backdrop:active { cursor: grabbing; }
@@ -44,6 +44,8 @@
     justify-content: center;
     pointer-events: auto;
     cursor: grab;
+    /* 拖拽命中区域略微放大，避免只点中图片边缘才生效 */
+    padding: 8px 0;
   }
   #pet-stage:active { cursor: grabbing; }
 
