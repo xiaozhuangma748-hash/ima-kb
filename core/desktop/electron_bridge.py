@@ -267,6 +267,30 @@ class ElectronIpcServer(IpcServer):
             "t": "todo", "m": "memory",
             "tag": "tags",
         }
+        # help 输入容错：h/h/he/hel 都是 help
+        if main_cmd in ("h", "he", "hel"):
+            main_cmd = "help"
+        # 其他未识别但可唯一前缀匹配的命令也允许
+        if main_cmd not in {
+            "list", "search", "stats", "tags", "todo", "memory",
+            "help", "sessions", "session",
+        }:
+            candidates = [
+                c for c in ("list", "search", "stats", "tags", "todo",
+                            "memory", "help", "sessions")
+                if c.startswith(main_cmd)
+            ]
+            if len(candidates) == 1:
+                main_cmd = candidates[0]
+            elif len(candidates) > 1:
+                return {
+                    "success": False,
+                    "error": (
+                        f"命令 /{main_cmd} 有歧义，匹配到多个: "
+                        + "/".join(candidates)
+                        + "\n请输入更明确的前缀"
+                    ),
+                }
         main_cmd = aliases.get(main_cmd, main_cmd)
 
         try:
