@@ -293,25 +293,52 @@ window.petAPI.onCliDone((answer) => {
 });
 
 // === 气泡控制 ===
-function showBubble() {
+function showBubble(keep = false) {
   bubble.classList.add('visible');
   bubbleInput.style.display = 'block';
-  bubbleInput.value = '';
-  bubbleInput.focus();
-  bubbleAnswer.innerHTML = '';
-  bubbleCitations.innerHTML = '';
-  bubbleCitations.classList.remove('expanded');
-  btnCitations.style.display = 'none';
-  pathHint.classList.remove('visible');
-  textHint.classList.remove('visible');
-  currentPath = null;
-  currentText = null;
-  isAnswerMode = false;
-  currentCitations = [];
-  answerBuffer = '';
-  if (bubbleScroll) bubbleScroll.scrollTop = 0;
+  if (!keep) {
+    // 全新交互：清空所有状态
+    bubbleInput.value = '';
+    bubbleInput.focus();
+    bubbleAnswer.innerHTML = '';
+    bubbleCitations.innerHTML = '';
+    bubbleCitations.classList.remove('expanded');
+    btnCitations.style.display = 'none';
+    pathHint.classList.remove('visible');
+    textHint.classList.remove('visible');
+    currentPath = null;
+    currentText = null;
+    isAnswerMode = false;
+    cliActive = false;
+    currentCitations = [];
+    answerBuffer = '';
+    cliAnswerBuffer = '';
+    if (bubbleScroll) bubbleScroll.scrollTop = 0;
+  } else {
+    // 重新打开查看已到达内容（点击未读徽章 / 双击宠物）：不重置状态，回填答案
+    if (!bubbleAnswer.innerHTML.trim()) {
+      renderCurrentAnswer();
+    }
+    if (bubbleScroll) bubbleScroll.scrollTop = bubbleScroll.scrollHeight;
+  }
   window.petAPI.bubbleVisible(true);
   hideBadge();
+}
+
+// 根据当前缓冲区回填气泡内容（用于后台已生成答案后重新打开气泡）
+function renderCurrentAnswer() {
+  if (cliActive) {
+    const tag = '<span style="color:var(--pet-muted-fg);font-size:11px">[CLI]</span> ';
+    bubbleAnswer.innerHTML = tag + markdownToHtml(cliAnswerBuffer || '');
+    bubbleInput.style.display = 'none';
+    return;
+  }
+  if (answerBuffer || isAnswerMode) {
+    const qHtml = pendingQuestion
+      ? `<div class="md-h">问：${escapeHtml(pendingQuestion)}</div>`
+      : '';
+    bubbleAnswer.innerHTML = qHtml + markdownToHtml(answerBuffer || '');
+  }
 }
 
 function hideBubble() {
@@ -329,8 +356,8 @@ function ensureBadge() {
   badgeEl.id = 'pet-badge';
   badgeEl.addEventListener('click', (e) => {
     e.stopPropagation();
-    // 点击徽章展开气泡
-    showBubble();
+    // 点击徽章展开气泡，保留已到达的内容
+    showBubble(true);
     hideBadge();
   });
   document.body.appendChild(badgeEl);
@@ -507,7 +534,8 @@ function ingestCurrentText() {
 img.addEventListener('dblclick', (e) => {
   e.preventDefault();
   e.stopPropagation();
-  showBubble();
+  // 保留已到达内容（避免关闭后重开丢失答案）
+  showBubble(true);
 });
 
 // 输入框内 Shift+Enter 换行；Enter 提交
