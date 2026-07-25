@@ -113,6 +113,8 @@ class ElectronIpcServer(IpcServer):
                 return self._handle_push_stage(request)
             if action == "set_state":
                 return self._handle_set_state(request)
+            if action == "exec_cli_command":
+                return self._handle_exec_cli_command(request)
             return {"success": False, "error": f"未知 action: {action}"}
         except Exception as e:
             logger.error(f"IPC 处理失败 (action={action}): {e}")
@@ -240,6 +242,173 @@ class ElectronIpcServer(IpcServer):
         import json as json_module
         print(json_module.dumps({"type": "set_state", "state": state}), flush=True)
         return {"success": True, "state": state}
+
+    def _handle_exec_cli_command(self, request: dict):
+        """P4: 桌宠命令面板 — 轻量命令执行器。
+
+        支持常用查询命令，直接调用 storage/pet_admin API，
+        不需要启动完整 REPL。
+        """
+        cmd = request.get("command", "").strip()
+        if not cmd:
+            return {"success": False, "error": "命令为空"}
+
+        # 去掉 / 前缀
+        if cmd.startswith("/"):
+            cmd = cmd[1:]
+
+        parts = cmd.split(maxsplit=1)
+        main_cmd = parts[0].lower()
+        sub_arg = parts[1].strip() if len(parts) > 1 else ""
+
+        # 命令别名（与 REPL CMD_ALIASES 保持一致）
+        aliases = {
+            "ls": "list", "s": "search", "st": "stats",
+            "t": "todo", "m": "memory",
+            "tag": "tags",
+        }
+        main_cmd = aliases.get(main_cmd, main_cmd)
+
+        try:
+            if main_cmd == "list":
+                return self._exec_list()
+            elif main_cmd == "search":
+                return self._exec_search(sub_arg)
+            elif main_cmd == "stats":
+                return self._exec_stats()
+            elif main_cmd == "tags":
+                return self._exec_tags()
+            elif main_cmd == "todo":
+                return self._exec_todo(sub_arg)
+            elif main_cmd == "memory":
+                return self._exec_memory(sub_arg)
+            elif main_cmd == "help":
+                return self._exec_help()
+            elif main_cmd in ("sessions", "session"):
+                return self._exec_sessions()
+            else:
+                return {
+                    "success": False,
+                    "error": f"桌宠命令面板暂不支持 /{main_cmd}\n支持: /list /search /stats /tags /todo /memory /sessions /help",
+                }
+        except Exception as e:
+            logger.error(f"exec_cli_command 失败 ({cmd}): {e}")
+            return {"success": False, "error": str(e)}
+
+    def _exec_list(self):
+        """列出文档。"""
+        docs = self._storage.list_documents(limit=50)
+        if not docs:
+            return {"success": True, "output": "知识库为空"}
+        lines = [f"📋 知识库文档（共 {len(docs)} 条）"]
+        for d in docs[:10]:
+            tags = "、".join(d.tags) if d.tags else "-"
+            lines.append(f"- **{d.title}** · {d.file_type} · {d.chunk_count}块 · {tags}")
+        if len(docs) > 10:
+            lines.append(f"... 还有 {len(docs) - 10} 条")
+        return {"success": True, "output": "\n".join(lines)}
+
+    def _exec_search(self, keyword: str):
+        """搜索文档。"""
+        if not keyword:
+            return {"success": False, "error": "用法: /search <关键词>"}
+        results = self._storage.bm25_search(keyword, top_k=5)
+        if not results:
+            return {"success": True, "output": f"未找到与 '{keyword}' 相关的内容"}
+        lines = [f"🔍 搜索 '{keyword}' → {len(results)} 条结果"]
+        for i, r in enumerate(results[:5], 1):
+            preview = r.content[:80].replace("\n", " ")
+            lines.append(f"{i}. **{r.doc_title}** ({r.score:.2f})")
+            lines.append(f"   {preview}...")
+        return {"success": True, "output": "\n".join(lines)}
+
+    def _exec_stats(self):
+        """统计信息。"""
+        docs = self._storage.list_documents()
+        total_chunks = sum(d.chunk_count for d in docs)
+        total_tokens = sum(d.total_tokens for d in docs)
+        lines = [
+            f"📊 知识库统计",
+            f"- 文档数: {len(docs)}",
+            f"- 总分块: {total_chunks}",
+            f"- 总 Tokens: {total_tokens}",
+        ]
+        if self._pet_admin and self._pet_admin.pet:
+            pet = self._pet_admin.pet
+            lines.append(f"- 宠物: {pet.name} (Lv.{pet.level})")
+        return {"success": True, "output": "\n".join(lines)}
+
+    def _exec_tags(self):
+        """列出标签。"""
+        tags = self._storage.list_all_tags()
+        if not tags:
+            return {"success": True, "output": "还没有标签"}
+        lines = [f"🏷 所有标签（共 {len(tags)} 个）"]
+        tag_items = list(tags.items())[:10]
+        lines.append("、".join(f"{t}×{c}" for t, c in tag_items))
+        if len(tags) > 10:
+            lines.append(f"... 还有 {len(tags) - 10} 个")
+        return {"success": True, "output": "\n".join(lines)}
+
+    def _exec_todo(self, sub_arg: str):
+        """任务列表。"""
+        from core.todo.manager import TodoManager
+        mgr = TodoManager()
+        items = mgr.list_day()
+        stats = mgr.stats_day()
+        today = stats["date"]
+        if not items:
+            return {"success": True, "output": f"📋 今日任务 · {today}\n暂无任务"}
+        lines = [f"📋 今日任务 · {today} ({stats['done']}/{stats['total']})"]
+        for i, item in enumerate(items[:8], 1):
+            mark = "✓" if item.status == "done" else "○" if item.status == "pending" else "✗"
+            lines.append(f"{mark} {i}. {item.description}")
+        if len(items) > 8:
+            lines.append(f"... 还有 {len(items) - 8} 条")
+        return {"success": True, "output": "\n".join(lines)}
+
+    def _exec_memory(self, sub_arg: str):
+        """记忆概览。"""
+        from core.memory.store import MemoryStore
+        store = MemoryStore()
+        data = store.get_data()
+        profile = data.get("profile", {})
+        tasks = data.get("tasks", [])
+        active = [t for t in tasks if t.get("status") != "completed"]
+        lines = ["🧠 记忆概览"]
+        lines.append(f"- 互动次数: {profile.get('interaction_count', 0)}")
+        lines.append(f"- 关注主题: {', '.join(profile.get('focus_topics', [])[:3]) or '(无)'}")
+        lines.append(f"- 任务: {len(active)} 个未完成 / 共 {len(tasks)} 个")
+        return {"success": True, "output": "\n".join(lines)}
+
+    def _exec_sessions(self):
+        """会话列表。"""
+        from core.session.store import SessionStore
+        ss = SessionStore()
+        sessions = ss.list_sessions()
+        if not sessions:
+            return {"success": True, "output": "暂无已保存的会话"}
+        lines = [f"📋 已保存会话（共 {len(sessions)} 个）"]
+        for s in sessions[:6]:
+            lines.append(f"- **{s['name']}** · {s['message_count']}条 · {s['saved_at'][:10]}")
+        if len(sessions) > 6:
+            lines.append(f"... 还有 {len(sessions) - 6} 个")
+        return {"success": True, "output": "\n".join(lines)}
+
+    def _exec_help(self):
+        """帮助。"""
+        lines = [
+            "📖 桌宠命令面板",
+            "- /list — 列出文档",
+            "- /search <关键词> — 搜索",
+            "- /stats — 统计信息",
+            "- /tags — 标签列表",
+            "- /todo — 今日任务",
+            "- /memory — 记忆概览",
+            "- /sessions — 会话列表",
+            "- /help — 帮助",
+        ]
+        return {"success": True, "output": "\n".join(lines)}
 
     def _handle_push_content(self, request: dict):
         """CLI 推送内容到桌面宠物（通过 stdout 通知 Electron 主进程转发）。"""

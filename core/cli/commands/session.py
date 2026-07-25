@@ -16,6 +16,11 @@ from rich.table import Table
 
 from core.cli.constants import console
 
+try:
+    from core.desktop.cli_sync import _try_push_content as _try_pet_push
+except Exception:
+    _try_pet_push = None
+
 
 class SessionMixin:
     """会话管理相关命令。"""
@@ -82,6 +87,14 @@ class SessionMixin:
             table.add_row(s["name"], str(s["message_count"]), s["saved_at"])
         console.print(table)
         console.print("\n[dim]恢复: /load <名称>  导出: /export <名称>[/dim]\n")
+        # P3: 推送会话列表到桌宠气泡
+        if _try_pet_push:
+            lines = [f"📋 已保存会话（共 {len(sessions)} 个）"]
+            for s in sessions[:6]:
+                lines.append(f"- **{s['name']}** · {s['message_count']}条 · {s['saved_at'][:10]}")
+            if len(sessions) > 6:
+                lines.append(f"... 还有 {len(sessions) - 6} 个")
+            _try_pet_push("\n".join(lines), "markdown")
 
     def _cmd_export(self, arg: str) -> None:
         """导出会话为 Markdown：/export <名称> [输出路径]"""

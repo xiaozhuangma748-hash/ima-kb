@@ -454,6 +454,16 @@ ipcMain.on('bubble-visible', (event, visible) => {
   }
 });
 
+// P4: 桌宠命令面板 — 执行 CLI 命令
+ipcMain.handle('exec-cli-command', async (event, cmdText) => {
+  try {
+    const resp = await electronBridge.request({ action: 'exec_cli_command', command: cmdText });
+    return resp;
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+});
+
 // === App 生命周期 ===
 app.whenReady().then(async () => {
   settings = loadSettings(app.getPath('userData'));

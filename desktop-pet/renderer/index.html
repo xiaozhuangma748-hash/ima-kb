@@ -87,7 +87,7 @@
     display: none;
     flex-direction: column;
     opacity: 0;
-    transition: opacity 0.18s ease, transform 0.18s ease;
+    transition: opacity 0.18s ease, transform 0.18s ease, width 0.2s ease, max-height 0.2s ease;
     font-size: 13px;
     color: var(--pet-fg);
   }
@@ -95,6 +95,11 @@
     display: flex;
     opacity: 1;
     transform: translateX(-50%) scale(1);
+  }
+  /* P5: 展开模式 */
+  #bubble.expanded {
+    width: 350px;
+    max-height: 420px;
   }
 
   #bubble-input {
@@ -297,7 +302,7 @@
       <div id="bubble-answer"></div>
       <div id="bubble-citations"></div>
     </div>
-    <input type="text" id="bubble-input" placeholder="问点什么？也可以粘贴文件路径入库" autocomplete="off" autofocus>
+    <input type="text" id="bubble-input" placeholder="问点什么？或输入 / 命令（/help 查看）" autocomplete="off" autofocus>
     <div id="path-hint">
       <span id="path-hint-text"></span>
       <button id="btn-ingest-path">入库</button>
@@ -308,6 +313,7 @@
     </div>
     <div id="bubble-actions">
       <button id="btn-citations" class="action-btn" style="display:none">引用</button>
+      <button id="btn-expand" class="action-btn">展开</button>
       <button id="btn-close" class="action-btn">关闭</button>
     </div>
   </div>

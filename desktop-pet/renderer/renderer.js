@@ -12,6 +12,7 @@ const bubbleAnswer = document.getElementById('bubble-answer');
 const bubbleCitations = document.getElementById('bubble-citations');
 const btnCitations = document.getElementById('btn-citations');
 const btnClose = document.getElementById('btn-close');
+const btnExpand = document.getElementById('btn-expand');
 const pathHint = document.getElementById('path-hint');
 const pathHintText = document.getElementById('path-hint-text');
 const btnIngestPath = document.getElementById('btn-ingest-path');
@@ -452,11 +453,41 @@ img.addEventListener('dblclick', (e) => {
 bubbleInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    submitQuestion(bubbleInput.value);
+    const text = bubbleInput.value.trim();
+    if (text.startsWith('/')) {
+      // P4: 桌宠独立命令面板 — / 前缀走 CLI 命令执行
+      submitCliCommand(text);
+    } else {
+      submitQuestion(bubbleInput.value);
+    }
   } else if (e.key === 'Escape') {
     hideBubble();
   }
 });
+
+// P4: 桌宠命令面板 — 提交 CLI 命令
+function submitCliCommand(cmdText) {
+  if (!cmdText.trim()) return;
+  // 在答案区显示命令
+  appendQuestionToHistory(cmdText);
+  bubbleAnswer.innerHTML = '<i>执行中…</i>';
+  bubbleInput.value = '';
+  currentPath = null;
+  currentText = null;
+  pathHint.classList.remove('visible');
+  textHint.classList.remove('visible');
+  bubbleInput.focus();
+  window.petAPI.execCliCommand(cmdText).then((result) => {
+    if (result && result.success) {
+      const md = result.output || '(无输出)';
+      bubbleAnswer.innerHTML = markdownToHtml(md);
+    } else {
+      bubbleAnswer.innerHTML = `<span style="color:#e84c3d">${escapeHtml(result?.error || '执行失败')}</span>`;
+    }
+  }).catch((err) => {
+    bubbleAnswer.innerHTML = `<span style="color:#e84c3d">${escapeHtml(String(err))}</span>`;
+  });
+}
 
 btnClose.addEventListener('click', (e) => {
   e.stopPropagation();
@@ -467,6 +498,13 @@ btnCitations.addEventListener('click', (e) => {
   e.stopPropagation();
   const expanded = bubbleCitations.classList.toggle('expanded');
   btnCitations.textContent = expanded ? '收起' : '引用';
+});
+
+// P5: 展开/收起气泡面板
+btnExpand.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const expanded = bubble.classList.toggle('expanded');
+  btnExpand.textContent = expanded ? '收起' : '展开';
 });
 
 // 输入框粘贴/输入文件路径时自动识别并提示入库

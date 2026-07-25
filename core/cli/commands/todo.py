@@ -112,6 +112,15 @@ class TodoMixin:
         )
         self._render_todo_list(items)
         console.print()
+        # P3: 推送任务列表到桌宠气泡
+        if _try_pet_push:
+            lines = [f"📋 今日任务 · {today} ({stats['done']}/{stats['total']})"]
+            for i, item in enumerate(items[:8], 1):
+                mark = "✓" if item.status == "done" else "○" if item.status == "pending" else "✗"
+                lines.append(f"{mark} {i}. {item.description}")
+            if len(items) > 8:
+                lines.append(f"... 还有 {len(items) - 8} 条")
+            _try_pet_push("\n".join(lines), "markdown")
 
     def _render_todo_list(self, items: list[TodoItem]) -> None:
         """渲染任务列表（带序号）。"""

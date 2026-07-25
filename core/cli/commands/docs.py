@@ -214,6 +214,17 @@ class DocsMixin:
         if total_found > limit:
             console.print(f"[dim]还有 {total_found - limit} 条,用 --limit {total_found} 查看更多[/dim]\n")
 
+        # P3: 推送搜索结果到桌宠气泡
+        if _try_pet_push:
+            lines = [f"🔍 搜索 '{keyword}' → {len(results)} 条结果"]
+            for i, r in enumerate(results[:5], 1):
+                preview = r.content[:80].replace("\n", " ")
+                lines.append(f"{i}. **{r.doc_title}** ({r.score:.2f})")
+                lines.append(f"   {preview}...")
+            if len(results) > 5:
+                lines.append(f"... 还有 {len(results) - 5} 条")
+            _try_pet_push("\n".join(lines), "markdown")
+
     def _cmd_ingest(self, path_str: str) -> None:
         """入库文件或目录。"""
         if not path_str:
@@ -507,6 +518,15 @@ class DocsMixin:
                 d.created_at[:19],
             )
         console.print(table)
+        # P3: 推送精简列表到桌宠气泡
+        if _try_pet_push:
+            lines = [f"📋 知识库文档（共 {len(docs)} 条）"]
+            for d in docs[:8]:
+                tags = "、".join(d.tags) if d.tags else "-"
+                lines.append(f"- **{d.title}** · {d.file_type} · {d.chunk_count}块 · {tags}")
+            if len(docs) > 8:
+                lines.append(f"... 还有 {len(docs) - 8} 条")
+            _try_pet_push("\n".join(lines), "markdown")
 
     def _cmd_show(self, id_str: str) -> None:
         """查看文档详情。"""
@@ -560,6 +580,14 @@ class DocsMixin:
         for tag, cnt in tags.items():
             console.print(f"  [magenta]{tag}[/magenta] [dim]×{cnt}[/dim]")
         console.print()
+        # P3: 推送标签列表到桌宠气泡
+        if _try_pet_push:
+            lines = [f"🏷 所有标签（共 {len(tags)} 个）"]
+            tag_items = list(tags.items())[:10]
+            lines.append("、".join(f"{t}×{c}" for t, c in tag_items))
+            if len(tags) > 10:
+                lines.append(f"... 还有 {len(tags) - 10} 个")
+            _try_pet_push("\n".join(lines), "markdown")
 
     def _cmd_tag(self, arg: str) -> None:
         """标签管理：/tag [rename|merge|<名称>]

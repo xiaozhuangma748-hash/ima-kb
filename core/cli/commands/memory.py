@@ -514,6 +514,18 @@ class MemoryMixin:
                 console.print(f"    [dim]{' → '.join(seq)} ×{p.get('count', 0)}[/dim]")
         console.print()
 
+        # P3: 推送记忆概览到桌宠气泡
+        if _try_pet_push:
+            lines = ["🧠 记忆概览"]
+            lines.append(f"- 风格: {style_label} · 格式: {format_label}")
+            if topics:
+                lines.append(f"- 关注主题: {'、'.join(topics[:3])}")
+            if regions:
+                lines.append(f"- 关注地区: {'、'.join(regions[:3])}")
+            lines.append(f"- 互动次数: {profile.get('interaction_count', 0)}")
+            lines.append(f"- 任务: {len(active)} 个未完成 / 共 {len(tasks)} 个")
+            _try_pet_push("\n".join(lines), "markdown")
+
     def _memory_clear(self) -> None:
         """清空所有记忆。"""
         from core.cli.terminal_helpers import repl_confirm

@@ -25,4 +25,6 @@ contextBridge.exposeInMainWorld('petAPI', {
   dragDelta: (dx, dy) => ipcRenderer.send('drag-delta', { dx, dy }),
   dragEnd: () => ipcRenderer.send('drag-end'),
   bubbleVisible: (visible) => ipcRenderer.send('bubble-visible', visible),
+  // P4: 桌宠命令面板
+  execCliCommand: (cmd) => ipcRenderer.invoke('exec-cli-command', cmd),
 });
