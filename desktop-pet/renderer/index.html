@@ -71,24 +71,25 @@
   /* 气泡：默认隐藏，在宠物上方居中 */
   #bubble {
     position: absolute;
-    left: 50%; bottom: 75px;
+    left: 50%; bottom: 90px;
     transform: translateX(-50%) scale(0.96);
     width: 220px;
     min-height: 48px;
     max-height: 230px;
     background: var(--pet-bg);
     border: 1px solid var(--pet-border);
-    border-radius: 16px;
-    padding: 10px 12px;
-    box-shadow: 0 8px 24px rgba(45, 32, 23, 0.2);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    border-radius: 20px;
+    padding: 12px 14px;
+    box-shadow: 0 10px 30px rgba(45, 32, 23, 0.15), 0 2px 8px rgba(45, 32, 23, 0.08);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     pointer-events: auto;
     display: none;
     flex-direction: column;
     opacity: 0;
-    transition: opacity 0.18s ease, transform 0.18s ease, width 0.2s ease, max-height 0.2s ease;
+    transition: opacity 0.2s ease, transform 0.2s ease, width 0.25s ease, max-height 0.25s ease;
     font-size: 13px;
+    line-height: 1.5;
     color: var(--pet-fg);
   }
   #bubble.visible {
@@ -100,39 +101,43 @@
   #bubble.expanded {
     width: 380px;
     max-height: 480px;
+    font-size: 14px;
   }
+  #bubble.expanded #bubble-input { font-size: 14px; }
+  #bubble.expanded .action-btn { font-size: 11px; padding: 4px 12px; }
 
   #bubble-input {
     flex: 0 0 auto;
     width: 100%;
-    padding: 4px 5px;
+    padding: 6px 10px;
     border: 1px solid var(--pet-border);
-    border-radius: 8px;
+    border-radius: 10px;
     font-size: 13px;
     outline: none;
-    background: var(--pet-muted);
+    background: rgba(255, 255, 255, 0.6);
     color: var(--pet-fg);
     -webkit-user-select: text; user-select: text;
-    margin-top: 6px;
+    margin-top: 8px;
+    transition: border-color 0.2s ease, background 0.2s ease;
   }
-  #bubble-input::placeholder { color: var(--pet-muted-fg); }
-  #bubble-input:focus { border-color: var(--pet-primary); }
+  #bubble-input::placeholder { color: var(--pet-muted-fg); font-size: 11px; }
+  #bubble-input:focus { border-color: var(--pet-primary); background: rgba(255, 255, 255, 0.8); }
 
   #bubble-followup { display: none !important; }
 
-  /* 可滚动内容区（问题输入框以下全部固定，上方答案区滚动） */
   #bubble-scroll {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    margin: 4px 0;
-    padding-right: 2px;
+    margin: 6px 0;
+    padding-right: 4px;
   }
   /* Webkit 滚动条 */
-  #bubble-scroll::-webkit-scrollbar { width: 3px; }
+  #bubble-scroll::-webkit-scrollbar { width: 4px; }
+  #bubble-scroll::-webkit-scrollbar-track { background: transparent; }
   #bubble-scroll::-webkit-scrollbar-thumb {
-    background: rgba(140, 122, 107, 0.35);
-    border-radius: 2px;
+    background: rgba(140, 122, 107, 0.3);
+    border-radius: 4px;
   }
 
   #bubble-answer {
@@ -222,19 +227,25 @@
     flex: 0 0 auto;
     display: flex;
     justify-content: flex-end;
-    gap: 4px;
-    margin-top: 6px;
+    gap: 6px;
+    margin-top: 8px;
   }
   .action-btn {
     background: transparent;
     border: 1px solid var(--pet-border);
-    border-radius: 5px;
-    padding: 2px 6px;
+    border-radius: 8px;
+    padding: 3px 10px;
     font-size: 10px;
     color: var(--pet-muted-fg);
     cursor: pointer;
+    transition: all 0.15s ease;
   }
-  .action-btn:hover { background: var(--pet-muted); color: var(--pet-fg); }
+  .action-btn:hover {
+    background: var(--pet-muted);
+    color: var(--pet-fg);
+    border-color: var(--pet-primary);
+  }
+  #btn-close:hover { color: var(--pet-error); border-color: var(--pet-error); }
 
   /* 输入框识别到文件路径/文字时的入库提示 */
   #path-hint,
@@ -290,6 +301,31 @@
     box-shadow: 0 3px 9px rgba(45, 32, 23, 0.12);
   }
   #drop-hint.visible { opacity: 1; }
+
+  /* P5+: 未读徽章——气泡关闭时后台完成输出，点击重新打开 */
+  #pet-badge {
+    position: absolute;
+    left: 50%; bottom: 95px;
+    transform: translateX(-50%) scale(0.8);
+    background: var(--pet-primary);
+    color: #fff;
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 25;
+    box-shadow: 0 2px 8px rgba(232, 140, 100, 0.4);
+    white-space: nowrap;
+  }
+  #pet-badge.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) scale(1);
+  }
 </style>
 </head>
 <body>

@@ -150,15 +150,23 @@ window.petAPI.onAnswerToken((chunk) => {
   if (!isAnswerMode) {
     answerBuffer = '';
     isAnswerMode = true;
+    // 后台开始流式，徽章提示
+    if (!bubble.classList.contains('visible')) {
+      showBadge('…');
+    }
   }
   answerBuffer += chunk;
   // 流式阶段：问题保留在顶部，纯文本答案追加在问题下方（避免半截 markdown 抖动）
-  const qHtml = pendingQuestion
-    ? `<div class="md-h">问：${escapeHtml(pendingQuestion)}</div>`
-    : '';
-  bubbleAnswer.innerHTML = qHtml + escapeHtml(answerBuffer);
-  console.log('[renderer] bubbleAnswer.innerHTML len:', bubbleAnswer.innerHTML.length);
-  updateScrollHeight();
+  if (bubble.classList.contains('visible')) {
+    const qHtml = pendingQuestion
+      ? `<div class="md-h">问：${escapeHtml(pendingQuestion)}</div>`
+      : '';
+    bubbleAnswer.innerHTML = qHtml + escapeHtml(answerBuffer);
+    updateScrollHeight();
+  } else {
+    // 徽章动态计数
+    showBadge(String(answerBuffer.length));
+  }
 });
 
 window.petAPI.onAnswerDone((citations) => {
@@ -169,7 +177,6 @@ window.petAPI.onAnswerDone((citations) => {
     ? `<div class="md-h">问：${escapeHtml(pendingQuestion)}</div>`
     : '';
   bubbleAnswer.innerHTML = qHtml + markdownToHtml(answerBuffer);
-  console.log('[renderer] onAnswerDone final innerHTML len:', bubbleAnswer.innerHTML.length);
   // 完成后才追加完整问答到 history，避免调用前 push 导致后端 messages 重复
   if (pendingQuestion) {
     history.push({ role: 'user', content: pendingQuestion });
@@ -185,6 +192,13 @@ window.petAPI.onAnswerDone((citations) => {
   }
   // 答案完成后滚到顶部，让用户从开头阅读（长答案不会被裁掉）
   if (bubbleScroll) bubbleScroll.scrollTop = 0;
+  // 后台完成时：如果气泡不可见，显示徽章提醒用户有新内容
+  isAnswerMode = false;
+  if (!bubble.classList.contains('visible')) {
+    showBadge('✓');
+  } else {
+    hideBadge();
+  }
 });
 
 window.petAPI.onAnswerError((err) => {
@@ -252,6 +266,7 @@ window.petAPI.onCliToken((text) => {
     cliAnswerBuffer = '';
     showBubble();
     bubbleInput.style.display = 'none';
+    hideBadge();
   }
   cliAnswerBuffer += text;
   // 流式阶段：纯文本显示（避免半截 markdown 抖动）
@@ -271,6 +286,10 @@ window.petAPI.onCliDone((answer) => {
   // 恢复输入框
   bubbleInput.style.display = 'block';
   if (bubbleScroll) bubbleScroll.scrollTop = 0;
+  // 后台完成时：如果气泡不可见，显示徽章
+  if (!bubble.classList.contains('visible')) {
+    showBadge('✓');
+  }
 });
 
 // === 气泡控制 ===
@@ -292,11 +311,53 @@ function showBubble() {
   answerBuffer = '';
   if (bubbleScroll) bubbleScroll.scrollTop = 0;
   window.petAPI.bubbleVisible(true);
+  hideBadge();
 }
 
 function hideBubble() {
   bubble.classList.remove('visible');
   window.petAPI.bubbleVisible(false);
+  // 如果后台还有未读内容，显示徽章提醒
+  updateBadge();
+}
+
+// P5+: 桌宠头顶未读徽章——气泡关闭时，后台仍有答案生成
+let badgeEl = null;
+function ensureBadge() {
+  if (badgeEl) return badgeEl;
+  badgeEl = document.createElement('div');
+  badgeEl.id = 'pet-badge';
+  badgeEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // 点击徽章展开气泡
+    showBubble();
+    hideBadge();
+  });
+  document.body.appendChild(badgeEl);
+  return badgeEl;
+}
+
+function showBadge(text) {
+  const el = ensureBadge();
+  el.textContent = text;
+  el.classList.add('visible');
+}
+
+function hideBadge() {
+  if (badgeEl) badgeEl.classList.remove('visible');
+}
+
+function updateBadge() {
+  // 气泡不可见 + 后台仍在输出 → 显示徽章
+  if (!bubble.classList.contains('visible') && (isAnswerMode || cliActive)) {
+    const text = isAnswerMode
+      ? (answerBuffer.length > 0 ? String(answerBuffer.length) : '…')
+      : '…';
+    showBadge(text);
+  } else if (bubble.classList.contains('visible')) {
+    // 气泡打开时不需要徽章
+    hideBadge();
+  }
 }
 
 function scrollToBottom() {
