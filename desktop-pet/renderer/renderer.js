@@ -251,7 +251,7 @@ window.petAPI.onCliStage((data) => {
   if (!cliActive) {
     cliActive = true;
     cliAnswerBuffer = '';
-    showBubble();
+    showBubble(true);
     bubbleInput.style.display = 'none';
   }
   renderStageHint(data.stage, data.count);
@@ -264,7 +264,7 @@ window.petAPI.onCliToken((text) => {
   if (!cliActive) {
     cliActive = true;
     cliAnswerBuffer = '';
-    showBubble();
+    showBubble(true);
     bubbleInput.style.display = 'none';
     hideBadge();
   }
@@ -697,25 +697,37 @@ function clearDropState() {
 
 // 拖拽入库：挂到猫咪元素（#pet-stage）。body 已 pointer-events:none，
 // 拖放事件不再冒泡到 body，必须直接绑在可交互的猫咪上。
-petStage.addEventListener('dragover', (e) => {
+img.addEventListener('dragover', (e) => {
   // 必须 preventDefault，否则 drop 不会触发
   e.preventDefault();
   e.dataTransfer.dropEffect = 'copy';
+  // 拖拽中 mousemove 不触发，窗口可能停在穿透模式导致 drop 收不到；
+  // 这里强制切回可交互模式，drop/dragleave 后再交还给命中检测
+  if (lastIgnoreState) {
+    lastIgnoreState = false;
+    window.petAPI.setMouseEvents(false);
+  }
   console.log('[dnd] dragover on pet');
   img.classList.add('drag-over', 'eating');
   setDropHint('啊~ 丢给我！', true);
 });
 
-petStage.addEventListener('dragleave', (e) => {
+img.addEventListener('dragleave', (e) => {
   // 离开猫咪区域才清除
   if (e.relatedTarget && petStage.contains(e.relatedTarget)) return;
   clearDropState();
+  // 拖拽结束，交还给命中检测（下一帧 mousemove 会重新计算）
+  lastIgnoreState = true;
+  window.petAPI.setMouseEvents(true);
 });
 
-petStage.addEventListener('drop', async (e) => {
+img.addEventListener('drop', async (e) => {
   e.preventDefault();
   e.stopPropagation();
   clearDropState();
+  // 拖拽结束，交还给命中检测
+  lastIgnoreState = true;
+  window.petAPI.setMouseEvents(true);
   console.log('[dnd] drop on pet');
 
   let filePath = null;
@@ -762,9 +774,18 @@ function updateMousePassthrough(x, y) {
   // 检查鼠标是否在任何交互元素的 bounding rect 内
   let shouldInteract = false;
 
-  // 猫咪
-  const petRect = petStage.getBoundingClientRect();
-  if (isPointInRect(x, y, petRect)) shouldInteract = true;
+  // 猫咪：用猫图 #pet-img 的实际包围盒（90px 宽），不要用 #pet-stage
+  // （#pet-stage 是 left:0;right:0 铺满整个窗口，会把猫左右透明边也算进交互区）
+  // 四周加 20px 缓冲，给拖放留容错，但左右仍留大段透明区可穿透
+  const pad = 20;
+  const petRect = img.getBoundingClientRect();
+  const petHit = {
+    left: petRect.left - pad,
+    right: petRect.right + pad,
+    top: petRect.top - pad,
+    bottom: petRect.bottom + pad,
+  };
+  if (isPointInRect(x, y, petHit)) shouldInteract = true;
 
   // 气泡（仅可见时）
   if (bubble.classList.contains('visible')) {
