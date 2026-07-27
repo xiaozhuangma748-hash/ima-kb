@@ -207,6 +207,22 @@ class ChatMixin:
         from core.retrieval.citation import sanitize_outbound_citations
         return sanitize_outbound_citations(text, num_sources)
 
+    @staticmethod
+    def _sanitize_memory_markers(text: str) -> str:
+        """清理 LLM 输出中自带的记忆类型标记（如 [偏好]、[身份]、[事实] 等）。
+
+        LLM 从跨会话记忆上下文格式（如【用户偏好】）中学到在回答中标注
+        信息来源类型，这些标记对用户无意义，需要移除。
+        """
+        import re
+        markers = [
+            "偏好", "身份", "事实", "主题",
+            "用户偏好", "关键事实", "关注主题", "未解决问题",
+        ]
+        pattern = r"\s*\[(" + "|".join(markers) + r")\]"
+        text = re.sub(pattern, "", text)
+        return text.replace("  ", " ").strip()
+
     def _print_token_usage(self, llm_obj=None) -> None:
         """打印最近一次 LLM 调用的 token 使用量。
 
@@ -433,6 +449,7 @@ class ChatMixin:
                         sanitized = self._sanitize_citations(
                             sanitized, getattr(self, "_source_count", 0)
                         )
+                        sanitized = self._sanitize_memory_markers(sanitized)
                         self._stream_live.update(Markdown(sanitized))
                     elif event["type"] == "done":
                         # 收尾：停掉残留 spinner 和 Live（无 token 的极端情况）

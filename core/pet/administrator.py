@@ -51,6 +51,25 @@ def _sanitize_latex(text: str) -> str:
     return text.replace("  ", " ")
 
 
+def _sanitize_memory_markers(text: str) -> str:
+    """清理 LLM 输出中自带的记忆类型标记（如 [偏好]、[身份]、[事实] 等）。
+
+    LLM 从 cross-session memory 的上下文格式（如【用户偏好】）中学到
+    在回答末尾标注信息来源类型，这些标记对用户无意义，需要移除。
+    """
+    import re
+    # 匹配中文记忆标记：如 [偏好]、[身份]、[事实]、[主题] 等
+    # 避免误伤正常的引用标记 [1]、[2] 等数字引用
+    markers = [
+        "偏好", "身份", "事实", "主题",
+        "用户偏好", "关键事实", "关注主题", "未解决问题",
+    ]
+    pattern = r"\s*\[(" + "|".join(markers) + r")\]"
+    text = re.sub(pattern, "", text)
+    # 清理可能残留的多余空格
+    return text.replace("  ", " ").strip()
+
+
 # 经验值表
 EXP_TABLE = {
     "qa": 10,
@@ -253,6 +272,7 @@ class PetAdministrator:
         # 7. 提取引用（提取前先清理越界 [n] 标记，确保正文与引用列表一致）
         from core.retrieval.citation import sanitize_outbound_citations
         answer_text = sanitize_outbound_citations(answer_text, len(top_sources))
+        answer_text = _sanitize_memory_markers(answer_text)
         try:
             citations = extract_citations(answer_text, sources_dict)
         except Exception as e:
@@ -434,6 +454,7 @@ class PetAdministrator:
         # 7. 提取引用（提取前先清理越界 [n] 标记，确保正文与引用列表一致）
         from core.retrieval.citation import sanitize_outbound_citations
         answer_text = sanitize_outbound_citations(answer_text, len(top_sources))
+        answer_text = _sanitize_memory_markers(answer_text)
         try:
             citations = extract_citations(answer_text, sources_dict)
         except Exception as e:
