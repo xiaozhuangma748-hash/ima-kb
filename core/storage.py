@@ -62,6 +62,7 @@ class ChunkRecord:
     token_count: int
     start_char: int
     end_char: int
+    parent_content: str = ""       # small-to-big 检索用的父级内容
 
 
 @dataclass
@@ -152,6 +153,7 @@ class Storage:
                     token_count   INTEGER DEFAULT 0,
                     start_char    INTEGER DEFAULT 0,
                     end_char      INTEGER DEFAULT 0,
+                    parent_content TEXT DEFAULT '',
                     created_at    TEXT NOT NULL,
                     FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
                 );
@@ -174,6 +176,12 @@ class Storage:
             col_names = {c["name"] for c in cols}
             if "tags" not in col_names:
                 conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT DEFAULT '[]'")
+
+            # 迁移：给 chunks 表加 parent_content 列（small-to-big 检索用）
+            chunk_cols = conn.execute("PRAGMA table_info(chunks)").fetchall()
+            chunk_col_names = {c["name"] for c in chunk_cols}
+            if "parent_content" not in chunk_col_names:
+                conn.execute("ALTER TABLE chunks ADD COLUMN parent_content TEXT DEFAULT ''")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -274,13 +282,14 @@ class Storage:
             conn.executemany(
                 """
                 INSERT INTO chunks
-                    (id, doc_id, index_in_doc, content, token_count, start_char, end_char, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, doc_id, index_in_doc, content, token_count, start_char, end_char, parent_content, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         f"{doc_id}_{c.index}", doc_id, c.index, c.content,
-                        c.token_count, c.start_char, c.end_char, now,
+                        c.token_count, c.start_char, c.end_char,
+                        getattr(c, "parent_content", ""), now,
                     )
                     for c in chunks
                 ],
@@ -347,6 +356,7 @@ class Storage:
                 token_count=r["token_count"],
                 start_char=r["start_char"],
                 end_char=r["end_char"],
+                parent_content=r["parent_content"] if "parent_content" in r.keys() else "",
             )
             for r in rows
         ]
@@ -387,6 +397,7 @@ class Storage:
             token_count=row["token_count"],
             start_char=row["start_char"],
             end_char=row["end_char"],
+            parent_content=row["parent_content"] if "parent_content" in row.keys() else "",
         )
 
     def search_chunks(self, keyword: str, limit: int = 20) -> List[ChunkRecord]:
@@ -411,6 +422,7 @@ class Storage:
                 token_count=r["token_count"],
                 start_char=r["start_char"],
                 end_char=r["end_char"],
+                parent_content=r["parent_content"] if "parent_content" in r.keys() else "",
             )
             for r in rows
         ]
@@ -521,7 +533,85 @@ class Storage:
             r.content = content
             r.doc_title = doc_title.get(r.doc_id, "")
             filled.append(r)
+
+        # 精确匹配重排序：对包含查询区分性词的结果加分
+        filled = self._rerank_by_exact_match(query, filled)
         return filled
+
+    def _rerank_by_exact_match(
+        self,
+        query: str,
+        results: List,
+        score_attr: str = "score",
+        content_attr: str = "content",
+    ) -> List:
+        """精确匹配重排序：对包含查询区分性词的结果加分，不包含的降分。
+
+        解决 BM25/向量检索无法区分同名实体的问题：
+        - 查询"白杨街道晨光社区居家养老服务照料中心"
+        - BM25 返回多个"白杨街道XX社区"（词频相似）
+        - 但只有"晨光社区"包含区分性词"晨光"
+        - 重排序后"晨光社区"分数翻倍，其他社区降半，排名更准确
+
+        算法：
+        1. 对查询分词，统计每个 token 在结果集中的出现频率
+        2. 识别区分性词（出现率 < 70% 的词，即不是所有结果都包含的词）
+        3. 对每个结果计算区分性词匹配率 (0.0 ~ 1.0)
+        4. 调整 score: new = old * (0.5 + match_ratio)
+           - match_ratio=1.0 (全命中) → score × 1.5
+           - match_ratio=0.5 (半命中) → score × 1.0 (不变)
+           - match_ratio=0.0 (全 miss) → score × 0.5 (降半)
+        5. 按新 score 重新排序
+
+        Args:
+            query: 查询文本
+            results: 结果列表（需已有 content）
+            score_attr: score 属性名
+            content_attr: content 属性名
+
+        Returns:
+            重排序后的结果列表（原地修改 score，重新排序）
+        """
+        if not results or len(results) == 1:
+            return results
+
+        from .search.bm25 import tokenize
+
+        query_tokens = tokenize(query)
+        if len(query_tokens) < 2:
+            return results  # 查询太短，无法识别区分性词
+
+        # 统计每个 token 在结果中出现的频率
+        total = len(results)
+        token_doc_count: Dict[str, int] = {tok: 0 for tok in query_tokens}
+        for r in results:
+            content = (getattr(r, content_attr, "") or "").lower()
+            for tok in query_tokens:
+                if tok in content:
+                    token_doc_count[tok] += 1
+
+        # 识别区分性词：至少出现1次，但出现率 < 70%
+        # （出现率 100% 的词是通用词，如"社区""服务"，无区分价值）
+        # 过滤单字 token：单字（如"中""心"）语义模糊，不作为区分性词
+        distinctive_tokens = [
+            tok for tok, cnt in token_doc_count.items()
+            if 0 < cnt < total * 0.7 and len(tok) > 1
+        ]
+
+        if not distinctive_tokens:
+            return results  # 没有区分性词，不重排序
+
+        # 对每个结果计算区分性词匹配率，调整 score
+        for r in results:
+            content = (getattr(r, content_attr, "") or "").lower()
+            matched = sum(1 for tok in distinctive_tokens if tok in content)
+            match_ratio = matched / len(distinctive_tokens)
+            old_score = getattr(r, score_attr)
+            setattr(r, score_attr, old_score * (0.5 + match_ratio))
+
+        # 重新排序
+        results.sort(key=lambda x: getattr(x, score_attr), reverse=True)
+        return results
 
     def enrich_hybrid_results(self, results: List) -> List:
         """批量补全混合检索结果的 content/doc_title/paragraph_num。
@@ -552,13 +642,33 @@ class Storage:
             chunk_map = {r["id"]: (r["content"], r["index_in_doc"]) for r in rows}
 
             doc_title = {}
+            doc_file_type: Dict[str, str] = {}
             if doc_ids:
                 placeholders = ",".join("?" * len(doc_ids))
                 rows = conn.execute(
-                    f"SELECT id, title FROM documents WHERE id IN ({placeholders})",
+                    f"SELECT id, title, file_type FROM documents WHERE id IN ({placeholders})",
                     doc_ids,
                 ).fetchall()
                 doc_title = {r["id"]: r["title"] for r in rows}
+                doc_file_type = {r["id"]: r["file_type"] for r in rows}
+
+        # file_type → format_tag 映射
+        _FILE_TYPE_TO_FORMAT = {
+            ".xlsx": "excel",
+            ".pptx": "ppt",
+            ".pdf": "pdf",
+            ".docx": "docx",
+            ".doc": "docx",
+            ".md": "markdown",
+            ".markdown": "markdown",
+            ".html": "html",
+            ".htm": "html",
+            ".png": "image",
+            ".jpg": "image",
+            ".jpeg": "image",
+            ".txt": "text",
+            ".log": "text",
+        }
 
         filled = []
         for r in results:
@@ -569,10 +679,77 @@ class Storage:
             r.content = entry[0]
             r.paragraph_num = entry[1] + 1  # 0-based → 1-based 段落号
             r.doc_title = doc_title.get(r.doc_id, "") or r.doc_title
+            # 从 file_type 映射 format_tag
+            ft = doc_file_type.get(r.doc_id, "")
+            r.format_tag = _FILE_TYPE_TO_FORMAT.get(ft, "text")
             filled.append(r)
         return filled
 
     # ---- 索引维护 ----
+
+    def migrate_xlsx_chunks_inject_doc_title(self) -> int:
+        """迁移：给 xlsx 文档的 chunks 注入「文档=DocTitle |」前缀。
+
+        背景：
+            xlsx parser 早期版本生成的 chunk content 只有 sheet 名前缀，
+            缺文档标题语义。导致 BM25 无法命中"智能终端怎么安装"类查询
+            （"智能"二字只在文档标题里，不在 chunk content）。
+
+        本方法幂等：
+            - 已含 `文档=` 前缀的 chunk 跳过
+            - 仅对 xlsx 文档的 chunks 操作
+            - 修改 chunk content 后重建 BM25 索引
+
+        Returns:
+            被修改的 chunk 数量
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        modified = 0
+        with self._conn() as conn:
+            # 找出所有 xlsx 文档
+            xlsx_docs = conn.execute(
+                "SELECT id, title FROM documents WHERE file_type = '.xlsx'"
+            ).fetchall()
+            if not xlsx_docs:
+                return 0
+
+            for doc in xlsx_docs:
+                doc_id = doc["id"]
+                doc_title = doc["title"]
+                # 查询该文档的所有 chunks
+                rows = conn.execute(
+                    "SELECT id, content FROM chunks WHERE doc_id = ?",
+                    (doc_id,),
+                ).fetchall()
+                for r in rows:
+                    content = r["content"]
+                    # 幂等：已含前缀则跳过
+                    if "] 文档=" in content or content.startswith("文档="):
+                        continue
+                    # 注入前缀：把 "[SheetName] xxx" 改为 "[SheetName] 文档=DocTitle | xxx"
+                    import re
+                    new_content = re.sub(
+                        r"^(\[[^\]]+\])\s+",
+                        rf"\1 文档={doc_title} | ",
+                        content,
+                        count=1,
+                    )
+                    if new_content != content:
+                        conn.execute(
+                            "UPDATE chunks SET content = ? WHERE id = ?",
+                            (new_content, r["id"]),
+                        )
+                        modified += 1
+
+            if modified > 0:
+                conn.commit()
+
+        if modified > 0:
+            logger.info(f"xlsx 文档标题迁移完成：修改 {modified} 条 chunk，重建 BM25 索引")
+            self.rebuild_bm25_index()
+        return modified
 
     def rebuild_bm25_index(self) -> int:
         """从数据库重建 BM25 索引（修复/迁移用）。

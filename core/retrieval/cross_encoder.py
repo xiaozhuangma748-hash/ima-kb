@@ -141,6 +141,7 @@ class CrossEncoderReranker:
                     relevance_score=float(normalized[i]),
                     reason="cross-encoder",
                     paragraph_num=getattr(c, "paragraph_num", 0),
+                    format_tag=getattr(c, "format_tag", ""),
                 ))
             results.sort(key=lambda r: r.relevance_score, reverse=True)
             return results[:top_n]
@@ -162,6 +163,7 @@ class CrossEncoderReranker:
                 relevance_score=0.0,
                 reason="cross-encoder-unavailable",
                 paragraph_num=getattr(c, "paragraph_num", 0),
+                format_tag=getattr(c, "format_tag", ""),
             )
             for c in candidates[:top_n]
         ]

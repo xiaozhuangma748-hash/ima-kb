@@ -17,6 +17,31 @@ logger = logging.getLogger(__name__)
 # 业界常用值 20-60；K=30 让 top-1 与 top-10 的分差更显著，避免次优结果挤掉最优
 RRF_K = 30
 
+# 查询自适应权重（Weighted RRF）：
+# 不同查询类型对 BM25 / 向量的依赖不同，硬 RRF（1:1）不是最优。
+# - precise（精确查询，含具体名称/编号）→ boost BM25（关键词精确匹配更重要）
+# - fuzzy（口语化/语义查询，含疑问词）→ boost 向量（语义相似度更重要）
+# - normal（其他）→ 1:1 等同原 RRF
+QUERY_WEIGHTS = {
+    "precise": {"bm25": 0.7, "vector": 0.3},
+    "fuzzy":   {"bm25": 0.3, "vector": 0.7},
+    "normal":  {"bm25": 0.5, "vector": 0.5},
+}
+
+# 疑问词触发 fuzzy 路径（与 bm25.py 的 _STOP_WORDS 保持互补，不重复过滤）
+_FUZZY_MARKERS = (
+    "怎么", "如何", "哪些", "哪种", "在哪", "哪里", "哪儿",
+    "什么", "为何", "为什么", "怎样", "啥", "多少",
+    "有没有", "是不是", "可以吗", "好吗",
+)
+
+# 精确查询指示词（街道/社区/政策编号等具体名词）
+_PRECISE_MARKERS = (
+    "街道", "社区", "镇", "村", "区", "市", "省",
+    "号", "字", "〔", "【", "第",
+    "照料中心", "服务中心", "服务站", "管理站",
+)
+
 # 并发检索线程池（复用，避免每次创建）
 _executor: Optional[ThreadPoolExecutor] = None
 
@@ -39,6 +64,7 @@ class HybridResult:
     content: str = ""
     doc_title: str = ""
     paragraph_num: int = 0  # 真实段落号（chunk 的 index_in_doc + 1，由 storage.enrich_hybrid_results 填充）
+    format_tag: str = ""    # 格式标签（由 storage.enrich_hybrid_results 从 file_type 映射填充）
 
 
 class HybridRetriever:
@@ -149,12 +175,14 @@ class HybridRetriever:
             if doc_ids:
                 doc_id_set = set(doc_ids)
                 bm25_results = [r for r in bm25_results if r.doc_id in doc_id_set]
-            # RRF 融合
-            results = self._rrf_fusion(bm25_results, vector_results, top_k)
+            # RRF 融合（查询自适应权重）
+            results = self._rrf_fusion(bm25_results, vector_results, top_k, query=query)
 
         # 2. 若有 storage 引用，批量补全 content/doc_title/paragraph_num
         if self.storage is not None and results:
             results = self.storage.enrich_hybrid_results(results)
+            # 精确匹配重排序：对包含查询区分性词的结果加分
+            results = self.storage._rerank_by_exact_match(query, results)
 
         # 3. 写入语义缓存（只缓存有结果的查询）
         if (
@@ -205,21 +233,35 @@ class HybridRetriever:
         bm25_results: List[SearchResult],
         vector_results: List[VectorResult],
         top_k: int,
+        query: Optional[str] = None,
     ) -> List[HybridResult]:
-        """RRF 融合：score = Σ 1/(k + rank)。"""
+        """RRF 融合：score = Σ 1/(k + rank)，支持查询自适应权重。
+
+        权重方案（Weighted RRF）：
+        - precise 查询：bm25 权重 0.7，vector 0.3（精确匹配更重要）
+        - fuzzy 查询：bm25 0.3，vector 0.7（语义相似度更重要）
+        - normal：1:1 等同原 RRF
+
+        当 query 为 None 时使用 normal 权重（兼容旧调用）。
+        """
         # 收集所有 chunk_id
         bm25_ids = {r.chunk_id for r in bm25_results}
         vector_ids = {r.chunk_id for r in vector_results}
         all_ids = bm25_ids | vector_ids
 
-        # 计算 RRF 分数
+        # 查询自适应权重
+        weights = self._classify_query(query) if query else QUERY_WEIGHTS["normal"]
+        w_bm25 = weights["bm25"]
+        w_vector = weights["vector"]
+
+        # 计算 Weighted RRF 分数
         scores = {}
         sources = {}
         for rank, r in enumerate(bm25_results, 1):
-            scores[r.chunk_id] = scores.get(r.chunk_id, 0) + 1.0 / (RRF_K + rank)
+            scores[r.chunk_id] = scores.get(r.chunk_id, 0) + w_bm25 * 1.0 / (RRF_K + rank)
             sources[r.chunk_id] = "bm25"
         for rank, r in enumerate(vector_results, 1):
-            scores[r.chunk_id] = scores.get(r.chunk_id, 0) + 1.0 / (RRF_K + rank)
+            scores[r.chunk_id] = scores.get(r.chunk_id, 0) + w_vector * 1.0 / (RRF_K + rank)
             if r.chunk_id in sources:
                 sources[r.chunk_id] = "both"
             else:
@@ -247,6 +289,35 @@ class HybridRetriever:
                 doc_title=doc_title,
             ))
         return results
+
+    @staticmethod
+    def _classify_query(query: Optional[str]) -> dict:
+        """查询分类：根据查询文本判断应 boost BM25 还是向量。
+
+        判断规则（按优先级）：
+        1. fuzzy: 含疑问词（怎么/如何/哪些/在哪等）→ 口语化查询
+        2. precise: 含具体名词（街道/社区/政策编号等）→ 精确查询
+        3. normal: 其他默认
+
+        注意：fuzzy 优先于 precise，因为"白杨街道怎么走"虽含"街道"
+        但语义是问路，向量检索更能召回相关结果。
+
+        Returns:
+            {"bm25": float, "vector": float} 权重字典
+        """
+        if not query:
+            return QUERY_WEIGHTS["normal"]
+        q = query.strip()
+        # 1. fuzzy 优先
+        for marker in _FUZZY_MARKERS:
+            if marker in q:
+                return QUERY_WEIGHTS["fuzzy"]
+        # 2. precise 次之
+        for marker in _PRECISE_MARKERS:
+            if marker in q:
+                return QUERY_WEIGHTS["precise"]
+        # 3. normal
+        return QUERY_WEIGHTS["normal"]
 
     def cache_stats(self) -> dict:
         """返回缓存统计信息。"""

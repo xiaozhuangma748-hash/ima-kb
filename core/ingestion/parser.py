@@ -38,6 +38,8 @@ class ParsedDocument:
         file_type: 文件类型（扩展名，小写）
         language: 内容语言（如 'zh' / 'en' / 'code' / 'unknown'）
         meta: 额外元信息（页数、作者等）
+        format_tag: 格式标签（'excel'/'ppt'/'code'/'markdown'/'docx'/'pdf'/'image'/'text'/'html'），
+                    用于下游 chunker 和 chain 做格式感知处理
     """
 
     text: str
@@ -46,9 +48,11 @@ class ParsedDocument:
     file_type: str
     language: str = "unknown"
     meta: Dict[str, str] = field(default_factory=dict)
+    format_tag: str = "text"
 
 
 # ---- 支持的文件类型 ----
+# 注：代码文件（.py/.js/.ts/...）按用户决策不入库，已从支持列表移除
 SUPPORTED_EXTENSIONS = {
     ".pdf", ".docx", ".doc", ".xlsx", ".pptx",
     ".md", ".markdown",
@@ -56,11 +60,6 @@ SUPPORTED_EXTENSIONS = {
     ".html", ".htm",
     # 图片（OCR）
     ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp",
-    # 代码文件
-    ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs",
-    ".c", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php", ".swift",
-    ".kt", ".scala", ".sh", ".bash", ".sql", ".yaml", ".yml",
-    ".json", ".xml", ".toml", ".ini", ".conf",
 }
 
 # 代码文件后缀 → 语言标签
@@ -350,6 +349,7 @@ def _parse_pdf(file_path: Path) -> ParsedDocument:
         file_type=".pdf",
         language="unknown",
         meta=meta,
+        format_tag="pdf",
     )
 
 
@@ -370,6 +370,7 @@ def _parse_image(file_path: Path) -> ParsedDocument:
             file_path=file_path,
             file_type=file_path.suffix.lower(),
             meta={"ocr_unavailable": "true"},
+            format_tag="image",
         )
 
     from PIL import Image  # type: ignore
@@ -387,21 +388,51 @@ def _parse_image(file_path: Path) -> ParsedDocument:
         file_type=file_path.suffix.lower(),
         language="unknown",
         meta={"ocr_used": "true"},
+        format_tag="image",
     )
 
 
 def _parse_docx(file_path: Path) -> ParsedDocument:
-    """解析 Word .docx：提取所有段落。"""
+    """解析 Word .docx：提取段落 + 表格内容。"""
     from docx import Document
 
     doc = Document(str(file_path))
-    text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    parts: list[str] = []
+
+    # 1. 段落文本
+    for p in doc.paragraphs:
+        if p.text.strip():
+            parts.append(p.text.strip())
+
+    # 2. 表格内容（键值对序列化，与 xlsx 一致）
+    for tbl_idx, table in enumerate(doc.tables):
+        rows = table.rows
+        if not rows:
+            continue
+        # 第一行作为表头
+        headers = [
+            (cell.text.strip() if cell.text.strip() else f"列{i+1}")
+            for i, cell in enumerate(rows[0].cells)
+        ]
+        for row in rows[1:]:
+            pairs = []
+            for i, cell in enumerate(row.cells):
+                if i >= len(headers):
+                    break
+                val = cell.text.strip()
+                if val:
+                    pairs.append(f"{headers[i]}={val}")
+            if pairs:
+                parts.append("[表格] " + " | ".join(pairs))
+
+    text = "\n\n".join(parts)
     return ParsedDocument(
         text=text,
         title=file_path.stem,
         file_path=file_path,
         file_type=".docx",
         meta={"paragraph_count": str(len(doc.paragraphs))},
+        format_tag="docx",
     )
 
 
@@ -443,25 +474,59 @@ def _parse_doc(file_path: Path) -> ParsedDocument:
         file_path=file_path,
         file_type=".doc",
         meta={"converter": "textutil"},
+        format_tag="docx",
     )
 
 
 def _parse_xlsx(file_path: Path) -> ParsedDocument:
-    """解析 Excel .xlsx：逐 sheet 转成文本表格。"""
+    """解析 Excel .xlsx：每行序列化为「表头=值」的键值对文本。
+
+    优化点（解决行被切断、表头数据关联丢失问题）：
+    1. 每行数据前缀表头字段名，形成 "列名1=值1 | 列名2=值2" 的语义完整单元
+    2. 每行作为一个独立记录，永不切断单行
+    3. 表头信息重复到每行，向量嵌入能感知字段语义
+    """
     from openpyxl import load_workbook
 
     wb = load_workbook(str(file_path), read_only=True, data_only=True)
     sheet_texts: list[str] = []
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        rows_text: list[str] = []
-        for row in ws.iter_rows(values_only=True):
-            # 跳过全空行
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            continue
+
+        # 第一行作为表头
+        header_row = rows[0]
+        headers = [
+            (str(c).strip() if c is not None else f"列{i+1}")
+            for i, c in enumerate(header_row)
+        ]
+
+        # 数据行序列化为键值对
+        # 每行前缀「文档=DocTitle」注入文档标题语义，让 BM25 能命中标题里的关键词
+        # 例：xlsx 标题"2025年智能服务终端配置安装情况"含"智能"二字，
+        # 但原 chunk 内容只有 sheet 名"钱塘安装情况"，缺"智能"
+        # 注入后 BM25 能命中"智能终端怎么安装"类查询
+        doc_title = file_path.stem
+        records: list[str] = []
+        for row_idx, row in enumerate(rows[1:], start=2):
             if all(cell is None or str(cell).strip() == "" for cell in row):
                 continue
-            rows_text.append("\t".join(str(cell) if cell is not None else "" for cell in row))
-        if rows_text:
-            sheet_texts.append(f"## Sheet: {sheet_name}\n" + "\n".join(rows_text))
+            pairs = []
+            for i, cell in enumerate(row):
+                if i >= len(headers):
+                    break
+                val = "" if cell is None else str(cell).strip()
+                # 跳过完全空值的列
+                if val:
+                    pairs.append(f"{headers[i]}={val}")
+            if pairs:
+                records.append(f"[{sheet_name}] 文档={doc_title} | " + " | ".join(pairs))
+
+        if records:
+            sheet_texts.append("\n".join(records))
+
     wb.close()
 
     text = "\n\n".join(sheet_texts)
@@ -471,11 +536,12 @@ def _parse_xlsx(file_path: Path) -> ParsedDocument:
         file_path=file_path,
         file_type=".xlsx",
         meta={"sheet_count": str(len(wb.sheetnames))},
+        format_tag="excel",
     )
 
 
 def _parse_pptx(file_path: Path) -> ParsedDocument:
-    """解析 PowerPoint .pptx：提取每页幻灯片文本。"""
+    """解析 PowerPoint .pptx：提取每页幻灯片文本 + 表格。"""
     from pptx import Presentation
 
     prs = Presentation(str(file_path))
@@ -483,11 +549,32 @@ def _parse_pptx(file_path: Path) -> ParsedDocument:
     for idx, slide in enumerate(prs.slides, start=1):
         texts: list[str] = []
         for shape in slide.shapes:
+            # 1. 普通文本框
             if shape.has_text_frame:
                 for para in shape.text_frame.paragraphs:
                     line = para.text.strip()
                     if line:
                         texts.append(line)
+            # 2. 表格 shape（之前完全丢失）
+            if shape.has_table:
+                tbl = shape.table
+                rows = tbl.rows
+                if not rows:
+                    continue
+                headers = [
+                    (cell.text.strip() if cell.text.strip() else f"列{i+1}")
+                    for i, cell in enumerate(rows[0].cells)
+                ]
+                for row in rows[1:]:
+                    pairs = []
+                    for i, cell in enumerate(row.cells):
+                        if i >= len(headers):
+                            break
+                        val = cell.text.strip()
+                        if val:
+                            pairs.append(f"{headers[i]}={val}")
+                    if pairs:
+                        texts.append("[幻灯片表格] " + " | ".join(pairs))
         if texts:
             slide_texts.append(f"## Slide {idx}\n" + "\n".join(texts))
 
@@ -498,6 +585,7 @@ def _parse_pptx(file_path: Path) -> ParsedDocument:
         file_path=file_path,
         file_type=".pptx",
         meta={"slide_count": str(len(prs.slides))},
+        format_tag="ppt",
     )
 
 
@@ -513,17 +601,22 @@ def _parse_html(file_path: Path) -> ParsedDocument:
         file_path=file_path,
         file_type=".html",
         meta={"extractor": "trafilatura"},
+        format_tag="html",
     )
 
 
 def _parse_plain(file_path: Path) -> ParsedDocument:
     """解析纯文本 / Markdown：直接读取。"""
     text = file_path.read_text(encoding="utf-8", errors="ignore")
+    ext = file_path.suffix.lower()
+    # Markdown 文件打 markdown tag，其他打 text tag
+    format_tag = "markdown" if ext in (".md", ".markdown") else "text"
     return ParsedDocument(
         text=text,
         title=file_path.stem,
         file_path=file_path,
-        file_type=file_path.suffix.lower(),
+        file_type=ext,
+        format_tag=format_tag,
     )
 
 
@@ -567,9 +660,7 @@ _PARSER_MAP: Dict[str, Callable[[Path], ParsedDocument]] = {
 for ext in (".md", ".markdown", ".txt", ".log"):
     _PARSER_MAP[ext] = _parse_plain
 
-# 代码类
-for ext in _CODE_LANGUAGES:
-    _PARSER_MAP[ext] = _parse_code
+# 注：代码文件按用户决策不入库，不再注册到 _PARSER_MAP
 
 
 # ============================================================

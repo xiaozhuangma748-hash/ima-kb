@@ -15,6 +15,7 @@ from config import settings
 from core.storage import Storage
 from core.ingestion.parser import parse, is_supported, ParseError, ParsedDocument
 from core.ingestion.chunker import chunk_document
+from core.ingestion.contextualizer import contextualize_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,18 @@ class IngestService:
                 chunk_overlap=settings.chunk_overlap,
             )
 
-            # 4. 去重
+            # 4. Contextual Retrieval：为每个 chunk 生成文档级摘要前缀
+            if settings.contextual_retrieval and settings.has_llm() and chunks:
+                try:
+                    from core.llm.client import LLMClient
+                    llm = LLMClient()
+                    chunks = contextualize_chunks(
+                        chunks, parsed, llm_client=llm, enabled=True,
+                    )
+                except Exception as e:
+                    logger.warning(f"Contextual Retrieval 失败，跳过: {e}")
+
+            # 5. 去重
             content_hash = hashlib.sha256(parsed.text.encode("utf-8")).hexdigest()
             doc_id = content_hash[:32]
             if self.storage.get_document(doc_id) is not None:
@@ -108,7 +120,7 @@ class IngestService:
                     error_type="duplicate",
                 )
 
-            # 5. 自动标签
+            # 6. 自动标签
             tags = []
             if auto_tag and settings.has_llm():
                 try:
@@ -118,7 +130,7 @@ class IngestService:
                 except Exception as e:
                     logger.warning(f"标签生成失败: {e}")
 
-            # 6. 保存
+            # 7. 保存
             record = self.storage.save_document(
                 parsed, chunks, copy_file=copy_file, tags=tags,
             )
@@ -201,6 +213,17 @@ class IngestService:
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
         )
+
+        # Contextual Retrieval
+        if settings.contextual_retrieval and settings.has_llm() and chunks:
+            try:
+                from core.llm.client import LLMClient
+                llm = LLMClient()
+                chunks = contextualize_chunks(
+                    chunks, parsed, llm_client=llm, enabled=True,
+                )
+            except Exception as e:
+                logger.warning(f"Contextual Retrieval 失败，跳过: {e}")
 
         # 标签
         tags = []

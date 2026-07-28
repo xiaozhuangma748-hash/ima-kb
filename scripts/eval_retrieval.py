@@ -184,6 +184,7 @@ def evaluate(
             "question": query,
             "category": q.get("category", ""),
             "difficulty": q.get("difficulty", ""),
+            "source_format": q.get("source_format", "unknown"),
             "hit": hit,
             "rank": rank,
             "n_results": len(eval_results),
@@ -201,7 +202,7 @@ def evaluate(
     # 汇总
     n = len(results_detail)
     if n == 0:
-        return {"overall": {}, "by_category": {}, "details": []}
+        return {"overall": {}, "by_category": {}, "by_format": {}, "details": []}
 
     overall = {
         "recall@5": round(sum(d.get("recall@5", 0) for d in results_detail) / n, 4),
@@ -229,7 +230,30 @@ def evaluate(
         s["recall@5"] = round(s["recall_sum"] / s["total"], 4) if s["total"] > 0 else 0
         del s["hits"], s["total"], s["mrr_sum"], s["recall_sum"]
 
-    return {"overall": overall, "by_category": by_cat, "details": results_detail}
+    # 按来源格式分组（source_format）
+    by_fmt: Dict[str, dict] = {}
+    for d in results_detail:
+        fmt = d.get("source_format", "unknown")
+        if fmt not in by_fmt:
+            by_fmt[fmt] = {"hits": 0, "total": 0, "mrr_sum": 0.0, "recall_sum": 0.0, "ndcg_sum": 0.0, "latency_sum": 0.0}
+        by_fmt[fmt]["total"] += 1
+        if d.get("hit"):
+            by_fmt[fmt]["hits"] += 1
+        by_fmt[fmt]["mrr_sum"] += d.get("mrr", 0)
+        by_fmt[fmt]["recall_sum"] += d.get("recall@5", 0)
+        by_fmt[fmt]["ndcg_sum"] += d.get("ndcg@5", 0)
+        by_fmt[fmt]["latency_sum"] += d.get("elapsed_ms", 0)
+    for fmt, s in by_fmt.items():
+        t = s["total"]
+        s["hit_rate"] = round(s["hits"] / t, 4) if t > 0 else 0
+        s["mrr"] = round(s["mrr_sum"] / t, 4) if t > 0 else 0
+        s["recall@5"] = round(s["recall_sum"] / t, 4) if t > 0 else 0
+        s["ndcg@5"] = round(s["ndcg_sum"] / t, 4) if t > 0 else 0
+        s["avg_latency_ms"] = round(s["latency_sum"] / t, 1) if t > 0 else 0
+        # 保留 total 字段供报告显示
+        del s["hits"], s["mrr_sum"], s["recall_sum"], s["ndcg_sum"], s["latency_sum"]
+
+    return {"overall": overall, "by_category": by_cat, "by_format": by_fmt, "details": results_detail}
 
 
 # ============================================================
@@ -256,12 +280,22 @@ def print_report(result: dict, mode_label: str) -> None:
     for cat, s in sorted(result["by_category"].items()):
         print(f"| {cat} | {s['recall@5']:.4f} | {s['mrr']:.4f} | {s['hit_rate']:.4f} |")
 
+    # 按来源格式分桶
+    by_fmt = result.get("by_format", {})
+    if by_fmt:
+        print(f"\n## 按来源格式（source_format）")
+        print(f"| 格式 | 题数 | Recall@5 | MRR | NDCG@5 | HitRate | 平均延迟(ms) |")
+        print(f"|---|---|---|---|---|---|---|")
+        for fmt, s in sorted(by_fmt.items(), key=lambda x: -x[1].get("total", 0)):
+            print(f"| {fmt} | {s.get('total', 0)} | {s['recall@5']:.4f} | {s['mrr']:.4f} | {s.get('ndcg@5', 0):.4f} | {s['hit_rate']:.4f} | {s.get('avg_latency_ms', 0):.1f} |")
+
     # 失败案例
     misses = [d for d in result["details"] if not d.get("hit")]
     if misses:
         print(f"\n## 失败案例 ({len(misses)} 个)")
         for d in misses[:10]:
-            print(f"- [{d['id']}] {d['question']} (cat={d.get('category','')})")
+            fmt_tag = d.get("source_format", "")
+            print(f"- [{d['id']}] {d['question']} (cat={d.get('category','')}, fmt={fmt_tag})")
             if d.get("top1_title"):
                 print(f"  → top1: {d['top1_title']}")
 

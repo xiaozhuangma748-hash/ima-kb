@@ -65,6 +65,8 @@ _STOP_WORDS: Set[str] = {
     "看", "好", "自己", "这", "那", "它", "他", "她", "与", "及", "或", "但",
     "而", "且", "则", "于", "以", "对", "为", "由", "把", "被", "让", "使",
     "其", "此", "该", "那些", "这些", "什么", "怎么", "如何", "为什么",
+    # 疑问代词/副词：作为查询词时无检索意义，会因极低 doc_freq 产生高 IDF 噪音
+    "哪些", "哪种", "哪类", "几个", "多少", "哪里", "哪儿", "何时",
     "可以", "可能", "应该",
     "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
     "and", "or", "but", "if", "of", "at", "by", "for", "with", "in", "on",
@@ -73,20 +75,23 @@ _STOP_WORDS: Set[str] = {
 
 
 def tokenize(text: str) -> List[str]:
-    """jieba 分词 + 文本归一化 + 过滤停用词和空白。
+    """jieba 分词 + 文本归一化 + 过滤停用词和空白 + bigram 短语匹配。
 
-    改进点（提升召回率）：
+    改进点（提升召回率 + 精确率）：
     - 先做 NFKC 归一化（全角→半角）+ 英文小写，消除格式差异
     - 同时用搜索引擎模式（cut_for_search）和全模式（cut_all=True），
       取两者 token 并集。全模式会切出所有可能的词组合，覆盖更细粒度的切分，
       提升召回率（可能引入噪音，但 BM25 的 IDF 会自动降低无意义词的权重）
     - 过滤停用词和单字符标点
+    - bigram 短语匹配：基于精确模式（jieba.cut）的有序 token 生成相邻 bigram，
+      让"晨光社区"作为"晨光_社区"整体参与匹配。bigram 的 IDF 天然更高
+      （只有包含该连续短语的文档才命中），显著提升短语查询的精确率。
 
     Args:
         text: 原文本
 
     Returns:
-        token 列表（已归一化、去重、过滤停用词）
+        token 列表（已归一化、去重、过滤停用词，含 unigram 和 bigram）
     """
     _ensure_jieba()
     text = _normalize_text(text)
@@ -109,7 +114,34 @@ def tokenize(text: str) -> List[str]:
     # 全模式：列出所有可能的词组合，补充搜索引擎模式遗漏的切分
     for tok in jieba.cut(text, cut_all=True):
         _add(tok)
+
+    # bigram 短语匹配：用精确模式的有序 token 生成相邻 bigram
+    # 例："晨光社区" → ["晨光", "社区"] → bigram "晨光_社区"
+    # 只有文档中连续出现"晨光"+"社区"才命中，区分性远高于单独的"晨光"或"社区"
+    _add_bigrams(text, _add)
+
     return tokens
+
+
+def _add_bigrams(text: str, _add) -> None:
+    """生成 bigram 并通过 _add 加入 token 列表。
+
+    用精确模式（jieba.cut）获取有序 token，过滤后生成相邻 bigram。
+    bigram 格式：f"{tok1}_{tok2}"，下划线分隔避免与正常 token 混淆。
+    """
+    ordered_tokens: list[str] = []
+    for tok in jieba.cut(text):  # 精确模式，保留原始顺序
+        tok = tok.strip()
+        if not tok or tok in _STOP_WORDS:
+            continue
+        if len(tok) == 1 and not tok.isalnum():
+            continue
+        ordered_tokens.append(tok)
+
+    # 生成相邻 bigram
+    for i in range(len(ordered_tokens) - 1):
+        bigram = f"{ordered_tokens[i]}_{ordered_tokens[i + 1]}"
+        _add(bigram)
 
 
 @dataclass
@@ -150,10 +182,16 @@ class BM25Index:
     def __init__(
         self,
         k1: float = 1.5,
-        b: float = 0.5,
+        b: float = 0.35,
         index_path: Optional[Path] = None,
     ) -> None:
         self.k1 = k1
+        # b 参数控制文档长度归一化强度：
+        # - b=1.0 完全归一化（短文档与长文档同等对待）
+        # - b=0.0 不归一化（原始词频决定分数）
+        # - 中文政务文档推荐 b=0.3-0.4
+        # - 从 0.5 调到 0.35：减少短 chunk（如 xlsx 单行）被长度归一化虚高的问题
+        #   长查询命中数相同时，短 chunk 不再因 |d|/avgdl 小而得分虚高
         self.b = b
         self.index_path = index_path or settings.bm25_index_path
 
@@ -261,6 +299,11 @@ class BM25Index:
                 n_qi = self._doc_freq.get(qt, 0)
                 # IDF 截断：当词在多数文档出现时 IDF 可能为负，设为 0 避免反向扣分
                 idf = max(0.0, math.log((N - n_qi + 0.5) / (n_qi + 0.5) + 1))
+                # 单字 token 降权：中文单字（如"中心""服务"）语义模糊且高频，
+                # 容易在管理类文档累积高分挤掉真正结果。乘 0.6 系数降低其影响。
+                # 注意：bigram（含下划线）和多字 token 不受影响
+                if len(qt) == 1:
+                    idf *= 0.6
                 for cid in postings:
                     entry = self._docs.get(cid)
                     if entry is None:

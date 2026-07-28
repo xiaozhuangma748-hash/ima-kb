@@ -109,12 +109,34 @@ def test_enrich_results_empty_list():
 
 
 def test_enrich_results_window_zero():
-    """window=0 不附加上下文。"""
+    """window=0 且无 parent_content 时不附加上下文。
+
+    注：small-to-big 升级后，window=0 仍会调用 get_chunks 检查 parent_content，
+    但 parent_content 为空时降级到 window 方式，window=0 跳过，content 不变。
+    """
+    chunks = [_make_chunk("doc1_1", "doc1", 1, "原始内容")]
     storage = MagicMock()
+    storage.get_chunks.return_value = chunks
     r = _make_result("doc1_1", "doc1", "原始内容")
     result = enrich_results(storage, [r], window=0)
     assert result[0].content == "原始内容"
-    storage.get_chunks.assert_not_called()
+
+
+def test_enrich_results_uses_parent_content():
+    """small-to-big: 有 parent_content 时优先使用，替换 content。"""
+    # chunk 有 parent_content（比 content 长）
+    chunk = ChunkRecord(
+        id="doc1_1", doc_id="doc1", index=1, content="小片段",
+        token_count=0, start_char=0, end_char=4,
+        parent_content="完整章节内容（包含小片段和其他内容）",
+    )
+    storage = MagicMock()
+    storage.get_chunks.return_value = [chunk]
+    r = _make_result("doc1_1", "doc1", "小片段")
+    enrich_results(storage, [r], window=1)
+    # parent_content 比 content 长，应替换
+    assert "完整章节内容" in r.content
+    assert r.content == "完整章节内容（包含小片段和其他内容）"
 
 
 def test_enrich_results_appends_parent_context():

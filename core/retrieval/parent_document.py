@@ -1,11 +1,14 @@
-"""Parent-Document 上下文扩展：检索小 chunk，返回大上下文。
+"""Parent-Document 上下文扩展（small-to-big 版）：检索小 chunk，返回大上下文。
 
 核心思想（来自 LlamaIndex ParentDocumentRetriever）：
 - 检索时用小 chunk（精确匹配，chunk_size=512）
-- 返回时扩展为 parent context（前后各 window 个相邻 chunk 合并）
+- 返回时扩展为 parent context（与格式结构对齐的大粒度内容）
 - 解决"小 chunk 丢失上下文"问题，让 LLM 有更完整的信息做回答
 
-无 schema 变更：利用现有 chunks 表的 doc_id + index_in_doc 计算相邻 chunk。
+升级版（small-to-big）：
+- 入库时每个 chunk 已生成 parent_content（同 sheet/slide/章节的所有 child 合并）
+- 检索时优先使用 chunk 自身的 parent_content
+- 无 parent_content 时降级到旧的 window 方式（前后各 N 个相邻 chunk 合并）
 
 集成点：RAGChain.ask() 在检索后、构造 prompt 前调用 enrich_results，
 把 parent context 附加到 HybridResult.content 后面（用分隔符标记）。
@@ -71,7 +74,11 @@ def enrich_results(
     results: List,
     window: Optional[int] = None,
 ) -> List:
-    """批量给检索结果附加 parent context。
+    """批量给检索结果附加 parent context（small-to-big 优先）。
+
+    策略：
+    1. 优先使用 chunk 自身的 parent_content（与格式结构对齐的大粒度内容）
+    2. 无 parent_content 时降级到 window 方式（前后各 N 个相邻 chunk 合并）
 
     高效实现：按 doc_id 分组，每组只查一次 chunks，避免 N+1 查询。
 
@@ -87,8 +94,6 @@ def enrich_results(
         return results
 
     w = window if window is not None else getattr(settings, "parent_window", 1)
-    if w <= 0:
-        return results
 
     # 按 doc_id 分组，收集需要查询的 doc_id（保持顺序去重）
     doc_ids = list(dict.fromkeys(r.doc_id for r in results if r.doc_id))
@@ -114,12 +119,12 @@ def enrich_results(
 
         # 解析当前 chunk 的 index
         try:
-            # chunk_id = "doc_id_index"，但 doc_id 本身可能含下划线
-            # 更可靠的方式：在 chunks 列表中按 chunk_id 查找
             current_idx = None
+            current_chunk = None
             for c in chunks:
                 if c.id == r.chunk_id:
                     current_idx = c.index
+                    current_chunk = c
                     break
             if current_idx is None:
                 # 回退：从 chunk_id 末尾解析
@@ -131,7 +136,27 @@ def enrich_results(
         except (ValueError, IndexError):
             continue
 
-        # 收集相邻 chunk
+        # 优先策略 1：使用 chunk 自身的 parent_content（small-to-big）
+        # 但对 excel 格式跳过：Excel 每个 chunk 已是完整的行记录，
+        # parent_content 是整 sheet 全文，替换后会丢失精确匹配信息
+        # （所有 chunk 都被替换成同一份 sheet 全文，再被压缩成相同前缀）
+        if current_chunk is not None:
+            parent_content = getattr(current_chunk, "parent_content", "")
+            if parent_content and parent_content.strip():
+                # 检查 format_tag，excel 行级 chunk 不做 parent 替换
+                fmt = getattr(r, "format_tag", "") or ""
+                if fmt == "excel":
+                    continue
+                # parent_content 包含当前 chunk 本身，直接替换 content
+                # 不再追加，而是用更完整的 parent 替代
+                if len(parent_content) > len(r.content):
+                    r.content = parent_content.strip()
+                continue
+
+        # 降级策略 2：window 方式（前后各 N 个相邻 chunk 合并）
+        if w <= 0:
+            continue
+
         start = max(0, current_idx - w)
         end = min(len(chunks), current_idx + w + 1)
 
