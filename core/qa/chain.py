@@ -36,6 +36,7 @@ from core.retrieval.semantic_cache import SemanticCache
 from core.qa.citation_validator import validate_answer
 from core.search.bm25 import BM25Index
 from core.retrieval.vector import VectorIndex
+from core.context.token_budget import TokenBudget, count_tokens
 
 
 @dataclass
@@ -78,10 +79,13 @@ def _build_user_prompt(
     results: List[HybridResult],
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
 ) -> Tuple[str, bool]:
-    """构造用户提示词：把检索结果作为参考资料。
+    """构造用户提示词：把检索结果作为参考资料（含格式提示）。
 
     [n] 编号按传入 results 的顺序分配。调用方负责重排和压缩。
     low_conf 用 max(score) 判断，不依赖顺序。
+
+    格式提示：根据 chunk 的 format_tag 注入对应格式说明，
+    让 LLM 用对应心智模型理解内容（表格/代码/PPT/...）。
 
     Returns:
         (prompt_text, low_confidence_flag)
@@ -106,8 +110,21 @@ def _build_user_prompt(
             "请谨慎回答，不确定时告知用户资料不足。\n"
         )
 
+    # 格式提示映射：让 LLM 知道内容来自什么格式
+    _FORMAT_HINTS = {
+        "excel": "（来源：Excel 表格，每行为一条记录，字段用「列名=值」格式，多条记录用换行分隔）",
+        "ppt": "（来源：PowerPoint 幻灯片，## Slide N 标记页码）",
+        "markdown": "（来源：Markdown 文档，# 标题标记章节层级）",
+        "docx": "（来源：Word 文档，含段落和表格）",
+        "pdf": "（来源：PDF 文档）",
+        "image": "（来源：图片 OCR 识别文本，可能有识别误差）",
+        "html": "（来源：HTML 网页正文）",
+        "text": "",
+    }
+
     for i, r in enumerate(results, 1):
-        parts.append(f"\n[{i}] 来源：{r.doc_title}")
+        format_hint = _FORMAT_HINTS.get(getattr(r, "format_tag", ""), "")
+        parts.append(f"\n[{i}] 来源：{r.doc_title}{format_hint}")
         parts.append(f"    内容：{r.content}")
 
     parts.append("\n" + "=" * 50)
@@ -269,22 +286,27 @@ class RAGChain:
         enable_hyde: bool = True,
         enable_decompose: bool = True,
         doc_ids: Optional[List[str]] = None,
+        cross_session_context: Optional[str] = None,
+        summary: Optional[str] = None,
     ) -> Answer:
         """同步问答（含答案语义缓存）。
 
         Args:
             question: 用户问题
             top_k: 检索候选数（默认用配置 RAG_TOP_K）
-            history: 多轮对话历史（用于 query expansion）
+            history: 多轮对话历史（用于 query expansion + LLM 上下文）
             enable_hyde: 启用 HyDE 假设答案改写
             enable_decompose: 启用子问题分解
             doc_ids: 元数据预过滤，只在这些文档中检索（None 不过滤）
+            cross_session_context: 跨会话记忆文本（注入 LLM 上下文）
+            summary: 之前的对话摘要（注入 LLM 上下文）
 
         Returns:
             Answer 对象
         """
-        # 0. 答案语义缓存（多轮对话不缓存，保证上下文新鲜；任何异常降级无缓存）
-        if self._answer_cache is not None and not history:
+        # 0. 答案语义缓存（多轮对话/跨会话/摘要存在时不缓存，保证上下文新鲜）
+        has_extra_context = bool(history or cross_session_context or summary)
+        if self._answer_cache is not None and not has_extra_context:
             try:
                 q_emb = self._query_embedding(question)
                 if q_emb is not None:
@@ -367,19 +389,43 @@ class RAGChain:
         if max_chars > 0:
             compress_results(final_results, max_chars=max_chars)
 
+        # 4.7 Token 预算分配（上下文工程 P0）
+        # 按 token 预算截断 retrieval/history/summary/cross_session
+        # 避免长对话 + parent_content 扩展后 input 超过模型窗口
+        budget = TokenBudget(total=getattr(settings, "token_budget_total", 4096))
+        _allocation, truncated = budget.allocate(
+            system_prompt=SYSTEM_PROMPT,
+            user_query=question,
+            retrieval_results=final_results,
+            history=history,
+            summary=summary,
+            cross_session=cross_session_context,
+        )
+        final_results = truncated["retrieval"] or final_results
+        truncated_history = truncated["history"]
+        truncated_summary = truncated["summary"]
+        truncated_cross = truncated["cross_session"]
+
         # 5. 构造 Prompt
         user_prompt, low_conf = _build_user_prompt(
             question, final_results,
             confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
         )
 
+        # 5.1 组装消息（对齐 administrator.py：system + cross_session + summary + history + user）
+        messages: List[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if truncated_cross:
+            messages.append({"role": "system", "content": f"## 跨会话记忆\n{truncated_cross}"})
+        if truncated_summary:
+            messages.append({"role": "system", "content": f"## 之前的对话摘要\n{truncated_summary}"})
+        if truncated_history:
+            messages.extend(truncated_history[-10:])  # 最近 10 条
+        messages.append({"role": "user", "content": user_prompt})
+
         # 6. LLM 生成
         try:
             content = self.llm.chat(
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=messages,
                 temperature=0.2,
             )
         except LLMError as e:
@@ -425,7 +471,7 @@ class RAGChain:
         confidence = max((r.score for r in final_results), default=0.0) if final_results else 0.0
 
         # 8.1 写入答案语义缓存（仅单轮、有实质答案、embedding 可用时）
-        if self._answer_cache is not None and content.strip() and not history:
+        if self._answer_cache is not None and content.strip() and not has_extra_context:
             try:
                 q_emb = self._query_embedding(question)
                 if q_emb is not None:
@@ -457,14 +503,27 @@ class RAGChain:
         enable_hyde: bool = True,
         enable_decompose: bool = True,
         doc_ids: Optional[List[str]] = None,
+        cross_session_context: Optional[str] = None,
+        summary: Optional[str] = None,
     ) -> Iterator[str]:
         """流式问答（含答案语义缓存）。
+
+        Args:
+            question: 用户问题
+            top_k: 检索候选数（默认用配置 RAG_TOP_K）
+            history: 多轮对话历史（用于 query expansion + LLM 上下文）
+            enable_hyde: 启用 HyDE 假设答案改写
+            enable_decompose: 启用子问题分解
+            doc_ids: 元数据预过滤，只在这些文档中检索（None 不过滤）
+            cross_session_context: 跨会话记忆文本（注入 LLM 上下文）
+            summary: 之前的对话摘要（注入 LLM 上下文）
 
         Yields:
             文本片段（含进度提示）
         """
-        # 0. 答案语义缓存（多轮不缓存；命中则整段回放后 return）
-        if self._answer_cache is not None and not history:
+        # 0. 答案语义缓存（多轮/跨会话/摘要存在时不缓存；命中则整段回放后 return）
+        has_extra_context = bool(history or cross_session_context or summary)
+        if self._answer_cache is not None and not has_extra_context:
             try:
                 q_emb = self._query_embedding(question)
                 if q_emb is not None:
@@ -541,6 +600,21 @@ class RAGChain:
         if max_chars > 0:
             compress_results(final_results, max_chars=max_chars)
 
+        # 3.7 Token 预算分配（上下文工程 P0）
+        budget = TokenBudget(total=getattr(settings, "token_budget_total", 4096))
+        _allocation, truncated = budget.allocate(
+            system_prompt=SYSTEM_PROMPT,
+            user_query=question,
+            retrieval_results=final_results,
+            history=history,
+            summary=summary,
+            cross_session=cross_session_context,
+        )
+        final_results = truncated["retrieval"] or final_results
+        truncated_history = truncated["history"]
+        truncated_summary = truncated["summary"]
+        truncated_cross = truncated["cross_session"]
+
         # 4. 构造 Prompt
         user_prompt, low_conf = _build_user_prompt(
             question, final_results,
@@ -548,14 +622,21 @@ class RAGChain:
         if low_conf:
             yield "⚠️ 注意：检索结果相关度较低，回答可能不够准确。\n\n"
 
+        # 4.1 组装消息（对齐 administrator.py：system + cross_session + summary + history + user）
+        messages: List[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if truncated_cross:
+            messages.append({"role": "system", "content": f"## 跨会话记忆\n{truncated_cross}"})
+        if truncated_summary:
+            messages.append({"role": "system", "content": f"## 之前的对话摘要\n{truncated_summary}"})
+        if truncated_history:
+            messages.extend(truncated_history[-10:])
+        messages.append({"role": "user", "content": user_prompt})
+
         # 5. 流式生成（收集完整回答以过滤引用）
         full_content = []
         try:
             for token in self.llm.chat_stream(
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=messages,
                 temperature=0.2,
             ):
                 full_content.append(token)
@@ -568,7 +649,7 @@ class RAGChain:
         answer_text = "".join(full_content)
 
         # 6.0 写入答案语义缓存（仅单轮、有实质答案、embedding 可用时）
-        if self._answer_cache is not None and answer_text.strip() and not history:
+        if self._answer_cache is not None and answer_text.strip() and not has_extra_context:
             try:
                 q_emb = self._query_embedding(question)
                 if q_emb is not None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from typing import Iterator, List, Optional
 
+import httpx
 from openai import OpenAI
 
 from config import settings
@@ -35,10 +36,20 @@ class LLMClient:
                 "未配置 AGNES_API_KEY，请在 .env 中设置。"
                 "参考 .env.example。"
             )
+        # 显式构造不使用代理的 httpx.Client 传给 OpenAI SDK
+        # 原因：用户系统可能开着代理软件（Clash/Surge/ICUBE 等）但代理进程未启动，
+        # 导致 HTTP_PROXY/HTTPS_PROXY 指向 127.0.0.1:xxxxx 不可用，
+        # 所有请求失败报 APIConnectionError。Agnes AI 的 API 直连即可，无需代理。
+        # trust_env=False 让 httpx 忽略 HTTP_PROXY/HTTPS_PROXY 环境变量
+        self._http_client = httpx.Client(
+            timeout=60.0,
+            trust_env=False,  # 忽略系统代理环境变量
+        )
         self._client = OpenAI(
             api_key=settings.agnes_api_key,
             base_url=settings.agnes_base_url,
             timeout=60.0,  # 单次请求超时 60 秒（默认太短）
+            http_client=self._http_client,
         )
         self._model = settings.llm_model
         # 最近一次调用的 token 使用量（由 chat/chat_stream 写入）

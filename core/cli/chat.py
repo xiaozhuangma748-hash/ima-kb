@@ -384,7 +384,7 @@ class ChatMixin:
                 ):
                     if event["type"] == "stage":
                         # 显示阶段提示 — 用动态 spinner 等待下一阶段
-                        stage_text = {"检索": "混合检索", "重排": "LLM 重排"}.get(
+                        stage_text = {"检索": "混合检索", "重排": "LLM 重排", "降级": "LLM 降级检索"}.get(
                             event["stage"], event["stage"]
                         )
                         # 桌面宠物状态联动
@@ -394,6 +394,8 @@ class ChatMixin:
                                 _try_pet_state("retrieving")
                             elif "重排" in _stage:
                                 _try_pet_state("ranking")
+                            elif "降级" in _stage:
+                                _try_pet_state("answering")
                         # 桌面宠物流式镜像
                         if _stream_pusher:
                             _stream_pusher.push_stage(event.get("stage", ""), event.get("count", 0))
@@ -589,7 +591,20 @@ class ChatMixin:
             _try_pet_state("thinking")
             _try_pet_state("retrieving")
         with console.status("[bold yellow]混合检索知识库...[/bold yellow]", spinner="dots"):
-            answer = self.rag.ask(user_input, history=self.history)
+            # 注入跨会话记忆和对话摘要（对齐 administrator.py 路径）
+            _rag_cross_ctx = None
+            if getattr(self, 'cross_session_memory', None) is not None:
+                try:
+                    _rag_cross_ctx = self.cross_session_memory.get_context()
+                except Exception:
+                    pass
+            _rag_summary = getattr(self, 'conversation_summary', None) or None
+            answer = self.rag.ask(
+                user_input,
+                history=self.history,
+                cross_session_context=_rag_cross_ctx,
+                summary=_rag_summary,
+            )
         _think_time = _time.time() - _t0
 
         if not answer.has_answer:

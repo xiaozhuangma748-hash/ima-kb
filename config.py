@@ -31,7 +31,7 @@ class Settings:
     agnes_base_url: str = field(
         default_factory=lambda: _get_env("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1")
     )
-    llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL_OVERRIDE") or _get_env("LLM_MODEL", "agnes-2.0-flash"))
+    llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL_OVERRIDE") or _get_env("LLM_MODEL", "agnes-2.5-flash"))
 
     # ---- 图像生成 (Agnes Image) ----
     image_model: str = field(default_factory=lambda: _get_env("IMAGE_MODEL", "agnes-image-2.1-flash"))
@@ -47,6 +47,11 @@ class Settings:
     chunk_size: int = field(default_factory=lambda: int(_get_env("CHUNK_SIZE", "512")))
     chunk_overlap: int = field(default_factory=lambda: int(_get_env("CHUNK_OVERLAP", "64")))
 
+    # ---- Contextual Retrieval（Anthropic 2024）----
+    # 入库时为每个 chunk 用 LLM 生成 50-100 字文档级摘要前缀到 content
+    # 检索失败率降低 49%，配合 rerank 降低 67%
+    contextual_retrieval: bool = field(default_factory=lambda: _get_env("CONTEXTUAL_RETRIEVAL", "1") == "1")
+
     # ---- RAG ----
     rag_top_k: int = field(default_factory=lambda: int(_get_env("RAG_TOP_K", "6")))
     llm_max_tokens: int = field(default_factory=lambda: int(_get_env("LLM_MAX_TOKENS", "1024")))
@@ -60,6 +65,16 @@ class Settings:
     # 每个 chunk content 传给 LLM 时的最大字符数，超过时保留首尾各一半
     # 0 表示不压缩（适用于 parent_window 扩展后 content 较长的场景）
     context_max_chars: int = field(default_factory=lambda: int(_get_env("CONTEXT_MAX_CHARS", "800")))
+
+    # ---- Token 预算（上下文工程 P0）----
+    # 总 token 预算（含 system + retrieval + history + summary + cross_session + margin）
+    # 默认 4096，覆盖大多数模型窗口；超大窗口模型可调高
+    token_budget_total: int = field(default_factory=lambda: int(_get_env("TOKEN_BUDGET_TOTAL", "4096")))
+    # 检索资料 token 预算占比（0-1，默认 0.50）
+    # 超预算时按 score 排序保留 top-N
+    token_budget_retrieval_ratio: float = field(default_factory=lambda: float(_get_env("TOKEN_BUDGET_RETRIEVAL_RATIO", "0.50")))
+    # 多轮历史 token 预算占比（0-1，默认 0.20）
+    token_budget_history_ratio: float = field(default_factory=lambda: float(_get_env("TOKEN_BUDGET_HISTORY_RATIO", "0.20")))
 
     # ---- 对话记忆 ----
     # 进入 LLM prompt 的最近消息条数（1 轮 = user + assistant 2 条）

@@ -440,6 +440,9 @@ class PetAdministrator:
                 yield {"type": "token", "text": token}
         except LLMError as e:
             logger.warning(f"LLM 流式生成失败，降级为检索模式: {e}")
+            # 先 yield 降级 stage 事件，确保桌宠气泡从"重排"切换到"降级"
+            # 即使后续 token 推送失败（socket 断开等），气泡也不会卡在"重排"状态
+            yield {"type": "stage", "stage": "降级", "count": len(top_sources)}
             # 降级：用统一文案 + 检索到的原文片段（与 ask() 保持一致）
             if top_sources:
                 answer_text = get_llm_degrade_message(

@@ -119,10 +119,11 @@ window.petAPI.onPetInfo((info) => {
   console.log('[pet] info:', info);
 });
 
-// 阶段状态指示器（检索/重排/缓存），首个 token 到来时自动清除
+// 阶段状态指示器（检索/重排/降级/缓存），首个 token 到来时自动清除
 const STAGE_TEXT = {
   '检索': '混合检索知识库',
   '重排': 'LLM 重排结果',
+  '降级': 'LLM 不可用，降级检索模式',
   '缓存': '命中缓存，快速回答',
 };
 

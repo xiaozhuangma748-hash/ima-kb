@@ -187,6 +187,37 @@ def test_ask_stream_degrades_on_llm_failure(tmp_path):
     assert "骨灰安置内容" in result.text or "不可用" in result.text or "原文" in result.text
 
 
+def test_ask_stream_degrade_yields_degrade_stage(tmp_path):
+    """LLM 降级时应 yield "降级" stage 事件，确保桌宠气泡从"重排"切换到"降级"。
+
+    回归测试：修复前降级只 yield token 事件，若 socket 推送失败，
+    桌宠气泡会卡在"LLM 重排结果 (N 条)"不更新。
+    修复后降级先 yield "降级" stage 事件，即使 token 推送失败也能切换状态。
+    """
+    admin = _make_admin(
+        tmp_path,
+        chat_stream_side_effect=LLMError("LLM 不可用"),
+    )
+    events = _consume_stream(admin)
+
+    # 收集所有 stage 事件
+    stage_events = [e for e in events if e["type"] == "stage"]
+    # 应包含 "检索"、"重排"、"降级" 三个 stage
+    stage_names = [e["stage"] for e in stage_events]
+    assert "检索" in stage_names, f"缺少检索 stage: {stage_names}"
+    assert "重排" in stage_names, f"缺少重排 stage: {stage_names}"
+    assert "降级" in stage_names, f"缺少降级 stage: {stage_names}"
+
+    # "降级" stage 应在 "重排" stage 之后
+    rerank_idx = stage_names.index("重排")
+    degrade_idx = stage_names.index("降级")
+    assert degrade_idx > rerank_idx, f"降级 stage 应在重排之后: {stage_names}"
+
+    # "降级" stage 的 count 应等于 top_sources 数量
+    degrade_stage = stage_events[degrade_idx]
+    assert degrade_stage["count"] == 1  # mock 返回 1 条重排结果
+
+
 def test_ask_stream_degrade_token_yielded(tmp_path):
     """LLM 失败时降级文案作为单个 token 事件产出。"""
     admin = _make_admin(
