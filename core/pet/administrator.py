@@ -367,12 +367,12 @@ class PetAdministrator:
             candidates = self.hybrid.search(search_query, top_k=10)
             yield {"type": "stage", "stage": "检索", "count": len(candidates)}
 
-        # 3. LLM 重排（无候选时跳过）
+        # 3. LLM 重排（无候选时跳过，不 yield "重排" 事件避免误导用户）
         if candidates:
             top_sources = self.reranker.rerank(query, candidates, top_n=5)
+            yield {"type": "stage", "stage": "重排", "count": len(top_sources)}
         else:
             top_sources = []
-        yield {"type": "stage", "stage": "重排", "count": len(top_sources)}
 
         # 4. 确定风格
         if style_override:
