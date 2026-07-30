@@ -72,10 +72,12 @@ def start_mobile_server(port: int = _DEFAULT_PORT) -> Tuple[int, threading.Threa
     import uvicorn
 
     app = _build_app()
-    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
+    # 安全:默认仅本机访问,避免局域网未授权访问桌宠配置
+    # 如需远程访问,显式传 host="0.0.0.0" 并配合反向代理 + 鉴权
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
     thread = threading.Thread(target=server.run, daemon=True, name="mobile-sync")
     thread.start()
-    logger.info(f"Mobile 同步服务已启动: http://0.0.0.0:{port}/health")
+    logger.info(f"Mobile 同步服务已启动: http://127.0.0.1:{port}/health")
     return port, thread

@@ -529,14 +529,43 @@ class DocsMixin:
             _try_pet_push("\n".join(lines), "markdown")
 
     def _cmd_show(self, id_str: str) -> None:
-        """查看文档详情。"""
+        """查看文档详情。
+
+        用法:
+            /show <id 前 8 位>              默认：元信息 + 前 3 块预览（每块 400 字截断）
+            /show <id> --full               显示所有分块的完整内容
+            /show <id> --chunk <N>          显示第 N 块完整内容（0-based，对应 Chunk #N）
+        """
         if not id_str:
-            console.print("[yellow]用法: /show <id 前 8 位>[/yellow]")
+            console.print("[yellow]用法:[/yellow]")
+            console.print("  [cyan]/show <id 前 8 位>[/cyan]              查看文档详情（前 3 块预览）")
+            console.print("  [cyan]/show <id> --full[/cyan]              显示所有分块完整内容")
+            console.print("  [cyan]/show <id> --chunk <N>[/cyan]         显示第 N 块完整内容")
             return
+
+        # 解析参数：第一个 token 是 id 前缀，其余为开关
+        tokens = id_str.split()
+        id_part = tokens[0]
+        show_full = "--full" in tokens or "-a" in tokens
+        chunk_idx: Optional[int] = None
+        if "--chunk" in tokens:
+            i = tokens.index("--chunk")
+            if i + 1 >= len(tokens):
+                console.print("[yellow]用法: /show <id> --chunk <N>（N 为 0-based 块号）[/yellow]")
+                return
+            try:
+                chunk_idx = int(tokens[i + 1])
+            except ValueError:
+                console.print(f"[red]无效的块号: {tokens[i + 1]}[/red]")
+                return
+        if show_full and chunk_idx is not None:
+            console.print("[yellow]--full 与 --chunk 不能同时使用[/yellow]")
+            return
+
         # 简写匹配
-        doc_id = self._resolve_doc_id(id_str)
+        doc_id = self._resolve_doc_id(id_part)
         if not doc_id:
-            console.print(f"[red]未找到文档:[/red] {id_str}")
+            console.print(f"[red]未找到文档:[/red] {id_part}")
             return
         doc = self.storage.get_document(doc_id)
         if not doc:
@@ -561,13 +590,48 @@ class DocsMixin:
         else:
             console.print(f"  标签:     [dim]（无）[/dim]")
         console.print()
+
         chunks = self.storage.get_chunks(doc_id)
+
+        # 模式 1：显示指定块完整内容
+        if chunk_idx is not None:
+            target = next((c for c in chunks if c.index == chunk_idx), None)
+            if target is None:
+                max_idx = max((c.index for c in chunks), default=-1)
+                console.print(
+                    f"[red]未找到第 {chunk_idx} 块[/red] "
+                    f"[dim]（该文档共 {len(chunks)} 块，索引 0~{max_idx}）[/dim]"
+                )
+                return
+            console.print(f"[bold]Chunk #{target.index}[/bold] [dim]· {target.token_count} tokens[/dim]\n")
+            console.print(target.content)
+            console.print()
+            return
+
+        # 模式 2：显示所有块完整内容
+        if show_full:
+            if not chunks:
+                console.print("[yellow]该文档没有分块内容[/yellow]")
+                return
+            total_tokens = sum(c.token_count for c in chunks)
+            console.print(
+                f"[bold]全部 {len(chunks)} 块 · {total_tokens} tokens[/bold]\n"
+            )
+            for c in chunks:
+                console.print(f"[dim]--- Chunk #{c.index} ({c.token_count} tokens) ---[/dim]")
+                console.print(c.content)
+                console.print()
+            return
+
+        # 默认模式：前 3 块预览（保持原行为）
         for c in chunks[:3]:
             console.print(f"[dim]--- Chunk #{c.index} ---[/dim]")
             console.print(c.content[:400] + ("..." if len(c.content) > 400 else ""))
             console.print()
         if len(chunks) > 3:
-            console.print(f"[dim]... 还有 {len(chunks) - 3} 块[/dim]\n")
+            console.print(
+                f"[dim]... 还有 {len(chunks) - 3} 块 · 用 [cyan]/show {id_part} --full[/cyan] 查看全部[/dim]\n"
+            )
 
     def _cmd_tags(self) -> None:
         """列出所有标签。"""

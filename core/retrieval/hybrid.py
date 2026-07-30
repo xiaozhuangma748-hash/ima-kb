@@ -65,6 +65,7 @@ class HybridResult:
     doc_title: str = ""
     paragraph_num: int = 0  # 真实段落号（chunk 的 index_in_doc + 1，由 storage.enrich_hybrid_results 填充）
     format_tag: str = ""    # 格式标签（由 storage.enrich_hybrid_results 从 file_type 映射填充）
+    heading: str = ""       # 所属章节标题（由 storage.enrich_hybrid_results 填充，PDF rerank 用）
 
 
 class HybridRetriever:
@@ -223,6 +224,7 @@ class HybridRetriever:
                 source="bm25",
                 content=getattr(r, "content", ""),
                 doc_title=getattr(r, "doc_title", ""),
+                heading=getattr(r, "heading", ""),
             )
             for r in bm25_results[:top_k]
         ]

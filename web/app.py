@@ -73,6 +73,27 @@ def _get_shared_graph_store(app: FastAPI):
     return app.state.graph_store
 
 
+def _get_shared_hybrid_retriever(app: FastAPI):
+    """获取全局共享的 HybridRetriever(懒加载,线程安全)。
+
+    性能优化:共享实例避免每个请求重建 SemanticCache。
+    若每请求新建,缓存命中率=0%,QA 响应时间无法受益于语义缓存。
+    共享后预期 QA 提速 30-50%。
+    """
+    if not getattr(app.state, "hybrid_retriever", None):
+        with app.state._hybrid_lock:
+            if not getattr(app.state, "hybrid_retriever", None):
+                from core.retrieval.hybrid import HybridRetriever
+                storage = _get_shared_storage(app)
+                vector_index = _get_shared_vector_index(app)
+                app.state.hybrid_retriever = HybridRetriever(
+                    bm25_index=storage.bm25,
+                    vector_index=vector_index,
+                    storage=storage,
+                )
+    return app.state.hybrid_retriever
+
+
 def _get_health_cache(app: FastAPI) -> dict:
     """获取缓存的健康分数（10 分钟刷新一次，入库/删除时清空）。"""
     import time
@@ -145,12 +166,14 @@ def create_app() -> FastAPI:
     app.state.storage = None
     app.state.vector_index = None
     app.state.graph_store = None
+    app.state.hybrid_retriever = None
     app.state._vector_init_failed = False
     app.state._graph_init_failed = False
     app.state._health_cache = None
     app.state._storage_lock = threading.Lock()
     app.state._vector_lock = threading.Lock()
     app.state._graph_lock = threading.Lock()
+    app.state._hybrid_lock = threading.Lock()
 
     # 注册路由
     from web.routes.qa import router as qa_router

@@ -27,7 +27,7 @@ async def search(
     import time
     t0 = time.time()
 
-    from web.app import _get_shared_storage, _get_shared_vector_index
+    from web.app import _get_shared_storage, _get_shared_hybrid_retriever
 
     storage = _get_shared_storage(request.app)
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
@@ -35,13 +35,9 @@ async def search(
     results = []
     try:
         if use_vector:
-            from core.retrieval.hybrid import HybridRetriever
-            vector_index = _get_shared_vector_index(request.app)
-            if vector_index and vector_index.is_available():
-                hybrid = HybridRetriever(bm25_index=storage.bm25, vector_index=vector_index, storage=storage)
-                raw_results = hybrid.search(q, top_k=limit * 2)
-            else:
-                raw_results = storage.bm25_search(q, top_k=limit * 2)
+            # 用共享 HybridRetriever(复用 SemanticCache,避免每请求重建缓存)
+            hybrid = _get_shared_hybrid_retriever(request.app)
+            raw_results = hybrid.search(q, top_k=limit * 2)
         else:
             raw_results = storage.bm25_search(q, top_k=limit * 2)
     except Exception:
@@ -57,13 +53,17 @@ async def search(
         except Exception:
             pass
 
-    # 标签筛选
+    # 标签筛选(兼容 dict 和 HybridResult 对象)
     if tag_list:
         tagged_docs = set()
         for t in tag_list:
             docs = storage.list_documents_by_tag(t)
             tagged_docs.update(d.id for d in docs)
-        raw_results = [r for r in raw_results if r.get("doc_id", "") in tagged_docs]
+        def _get_doc_id(r):
+            if isinstance(r, dict):
+                return r.get("doc_id", "")
+            return getattr(r, "doc_id", "") or ""
+        raw_results = [r for r in raw_results if _get_doc_id(r) in tagged_docs]
 
     # 构造结果（兼容 dict 和各类 search result 对象）
     # 先收集所有 doc_id，批量查询文档元数据（避免 N+1 查询）
@@ -93,11 +93,17 @@ async def search(
     # 一次查询所有文档元数据
     docs_map = storage.get_documents_batch(list(all_doc_ids)) if all_doc_ids else {}
 
-    # 对缺少 content 的结果，批量查第一个 chunk
+    # 批量查第一个 chunk(避免 N+1 查询)
     missing_content_doc_ids = [
         p["doc_id"] for p in parsed_results
         if not p["content"] and p["doc_id"]
     ]
+    first_chunks_map = {}
+    if missing_content_doc_ids:
+        try:
+            first_chunks_map = storage.get_first_chunks_batch(missing_content_doc_ids)
+        except Exception:
+            pass
 
     for p in parsed_results:
         doc_id = p["doc_id"]
@@ -113,14 +119,11 @@ async def search(
             p["file_type"] = ""
             p["created_at"] = ""
 
-        # 如果 content 为空，从文档分块取第一个
+        # 如果 content 为空,从批量查询结果取第一个 chunk
         if not p["content"] and doc_id:
-            try:
-                first_chunk = storage.get_first_chunk(doc_id)
-                if first_chunk:
-                    p["content"] = first_chunk.content or ""
-            except Exception:
-                pass
+            first_chunk = first_chunks_map.get(doc_id)
+            if first_chunk:
+                p["content"] = first_chunk.content or ""
 
         snippet = p["content"][:300]
 

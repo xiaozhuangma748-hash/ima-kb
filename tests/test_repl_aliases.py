@@ -333,8 +333,8 @@ def test_dedup_delete_e2e(tmp_path):
     chunk_id = f"{record.id}_0"
     repl.storage = storage
 
-    # 绕过 Prompt.ask 确认，直接调用 delete 子流程
-    with patch("repl.Prompt.ask", return_value="y"):
+    # 绕过 repl_confirm 确认，直接调用 delete 子流程
+    with patch("core.cli.terminal_helpers.repl_confirm", return_value=True):
         repl._cmd_dedup(f"delete {chunk_id}")
 
     # chunk 应被删除
@@ -373,7 +373,8 @@ def test_reparse_by_doc_id_e2e(tmp_path):
     file_path.write_text("更新后内容", encoding="utf-8")
 
     # 执行 reparse（绕过确认）
-    with patch("repl.Prompt.ask", return_value="y"):
+    # docs.py 顶层 from core.cli.terminal_helpers import repl_confirm as _repl_confirm
+    with patch("core.cli.commands.docs._repl_confirm", return_value=True):
         repl._cmd_reparse(doc_id[:8])
 
     # 旧 doc_id 应已删除，新文档应存在
@@ -392,7 +393,7 @@ def test_reparse_by_file_path_e2e(tmp_path):
     file_path.write_text("新文件内容", encoding="utf-8")
     repl.storage = storage
 
-    with patch("repl.Prompt.ask", return_value="y"):
+    with patch("core.cli.commands.docs._repl_confirm", return_value=True):
         repl._cmd_reparse(str(file_path))
 
     docs = storage.list_documents()
@@ -535,3 +536,120 @@ def test_show_displays_new_fields(tmp_path):
 
     # 执行 /show，不应抛异常
     repl._cmd_show(record.id[:8])
+
+
+# ============================================================
+# /show --full 和 --chunk <N> 扩展模式测试
+# ============================================================
+
+def _make_doc_with_chunks(tmp_path, n_chunks=5):
+    """构造一个有 n_chunks 块的真实文档，每块内容可辨识。"""
+    from core.storage import Storage
+    from core.ingestion.parser import ParsedDocument
+    from core.ingestion.chunker import Chunk
+    storage = Storage(storage_path=tmp_path)
+    file_path = tmp_path / "multi.txt"
+    full_text = "\n".join(f"第 {i} 段：内容块 #{i}" for i in range(n_chunks))
+    file_path.write_text(full_text, encoding="utf-8")
+    parsed = ParsedDocument(
+        title="多块文档", text=full_text, file_path=file_path,
+        file_type=".txt", language="zh", meta={},
+    )
+    chunks = [
+        Chunk(index=i, content=f"第 {i} 段：内容块 #{i}", token_count=10,
+              start_char=i * 10, end_char=i * 10 + 10)
+        for i in range(n_chunks)
+    ]
+    record = storage.save_document(parsed, chunks, copy_file=False)
+    return storage, record
+
+
+def test_show_no_arg_prints_usage(tmp_path, capsys):
+    """/show 不带参数应打印用法（含 --full / --chunk 提示）。"""
+    repl = _make_repl(tmp_path)
+    repl._cmd_show("")
+    out = capsys.readouterr().out
+    assert "--full" in out
+    assert "--chunk" in out
+
+
+def test_show_full_displays_all_chunks(tmp_path, capsys):
+    """/show <id> --full 应打印所有分块的完整内容。"""
+    repl = _make_repl(tmp_path)
+    storage, record = _make_doc_with_chunks(tmp_path, n_chunks=5)
+    repl.storage = storage
+
+    repl._cmd_show(f"{record.id[:8]} --full")
+    out = capsys.readouterr().out
+
+    # 所有的块号都应出现
+    for i in range(5):
+        assert f"#{i}" in out, f"Chunk #{i} 未出现在 --full 输出中"
+    # 提示行应显示总块数
+    assert "全部 5 块" in out
+
+
+def test_show_chunk_n_displays_single_chunk(tmp_path, capsys):
+    """/show <id> --chunk 2 应只打印第 2 块的完整内容。"""
+    repl = _make_repl(tmp_path)
+    storage, record = _make_doc_with_chunks(tmp_path, n_chunks=5)
+    repl.storage = storage
+
+    repl._cmd_show(f"{record.id[:8]} --chunk 2")
+    out = capsys.readouterr().out
+
+    # 应出现第 2 块内容
+    assert "内容块 #2" in out
+    # 不应出现其他块的内容
+    assert "内容块 #0" not in out
+    assert "内容块 #1" not in out
+    assert "内容块 #3" not in out
+    assert "内容块 #4" not in out
+
+
+def test_show_chunk_out_of_range_returns_error(tmp_path, capsys):
+    """/show <id> --chunk 99 应提示块号越界。"""
+    repl = _make_repl(tmp_path)
+    storage, record = _make_doc_with_chunks(tmp_path, n_chunks=3)
+    repl.storage = storage
+
+    repl._cmd_show(f"{record.id[:8]} --chunk 99")
+    out = capsys.readouterr().out
+    assert "未找到第 99 块" in out
+    # 应给出有效范围提示
+    assert "0~2" in out
+
+
+def test_show_chunk_invalid_number_returns_error(tmp_path, capsys):
+    """/show <id> --chunk abc 应提示块号无效。"""
+    repl = _make_repl(tmp_path)
+    storage, record = _make_doc_with_chunks(tmp_path, n_chunks=2)
+    repl.storage = storage
+
+    repl._cmd_show(f"{record.id[:8]} --chunk abc")
+    out = capsys.readouterr().out
+    assert "无效的块号" in out
+
+
+def test_show_full_and_chunk_mutually_exclusive(tmp_path, capsys):
+    """/show <id> --full --chunk 0 应提示互斥。"""
+    repl = _make_repl(tmp_path)
+    storage, record = _make_doc_with_chunks(tmp_path, n_chunks=2)
+    repl.storage = storage
+
+    repl._cmd_show(f"{record.id[:8]} --full --chunk 0")
+    out = capsys.readouterr().out
+    assert "不能同时使用" in out
+
+
+def test_show_default_mode_suggests_full(tmp_path, capsys):
+    """默认模式下当块数 > 3 时应提示用 --full 查看全部。"""
+    repl = _make_repl(tmp_path)
+    storage, record = _make_doc_with_chunks(tmp_path, n_chunks=5)
+    repl.storage = storage
+
+    short_id = record.id[:8]
+    repl._cmd_show(short_id)
+    out = capsys.readouterr().out
+    assert f"/show {short_id} --full" in out
+    assert "还有 2 块" in out

@@ -63,6 +63,8 @@ class ChunkRecord:
     start_char: int
     end_char: int
     parent_content: str = ""       # small-to-big 检索用的父级内容
+    page_num: int = 0              # PDF 页码（1-based，0 表示非 PDF 或未标记）
+    heading: str = ""              # 所属章节标题
 
 
 @dataclass
@@ -108,14 +110,127 @@ class Storage:
     def attach_vector_index(self, vector_index) -> None:
         """注入向量索引实例，使后续 save/delete 自动同步向量索引。
 
+        注入后会自动检查向量索引与数据库的一致性：
+        - 过期 chunk（在向量索引但不在数据库）→ 自动删除
+        - 缺失 chunk（在数据库但不在向量索引）→ 自动补充嵌入
+
+        这解决了重新入库时向量索引未清理导致的检索结果过期问题。
+
         Args:
             vector_index: VectorIndex 实例（或任何实现了 add_chunks_batch/delete_document 的对象）
         """
         self._vector_index = vector_index
+        # 注入后立即同步，确保向量索引与数据库一致
+        try:
+            self._sync_vector_from_db()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"向量索引同步失败（非致命）: {e}")
 
     def detach_vector_index(self) -> None:
         """解除向量索引绑定。"""
         self._vector_index = None
+
+    def _sync_vector_from_db(self) -> None:
+        """同步向量索引与数据库 chunks 表。
+
+        策略（类似 _sync_bm25_from_db）：
+        - 数量匹配且 ID 集合一致 → 直接用
+        - 有过期 chunk（在向量索引但不在数据库）→ 删除
+        - 有缺失 chunk（在数据库但不在向量索引）→ 补充嵌入
+        - 向量索引为空 → 全量重建
+
+        本方法在 attach_vector_index 时自动调用，也可手动调用修复。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if self._vector_index is None or not self._vector_index.is_available():
+            return
+
+        with self._conn() as conn:
+            db_chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+
+        if db_chunk_count == 0:
+            return
+
+        # 获取向量索引中所有 chunk_id
+        try:
+            all_vec = self._vector_index._collection.get(include=["metadatas"])
+            vec_chunk_ids = set(all_vec["ids"])
+        except Exception as e:
+            logger.warning(f"读取向量索引失败，跳过同步: {e}")
+            return
+
+        # 向量索引为空，全量重建
+        if not vec_chunk_ids:
+            logger.info(f"向量索引为空，全量重建中...")
+            count = self.rebuild_vector_index(self._vector_index)
+            logger.info(f"向量索引重建完成：{count} 条")
+            return
+
+        # 数量匹配，可能一致
+        if len(vec_chunk_ids) == db_chunk_count:
+            # 进一步检查 ID 集合
+            with self._conn() as conn:
+                db_ids = set(row[0] for row in conn.execute("SELECT id FROM chunks").fetchall())
+            if vec_chunk_ids == db_ids:
+                return  # 完全一致
+            # ID 不一致但数量相同，按增量修复
+            logger.info("向量索引数量匹配但 ID 不一致，增量修复中...")
+
+        # 获取数据库 ID 集合
+        with self._conn() as conn:
+            db_ids = set(row[0] for row in conn.execute("SELECT id FROM chunks").fetchall())
+
+        expired_ids = vec_chunk_ids - db_ids
+        missing_ids = db_ids - vec_chunk_ids
+
+        if not expired_ids and not missing_ids:
+            return  # 一致
+
+        # 全部过期 → 全量重建（避免逐个删除慢）
+        if len(expired_ids) == len(vec_chunk_ids):
+            logger.info(
+                f"向量索引清理 {len(vec_chunk_ids)} 条过期 chunk，从数据库全量重建中..."
+            )
+            count = self.rebuild_vector_index(self._vector_index)
+            logger.info(f"向量索引重建完成：{count} 条")
+            return
+
+        # 增量修复：先删除过期，再补充缺失
+        if expired_ids:
+            logger.info(f"向量索引删除 {len(expired_ids)} 条过期 chunk...")
+            # chromadb delete 支持批量
+            expired_list = list(expired_ids)
+            batch_size = 500
+            for i in range(0, len(expired_list), batch_size):
+                batch = expired_list[i:i + batch_size]
+                try:
+                    self._vector_index._collection.delete(ids=batch)
+                except Exception as e:
+                    logger.warning(f"批量删除向量失败（{len(batch)} 条）: {e}")
+
+        if missing_ids:
+            logger.info(f"向量索引补充 {len(missing_ids)} 条缺失 chunk...")
+            with self._conn() as conn:
+                placeholders = ",".join("?" * len(missing_ids))
+                rows = conn.execute(
+                    f"SELECT id, doc_id, content FROM chunks WHERE id IN ({placeholders})",
+                    list(missing_ids),
+                ).fetchall()
+            chunks_to_add = [
+                {"chunk_id": r["id"], "doc_id": r["doc_id"], "content": r["content"]}
+                for r in rows
+            ]
+            try:
+                self._vector_index.add_chunks_batch(chunks_to_add)
+            except Exception as e:
+                logger.warning(f"补充向量失败（{len(chunks_to_add)} 条）: {e}")
+
+        logger.info(
+            f"向量索引同步完成：删除 {len(expired_ids)} 过期，补充 {len(missing_ids)} 缺失"
+        )
 
     # ---- 初始化 ----
 
@@ -154,6 +269,8 @@ class Storage:
                     start_char    INTEGER DEFAULT 0,
                     end_char      INTEGER DEFAULT 0,
                     parent_content TEXT DEFAULT '',
+                    page_num      INTEGER DEFAULT 0,
+                    heading       TEXT DEFAULT '',
                     created_at    TEXT NOT NULL,
                     FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
                 );
@@ -182,6 +299,11 @@ class Storage:
             chunk_col_names = {c["name"] for c in chunk_cols}
             if "parent_content" not in chunk_col_names:
                 conn.execute("ALTER TABLE chunks ADD COLUMN parent_content TEXT DEFAULT ''")
+            # 迁移：给 chunks 表加 page_num / heading 列（PDF 结构感知分块用）
+            if "page_num" not in chunk_col_names:
+                conn.execute("ALTER TABLE chunks ADD COLUMN page_num INTEGER DEFAULT 0")
+            if "heading" not in chunk_col_names:
+                conn.execute("ALTER TABLE chunks ADD COLUMN heading TEXT DEFAULT ''")
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -282,14 +404,17 @@ class Storage:
             conn.executemany(
                 """
                 INSERT INTO chunks
-                    (id, doc_id, index_in_doc, content, token_count, start_char, end_char, parent_content, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, doc_id, index_in_doc, content, token_count, start_char, end_char, parent_content, page_num, heading, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         f"{doc_id}_{c.index}", doc_id, c.index, c.content,
                         c.token_count, c.start_char, c.end_char,
-                        getattr(c, "parent_content", ""), now,
+                        getattr(c, "parent_content", ""),
+                        getattr(c, "page_num", 0),
+                        getattr(c, "heading", ""),
+                        now,
                     )
                     for c in chunks
                 ],
@@ -347,8 +472,10 @@ class Storage:
                 "SELECT * FROM chunks WHERE doc_id = ? ORDER BY index_in_doc",
                 (doc_id,),
             ).fetchall()
-        return [
-            ChunkRecord(
+        result: list[ChunkRecord] = []
+        for r in rows:
+            keys = r.keys()
+            result.append(ChunkRecord(
                 id=r["id"],
                 doc_id=r["doc_id"],
                 index=r["index_in_doc"],
@@ -356,10 +483,11 @@ class Storage:
                 token_count=r["token_count"],
                 start_char=r["start_char"],
                 end_char=r["end_char"],
-                parent_content=r["parent_content"] if "parent_content" in r.keys() else "",
-            )
-            for r in rows
-        ]
+                parent_content=r["parent_content"] if "parent_content" in keys else "",
+                page_num=r["page_num"] if "page_num" in keys else 0,
+                heading=r["heading"] if "heading" in keys else "",
+            ))
+        return result
 
     def get_documents_batch(self, doc_ids: List[str]) -> Dict[str, DocumentRecord]:
         """批量查询多个文档的元数据（避免 N+1 查询）。
@@ -399,6 +527,46 @@ class Storage:
             end_char=row["end_char"],
             parent_content=row["parent_content"] if "parent_content" in row.keys() else "",
         )
+
+    def get_first_chunks_batch(self, doc_ids: List[str]) -> Dict[str, ChunkRecord]:
+        """批量获取多个文档的第一个分块(避免 N+1 查询)。
+
+        Args:
+            doc_ids: 文档 ID 列表
+
+        Returns:
+            {doc_id: ChunkRecord} 字典(无分块的文档不出现在结果中)
+        """
+        if not doc_ids:
+            return {}
+        # 用 GROUP BY/MIN 取每个 doc_id 的最小 index_in_doc 行
+        # SQLite 支持 MIN() 选项 + 子查询取完整行
+        with self._conn() as conn:
+            placeholders = ",".join("?" * len(doc_ids))
+            rows = conn.execute(
+                f"""SELECT c.* FROM chunks c
+                    INNER JOIN (
+                        SELECT doc_id, MIN(index_in_doc) AS min_idx
+                        FROM chunks
+                        WHERE doc_id IN ({placeholders})
+                        GROUP BY doc_id
+                    ) m ON c.doc_id = m.doc_id AND c.index_in_doc = m.min_idx
+                """,
+                doc_ids,
+            ).fetchall()
+        return {
+            r["doc_id"]: ChunkRecord(
+                id=r["id"],
+                doc_id=r["doc_id"],
+                index=r["index_in_doc"],
+                content=r["content"],
+                token_count=r["token_count"],
+                start_char=r["start_char"],
+                end_char=r["end_char"],
+                parent_content=r["parent_content"] if "parent_content" in r.keys() else "",
+            )
+            for r in rows
+        }
 
     def search_chunks(self, keyword: str, limit: int = 20) -> List[ChunkRecord]:
         """关键词搜索分块（LIKE 模糊匹配，P2 会换成向量检索）。"""
@@ -507,13 +675,14 @@ class Storage:
         doc_ids = list({r.doc_id for r in results})
 
         with self._conn() as conn:
-            # 查 chunk 内容
+            # 查 chunk 内容和章节标题
             placeholders = ",".join("?" * len(chunk_ids))
             rows = conn.execute(
-                f"SELECT id, content FROM chunks WHERE id IN ({placeholders})",
+                f"SELECT id, content, heading FROM chunks WHERE id IN ({placeholders})",
                 chunk_ids,
             ).fetchall()
             chunk_content = {r["id"]: r["content"] for r in rows}
+            chunk_heading = {r["id"]: (r["heading"] or "") for r in rows}
 
             # 查文档标题
             placeholders = ",".join("?" * len(doc_ids))
@@ -532,6 +701,7 @@ class Storage:
                 continue
             r.content = content
             r.doc_title = doc_title.get(r.doc_id, "")
+            r.heading = chunk_heading.get(r.chunk_id, "")
             filled.append(r)
 
         # 精确匹配重排序：对包含查询区分性词的结果加分
@@ -581,13 +751,33 @@ class Storage:
         if len(query_tokens) < 2:
             return results  # 查询太短，无法识别区分性词
 
-        # 统计每个 token 在结果中出现的频率
+        # 对每个结果的 content 做分词，生成 token 集合（避免子串误匹配）
+        # 原来用 `tok in content` 子串匹配会跨词边界误命中：
+        #   "养老" in "养老保险基金" → True（语义无关）
+        # 改为 token 集合包含判断，更精确
+        #
+        # PDF rerank 增强：注入 doc_title + heading 前缀
+        # PDF chunk content 可能不含文档标题/章节标题词，导致 reranker 无法匹配
+        # 查询中的标题词。注入后 token 集合扩展，让 reranker 能识别"查询词出现在
+        # 文档标题/章节标题"的情况。对 xlsx 等已有 doc_title 在 content 中的格式，
+        # 集合去重使其成为 no-op（安全无副作用）。
+        result_token_sets: list[set[str]] = []
+        for r in results:
+            content = getattr(r, content_attr, "") or ""
+            doc_title = getattr(r, "doc_title", "") or ""
+            heading = getattr(r, "heading", "") or ""
+            if doc_title or heading:
+                expanded = f"{doc_title} {heading} {content}".strip()
+                result_token_sets.append(set(tokenize(expanded)))
+            else:
+                result_token_sets.append(set(tokenize(content)))
+
+        # 统计每个 query token 在结果中出现的频率
         total = len(results)
         token_doc_count: Dict[str, int] = {tok: 0 for tok in query_tokens}
-        for r in results:
-            content = (getattr(r, content_attr, "") or "").lower()
+        for tok_set in result_token_sets:
             for tok in query_tokens:
-                if tok in content:
+                if tok in tok_set:
                     token_doc_count[tok] += 1
 
         # 识别区分性词：至少出现1次，但出现率 < 70%
@@ -602,9 +792,9 @@ class Storage:
             return results  # 没有区分性词，不重排序
 
         # 对每个结果计算区分性词匹配率，调整 score
-        for r in results:
-            content = (getattr(r, content_attr, "") or "").lower()
-            matched = sum(1 for tok in distinctive_tokens if tok in content)
+        for i, r in enumerate(results):
+            tok_set = result_token_sets[i]
+            matched = sum(1 for tok in distinctive_tokens if tok in tok_set)
             match_ratio = matched / len(distinctive_tokens)
             old_score = getattr(r, score_attr)
             setattr(r, score_attr, old_score * (0.5 + match_ratio))
@@ -636,10 +826,13 @@ class Storage:
         with self._conn() as conn:
             placeholders = ",".join("?" * len(chunk_ids))
             rows = conn.execute(
-                f"SELECT id, content, index_in_doc FROM chunks WHERE id IN ({placeholders})",
+                f"SELECT id, content, index_in_doc, heading FROM chunks WHERE id IN ({placeholders})",
                 chunk_ids,
             ).fetchall()
-            chunk_map = {r["id"]: (r["content"], r["index_in_doc"]) for r in rows}
+            chunk_map = {
+                r["id"]: (r["content"], r["index_in_doc"], r["heading"] or "")
+                for r in rows
+            }
 
             doc_title = {}
             doc_file_type: Dict[str, str] = {}
@@ -678,6 +871,7 @@ class Storage:
                 continue
             r.content = entry[0]
             r.paragraph_num = entry[1] + 1  # 0-based → 1-based 段落号
+            r.heading = entry[2]
             r.doc_title = doc_title.get(r.doc_id, "") or r.doc_title
             # 从 file_type 映射 format_tag
             ft = doc_file_type.get(r.doc_id, "")

@@ -66,11 +66,17 @@ def _create_pet_administrator():
 
 
 def _setup_logging() -> None:
-    """配置日志（basicConfig，幂等）。"""
+    """配置日志(basicConfig,幂等)。
+
+    安全:强制输出到 stderr,避免与 stdout 的 JSON 协议混合
+    (Electron 主进程解析 stdout 的 JSON 行,日志混入会导致 JSON.parse 失败)。
+    """
+    import sys
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
+        stream=sys.stderr,
     )
 
 

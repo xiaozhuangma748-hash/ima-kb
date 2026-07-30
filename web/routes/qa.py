@@ -18,16 +18,14 @@ from services.qa_service import QAService
 router = APIRouter(tags=["qa"])
 
 
-def _build_sse_event(event_type: str, data: dict) -> str:
-    """构造 SSE 事件字符串。"""
-    payload = json.dumps(data, ensure_ascii=False)
-    return f"event: {event_type}\ndata: {payload}\n\n"
-
-
 @router.post("/qa/stream")
 async def qa_stream(request: Request):
-    """SSE 流式问答。"""
-    from web.app import _get_shared_storage, _get_shared_vector_index
+    """SSE 流式问答。
+
+    所有错误响应统一用 SSE 格式（data: {"type":"error","message":"..."}\n\n），
+    因为前端 qa.js 用 fetch + ReadableStream 解析，不处理 JSON 响应。
+    """
+    from web.app import _get_shared_storage, _get_shared_vector_index, _get_shared_hybrid_retriever
 
     body = await request.json()
     question = body.get("question", "").strip()
@@ -36,21 +34,23 @@ async def qa_stream(request: Request):
     persona = body.get("persona", "").strip() or None
 
     if not question:
-        return {"error": "请输入问题"}
+        return StreamingResponse(_sse_error("请输入问题"), media_type="text/event-stream")
 
     # 通过 QAService 统一组装，复用 Web 共享组件
     storage = _get_shared_storage(request.app)
     vector_index = _get_shared_vector_index(request.app)
+    hybrid_retriever = _get_shared_hybrid_retriever(request.app)
 
     service = QAService(
         storage=storage,
         vector_index=vector_index,
+        hybrid_retriever=hybrid_retriever,
     )
 
     if not service.has_pet:
-        return {"error": "请先领养宠物"}
+        return StreamingResponse(_sse_error("请先领养宠物"), media_type="text/event-stream")
     if not service.is_ready:
-        return {"error": "LLM 不可用，请检查配置"}
+        return StreamingResponse(_sse_error("LLM 不可用，请检查配置"), media_type="text/event-stream")
 
     async def event_stream():
         """异步 SSE 流：同步生成器放到线程中运行，不阻塞 event loop。
@@ -128,7 +128,12 @@ async def qa_stream(request: Request):
 
 
 def _sse_error(message: str):
-    """返回 SSE 格式的错误流。"""
+    """返回 SSE 格式的错误流。
+
+    格式与 event_stream 内部事件一致：data 字段为 {"type":"error","message":"..."}，
+    前端 qa.js 只解析 data 行（不解析 event 行），所以 type 必须放在 data 里。
+    """
     async def _stream():
-        yield _build_sse_event("error", {"message": message})
+        payload = json.dumps({"type": "error", "message": message}, ensure_ascii=False)
+        yield f"data: {payload}\n\n"
     return _stream()

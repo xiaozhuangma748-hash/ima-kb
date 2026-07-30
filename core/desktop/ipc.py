@@ -53,6 +53,11 @@ class IpcServer:
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind(SOCKET_PATH)
+        # 安全:限制 socket 仅当前用户可访问(默认 755 会让同机其他用户可连接)
+        try:
+            os.chmod(SOCKET_PATH, 0o600)
+        except OSError:
+            pass
         self._sock.listen(5)
         self._sock.settimeout(0.5)
         self._running = True

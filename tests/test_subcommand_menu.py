@@ -15,6 +15,29 @@ import repl as repl_module
 from repl import REPL
 from rich.prompt import Prompt
 
+# _prompt_subcmd_params 实际用的是 core.cli.repl._repl_input（prompt_toolkit）
+# 而非 Prompt.ask，统一 patch 到正确位置
+_REPL_INPUT_PATH = "core.cli.repl._repl_input"
+
+
+def _patch_repl_input(monkeypatch, return_values):
+    """把 _repl_input 替换为按顺序返回 return_values 的 stub。
+
+    return_values 可以是单值（每次返回同样）或列表（按调用顺序返回）。
+    """
+    if isinstance(return_values, (list, tuple)):
+        it = iter(return_values)
+
+        def _stub(*a, **kw):
+            try:
+                return next(it)
+            except StopIteration:
+                return ""
+    else:
+        def _stub(*a, **kw):
+            return return_values
+    monkeypatch.setattr(_REPL_INPUT_PATH, _stub)
+
 
 def _make_repl(tmp_path, monkeypatch):
     """构建最小化的 REPL 实例（不真正初始化所有依赖）。"""
@@ -110,7 +133,7 @@ def test_show_menu_select_no_subcmd_items(tmp_path, monkeypatch):
 def test_show_menu_placeholder_prompts_for_input(tmp_path, monkeypatch):
     """_prompt_subcmd_params 带占位符应提示输入参数。"""
     repl = _make_repl(tmp_path, monkeypatch)
-    monkeypatch.setattr(Prompt, "ask", lambda *a, **kw: "殡葬政策")
+    _patch_repl_input(monkeypatch, "殡葬政策")
     result = repl._prompt_subcmd_params("/memory", "topic add <主题>")
     assert result == "topic add 殡葬政策"
 
@@ -118,11 +141,8 @@ def test_show_menu_placeholder_prompts_for_input(tmp_path, monkeypatch):
 def test_show_menu_choices_placeholder_validates(tmp_path, monkeypatch):
     """_prompt_subcmd_params 有固定选项应验证输入。"""
     repl = _make_repl(tmp_path, monkeypatch)
-    call_count = [0]
-    def fake_ask(*a, **kw):
-        call_count[0] += 1
-        return "table" if call_count[0] > 1 else "3"
-    monkeypatch.setattr(Prompt, "ask", fake_ask)
+    # 第一次输入无效值 "3"，第二次输入有效值 "table"
+    _patch_repl_input(monkeypatch, ["3", "table"])
     result = repl._prompt_subcmd_params("/memory", "format <格式|table|list|prose|auto|none>")
     assert result == "format table"
 
@@ -130,7 +150,7 @@ def test_show_menu_choices_placeholder_validates(tmp_path, monkeypatch):
 def test_show_menu_choices_placeholder_accepts_valid(tmp_path, monkeypatch):
     """_prompt_subcmd_params 有固定选项接受有效值。"""
     repl = _make_repl(tmp_path, monkeypatch)
-    monkeypatch.setattr(Prompt, "ask", lambda *a, **kw: "list")
+    _patch_repl_input(monkeypatch, "list")
     result = repl._prompt_subcmd_params("/memory", "format <格式|table|list|prose|auto|none>")
     assert result == "format list"
 
@@ -138,7 +158,7 @@ def test_show_menu_choices_placeholder_accepts_valid(tmp_path, monkeypatch):
 def test_show_menu_choices_placeholder_empty_cancels(tmp_path, monkeypatch):
     """_prompt_subcmd_params 有固定选项空输入应取消。"""
     repl = _make_repl(tmp_path, monkeypatch)
-    monkeypatch.setattr(Prompt, "ask", lambda *a, **kw: "")
+    _patch_repl_input(monkeypatch, "")
     result = repl._prompt_subcmd_params("/memory", "format <格式|table|list|prose|auto|none>")
     assert result is None
 
@@ -146,7 +166,7 @@ def test_show_menu_choices_placeholder_empty_cancels(tmp_path, monkeypatch):
 def test_prompt_subcmd_params_directly(tmp_path, monkeypatch):
     """直接测试 _prompt_subcmd_params。"""
     repl = _make_repl(tmp_path, monkeypatch)
-    monkeypatch.setattr(Prompt, "ask", lambda *a, **kw: "测试主题")
+    _patch_repl_input(monkeypatch, "测试主题")
     result = repl._prompt_subcmd_params("/memory", "topic add <主题>")
     assert result == "topic add 测试主题"
 
@@ -154,7 +174,7 @@ def test_prompt_subcmd_params_directly(tmp_path, monkeypatch):
 def test_prompt_subcmd_params_choices(tmp_path, monkeypatch):
     """_prompt_subcmd_params 有选项的占位符。"""
     repl = _make_repl(tmp_path, monkeypatch)
-    monkeypatch.setattr(Prompt, "ask", lambda *a, **kw: "table")
+    _patch_repl_input(monkeypatch, "table")
     result = repl._prompt_subcmd_params("/memory", "format <格式|table|list|prose|auto|none>")
     assert result == "format table"
 

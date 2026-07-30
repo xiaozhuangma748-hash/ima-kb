@@ -36,6 +36,7 @@ class QAService:
         llm: Optional[LLMClient] = None,
         memory_store: Optional[MemoryStore] = None,
         todo_manager: Optional[TodoManager] = None,
+        hybrid_retriever: Optional[HybridRetriever] = None,
     ) -> None:
         """初始化问答服务。
 
@@ -45,6 +46,7 @@ class QAService:
             llm: LLM 客户端（不传则自动创建）
             memory_store: 记忆存储（不传则自动创建）
             todo_manager: 待办管理器（可选）
+            hybrid_retriever: 混合检索器(不传则自动创建;Web 端应传共享实例以复用 SemanticCache)
         """
         self.storage = storage or Storage()
 
@@ -85,12 +87,15 @@ class QAService:
             except Exception as e:
                 logger.warning(f"Reranker 初始化失败: {e}")
 
-        # HybridRetriever
-        self.hybrid = HybridRetriever(
-            bm25_index=self.storage.bm25,
-            vector_index=self.vector_index,
-            storage=self.storage,
-        )
+        # HybridRetriever(优先用传入的共享实例,避免重建 SemanticCache)
+        if hybrid_retriever is not None:
+            self.hybrid = hybrid_retriever
+        else:
+            self.hybrid = HybridRetriever(
+                bm25_index=self.storage.bm25,
+                vector_index=self.vector_index,
+                storage=self.storage,
+            )
 
         # PetAdministrator
         self.administrator: Optional[PetAdministrator] = None

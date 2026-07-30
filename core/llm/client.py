@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import threading
 import time
 from typing import Iterator, List, Optional
 
@@ -148,13 +149,16 @@ class LLMClient:
             raise LLMError(f"LLM 流式调用失败: {type(e).__name__}: {e}") from e
 
 
-# 模块级单例（首次访问时创建）
+# 模块级单例（首次访问时创建,线程安全)
 _client: Optional[LLMClient] = None
+_client_lock = threading.Lock()
 
 
 def get_llm() -> LLMClient:
-    """获取 LLM 客户端单例。"""
+    """获取 LLM 客户端单例(线程安全)。"""
     global _client
     if _client is None:
-        _client = LLMClient()
+        with _client_lock:
+            if _client is None:
+                _client = LLMClient()
     return _client

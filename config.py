@@ -44,8 +44,8 @@ class Settings:
     )
 
     # ---- 分块 ----
-    chunk_size: int = field(default_factory=lambda: int(_get_env("CHUNK_SIZE", "512")))
-    chunk_overlap: int = field(default_factory=lambda: int(_get_env("CHUNK_OVERLAP", "64")))
+    chunk_size: int = field(default_factory=lambda: int(_get_env("CHUNK_SIZE", "768")))
+    chunk_overlap: int = field(default_factory=lambda: int(_get_env("CHUNK_OVERLAP", "96")))
 
     # ---- Contextual Retrieval（Anthropic 2024）----
     # 入库时为每个 chunk 用 LLM 生成 50-100 字文档级摘要前缀到 content
@@ -98,6 +98,19 @@ class Settings:
     reranker_model: str = field(default_factory=lambda: _get_env("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"))
     # 重排序候选数（top_n）：最终返回给 LLM 的资料条数
     reranker_top_n: int = field(default_factory=lambda: int(_get_env("RERANKER_TOP_N", "5")))
+
+    # ---- 低置信度硬拒答 ----
+    # 检索 top1 score 低于此值时直接返回"无法回答"，不调用 LLM
+    # 用于避免 negative 类（知识库里没有的问题）硬塞不相关文档给 LLM 产生幻觉
+    # 区别于 prompt 提示阈值（DEFAULT_CONFIDENCE_THRESHOLD=0.05）：那个只在 prompt 加提示，LLM 仍生成
+    reject_confidence_threshold: float = field(default_factory=lambda: float(_get_env("REJECT_CONFIDENCE_THRESHOLD", "0.15")))
+
+    # ---- 版面分析（扫描件/图片结构化）----
+    # 启用后对图片和扫描 PDF 使用 PaddleX layout_parsing pipeline，
+    # 保留标题/正文/表格分区结构，表格转 Markdown，显著提升结构化检索准确率。
+    # 关闭后回退到纯 OCR 文本提取（_ocr_image）。
+    # CPU 模式下首次推理较慢（模型加载 + 推理约 10-15 秒/页）。
+    enable_layout_parsing: bool = field(default_factory=lambda: _get_env("ENABLE_LAYOUT_PARSING", "1") == "1")
 
     @property
     def uploads_dir(self) -> Path:

@@ -9,7 +9,7 @@ from __future__ import annotations
 import tempfile
 import shutil
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, UploadFile, File, Request
 from pydantic import BaseModel
@@ -27,32 +27,53 @@ async def ingest_upload(request: Request, files: List[UploadFile] = File(...)):
 
     storage = _get_shared_storage(request.app)
     service = IngestService(storage=storage)
+    # 上传文件大小上限(字节): 100MB,防止 OOM
+    MAX_UPLOAD_SIZE = 100 * 1024 * 1024
+
     results = []
     for f in files:
-        original_name = f.filename or "unknown"
-        suffix = Path(original_name).suffix
+        raw_name = f.filename or "unknown"
+        # 安全:取纯文件名,防止路径遍历(../.. / 绝对路径)
+        safe_name = Path(raw_name).name
+        if not safe_name or safe_name in (".", ".."):
+            safe_name = "unknown"
+        suffix = Path(safe_name).suffix
+        tmp_path: Optional[Path] = None
         try:
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                content = await f.read()
-                tmp.write(content)
+                # 流式落盘,避免大文件 OOM
+                total = 0
+                while True:
+                    chunk = await f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_UPLOAD_SIZE:
+                        raise ValueError(f"文件超过大小限制 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+                    tmp.write(chunk)
                 tmp_path = Path(tmp.name)
         except Exception as e:
             results.append({
-                "filename": original_name, "status": "failed",
+                "filename": safe_name, "status": "failed",
                 "error": f"保存临时文件失败: {e}", "error_type": "unknown",
             })
+            if tmp_path:
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
             continue
 
-        # 保留一份到 quick 目录
+        # 保留一份到 quick 目录(使用安全文件名)
         quick_dir = Path(settings.storage_path) / "uploads" / "quick"
         quick_dir.mkdir(parents=True, exist_ok=True)
-        dest = quick_dir / original_name
+        dest = quick_dir / safe_name
         try:
             shutil.copy(tmp_path, dest)
         except Exception:
             pass
 
-        result = service.ingest_file(tmp_path, original_name=original_name)
+        result = service.ingest_file(tmp_path, original_name=safe_name)
         results.append({
             "filename": result.filename,
             "status": result.status,

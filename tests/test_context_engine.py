@@ -101,11 +101,13 @@ class TestTokenBudget:
 
     def test_retrieval_truncation_by_score(self):
         """检索结果超预算时按 score 保留高分。"""
+        # tiktoken 下 "a"*1000 ≈ 125 token，3 条共 375 token
+        # total=300 → retrieval_budget ≈ 134，能保留 c1+c2，c3 被截断
         budget = TokenBudget(total=300)  # 小预算触发截断
         results = [
-            self._make_result("a" * 200, 0.9, "c1"),
-            self._make_result("b" * 200, 0.5, "c2"),
-            self._make_result("c" * 200, 0.3, "c3"),
+            self._make_result("a" * 1000, 0.9, "c1"),
+            self._make_result("b" * 1000, 0.5, "c2"),
+            self._make_result("c" * 1000, 0.3, "c3"),
         ]
         _, truncated = budget.allocate(
             system_prompt="系统",
@@ -184,8 +186,11 @@ class TestTokenBudget:
 # chain.py 上下文组装测试
 # ============================================================
 
-def _make_mock_result(content="资料内容", score=0.1, chunk_id="c1", doc_id="d1"):
-    """构造完整的 mock HybridResult。"""
+def _make_mock_result(content="资料内容", score=0.5, chunk_id="c1", doc_id="d1"):
+    """构造完整的 mock HybridResult。
+
+    score 默认 0.5（高于硬拒答阈值 0.15），避免干扰上下文组装测试。
+    """
     r = MagicMock()
     r.content = content
     r.score = score

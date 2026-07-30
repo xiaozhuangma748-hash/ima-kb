@@ -376,6 +376,22 @@ class RAGChain:
         # 4. 确定最终使用的结果
         final_results = reranked if reranked else results
 
+        # 4.1 低置信度硬拒答：top1 score 低于阈值时直接返回"无法回答"
+        # 避免 negative 类（知识库里没有的问题）硬塞不相关文档给 LLM 产生幻觉
+        # 区别于 prompt 提示阈值（DEFAULT_CONFIDENCE_THRESHOLD=0.05）：那个只在 prompt 加提示，LLM 仍生成
+        reject_threshold = getattr(settings, "reject_confidence_threshold", 0.15)
+        if final_results:
+            max_score = max((getattr(r, "score", 0.0) for r in final_results), default=0.0)
+            if max_score < reject_threshold:
+                return Answer(
+                    question=question,
+                    content="根据现有资料无法回答该问题。知识库中未找到与您问题相关的内容，建议入库相关文档后再试。",
+                    retrieved=final_results,
+                    reranked=reranked,
+                    confidence=max_score,
+                    low_confidence=True,
+                )
+
         # 4.5 Parent-Document 上下文扩展
         # 重排后附加，避免 parent context 干扰重排打分
         if self.storage is not None and getattr(settings, "parent_window", 0) > 0:
@@ -589,6 +605,14 @@ class RAGChain:
                 pass
 
         final_results = reranked if reranked else results
+
+        # 3.1 低置信度硬拒答：top1 score 低于阈值时直接返回"无法回答"
+        reject_threshold = getattr(settings, "reject_confidence_threshold", 0.15)
+        if final_results:
+            max_score = max((getattr(r, "score", 0.0) for r in final_results), default=0.0)
+            if max_score < reject_threshold:
+                yield "根据现有资料无法回答该问题。知识库中未找到与您问题相关的内容，建议入库相关文档后再试。"
+                return
 
         # 3.5 Parent-Document 上下文扩展
         if self.storage is not None and getattr(settings, "parent_window", 0) > 0:

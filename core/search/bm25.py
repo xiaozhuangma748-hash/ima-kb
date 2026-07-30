@@ -28,12 +28,63 @@ jieba.setLogLevel(jieba.logging.WARNING)
 from config import settings
 
 
+# ---- 机构名词典（加载一次，提升专有名词切分准确度）----
+_user_dict_loaded = False
+
+# 项目内置的机构名/术语词典（殡葬领域专有名词）
+_BIZ_USER_DICT_PATH = Path(__file__).resolve().parent.parent.parent / "storage" / "user_dict.txt"
+
+# 内置词典内容（若文件不存在则用代码内置）
+_BUILTIN_TERMS = [
+    # 行政区划
+    "拱墅区", "余杭区", "钱塘区", "临平区", "滨江区", "萧山区", "上城区", "西湖区",
+    "杭州市", "浙江省", "上海市",
+    # 街道/社区
+    "白杨街道", "晨光社区",
+    # 机构全称
+    "居家养老服务照料中心", "养老服务照料中心", "照料中心",
+    "殡葬服务中心", "殡仪服务中心", "殡仪馆",
+    "民政局", "财政厅", "民政厅",
+    # 殡葬术语
+    "骨灰安置", "骨灰寄存", "骨灰撒海", "节地生态安葬", "生态安葬",
+    "身后事", "身后一件事", "一件事",
+    "遗体接运", "遗体火化", "遗体告别",
+    "白事服务", "殡葬服务", "殡仪服务",
+    "公益性墓地", "经营性墓地", "骨灰堂",
+    "奖补政策", "奖补标准",
+]
+
+
+def _load_user_dict() -> None:
+    """加载用户词典（机构名/术语），提升 jieba 对专有名词的切分准确度。
+
+    优先加载 storage/user_dict.txt（用户可自行扩展），叠加内置术语。
+    只加载一次（线程安全由 GIL 保证）。
+    """
+    global _user_dict_loaded
+    if _user_dict_loaded:
+        return
+
+    # 1. 加载内置术语
+    for term in _BUILTIN_TERMS:
+        jieba.add_word(term)
+
+    # 2. 加载用户扩展词典（若存在）
+    if _BIZ_USER_DICT_PATH.exists():
+        try:
+            jieba.load_userdict(str(_BIZ_USER_DICT_PATH))
+        except Exception:
+            pass  # 词典加载失败不影响主流程
+
+    _user_dict_loaded = True
+
+
 # ---- jieba 懒加载 ----
 _jieba_ready: bool = False
 
 
 def _ensure_jieba() -> None:
-    """懒加载 jieba 并静默完成字典初始化。"""
+    """懒加载 jieba 并静默完成字典初始化 + 加载用户词典。"""
     global _jieba_ready
     if _jieba_ready:
         return
@@ -41,6 +92,7 @@ def _ensure_jieba() -> None:
     import io
     with redirect_stdout(io.StringIO()):
         list(jieba.cut(""))
+    _load_user_dict()  # 加载机构名词典
     _jieba_ready = True
 
 
@@ -79,9 +131,10 @@ def tokenize(text: str) -> List[str]:
 
     改进点（提升召回率 + 精确率）：
     - 先做 NFKC 归一化（全角→半角）+ 英文小写，消除格式差异
-    - 同时用搜索引擎模式（cut_for_search）和全模式（cut_all=True），
-      取两者 token 并集。全模式会切出所有可能的词组合，覆盖更细粒度的切分，
-      提升召回率（可能引入噪音，但 BM25 的 IDF 会自动降低无意义词的权重）
+    - 加载机构名词典（居家养老服务照料中心等），避免专有名词被错误切分
+    - 用搜索引擎模式（cut_for_search）：精确切分 + 对长词再切分，召回率足够
+    - 去掉了 cut_all=True 全模式路径：全模式会切出"家养"等噪音词（从"居家养老"
+      中错误切出），降低长机构名查询的精确率。cut_for_search 已足够覆盖细粒度切分。
     - 过滤停用词和单字符标点
     - bigram 短语匹配：基于精确模式（jieba.cut）的有序 token 生成相邻 bigram，
       让"晨光社区"作为"晨光_社区"整体参与匹配。bigram 的 IDF 天然更高
@@ -108,11 +161,8 @@ def tokenize(text: str) -> List[str]:
             seen.add(tok)
             tokens.append(tok)
 
-    # 搜索引擎模式：精确切分 + 对长词再切分
+    # 搜索引擎模式：精确切分 + 对长词再切分（覆盖足够，不引入全模式噪音）
     for tok in jieba.cut_for_search(text):
-        _add(tok)
-    # 全模式：列出所有可能的词组合，补充搜索引擎模式遗漏的切分
-    for tok in jieba.cut(text, cut_all=True):
         _add(tok)
 
     # bigram 短语匹配：用精确模式的有序 token 生成相邻 bigram
@@ -165,6 +215,7 @@ class SearchResult:
     score: float
     content: str = ""               # 由调用方填充
     doc_title: str = ""             # 由调用方填充
+    heading: str = ""               # 所属章节标题（由调用方填充，PDF rerank 用）
 
 
 class BM25Index:
@@ -304,6 +355,11 @@ class BM25Index:
                 # 注意：bigram（含下划线）和多字 token 不受影响
                 if len(qt) == 1:
                     idf *= 0.6
+                # 高频双字 token 降权：doc_freq > N*0.5 的双字词（如"中心""服务""养老"）
+                # 在政务文档中极常见，累加分数会干扰精确查询排名。乘 0.8 系数。
+                # bigram（含下划线）和低频双字词不受影响
+                elif len(qt) == 2 and "_" not in qt and n_qi > N * 0.5 and N > 10:
+                    idf *= 0.8
                 for cid in postings:
                     entry = self._docs.get(cid)
                     if entry is None:
