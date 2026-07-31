@@ -471,6 +471,7 @@ class RAGChain:
 
         # 6.1 Self-RAG 答案验证：逐句检查答案是否被资料支持
         # 幻觉句子标注 ⚠️ 未经资料支持，失败回退原答案
+        verify_result: Optional[VerificationResult] = None
         if self.self_verifier is not None and content.strip():
             try:
                 snippets_for_verify = [r.content or "" for r in final_results[:5]]
@@ -531,7 +532,7 @@ class RAGChain:
                 import logging
                 logging.getLogger(__name__).warning(f"RAGChain 答案缓存写入失败，忽略: {e}")
 
-        return Answer(
+        answer_obj = Answer(
             question=question,
             content=content,
             citations=citations,
@@ -540,6 +541,10 @@ class RAGChain:
             confidence=confidence,
             low_confidence=low_conf,
         )
+        # 挂载 Self-RAG 验证结果供 AgenticRAGChain 判断是否需要重检索
+        # 不影响现有行为（Answer dataclass 未声明此字段，仅作为运行时属性）
+        answer_obj._verify_result = verify_result
+        return answer_obj
 
     def ask_stream(
         self,

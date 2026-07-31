@@ -24,7 +24,7 @@
 **Files:**
 - Create: `tests/eval/test_eval_answer.py`
 
-- [ ] **Step 1: 编写评测脚本的单元测试**
+- [x] **Step 1: 编写评测脚本的单元测试**
 
 ```python
 """端到端回答评测脚本的单元测试。
@@ -127,13 +127,13 @@ def test_judge_prompt_contains_required_fields():
     assert "JSON" in user_content  # 要求 LLM 返回 JSON
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/eval/test_eval_answer.py -v`
 
 Expected: 6 个测试全部 FAIL，因为 `scripts/eval_answer.py` 不存在，`from scripts.eval_answer import ...` 报 ModuleNotFoundError。
 
-- [ ] **Step 3: 创建 scripts/eval_answer.py 最小实现**
+- [x] **Step 3: 创建 scripts/eval_answer.py 最小实现**
 
 ```python
 #!/usr/bin/env python3
@@ -495,13 +495,13 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: 运行测试验证通过**
+- [x] **Step 4: 运行测试验证通过**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/eval/test_eval_answer.py -v`
 
 Expected: 6 个测试全部 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add scripts/eval_answer.py tests/eval/test_eval_answer.py
@@ -516,13 +516,13 @@ git commit -m "feat: 端到端回答准确率评测脚本 + 单元测试
 
 ## Task 2: 跑小批量评测验证脚本可用
 
-- [ ] **Step 1: 跑 5 题快速验证**
+- [x] **Step 1: 跑 5 题快速验证**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && export HF_ENDPOINT=https://hf-mirror.com && python scripts/eval_answer.py --limit 5 --report both`
 
 Expected: 脚本正常跑完 5 题，输出报告，JSON 保存到 `storage/eval_answer_report.json`。每题约 3-10 秒（检索 + 生成 + 裁判），5 题约 15-50 秒。
 
-- [ ] **Step 2: 检查报告内容合理**
+- [x] **Step 2: 检查报告内容合理**
 
 验证：
 - 平均分在 1-5 之间
@@ -531,7 +531,7 @@ Expected: 脚本正常跑完 5 题，输出报告，JSON 保存到 `storage/eval
 
 如果脚本崩溃或指标异常，修复后重新跑。
 
-- [ ] **Step 3: 提交（如有修复）**
+- [x] **Step 3: 提交（如有修复）**
 
 ```bash
 git add scripts/eval_answer.py
@@ -542,13 +542,13 @@ git commit -m "fix: 修复小批量评测中发现的问题"
 
 ## Task 3: 跑全量评测建立基线
 
-- [ ] **Step 1: 跑全量 100 题**
+- [x] **Step 1: 跑全量 100 题**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && export HF_ENDPOINT=https://hf-mirror.com && python scripts/eval_answer.py --report both 2>&1 | tee storage/eval_answer_baseline.log`
 
 Expected: 100 题跑完约 5-15 分钟。输出完整 Markdown 报告 + JSON 报告。**记录基线数据**（平均分、准确率、幻觉率、引用率、negative 类准确率）。
 
-- [ ] **Step 2: 把基线数据写入 docs**
+- [x] **Step 2: 把基线数据写入 docs**
 
 把报告关键数据抄到 plan 文件末尾的"Baseline"小节，格式：
 
@@ -569,7 +569,7 @@ Expected: 100 题跑完约 5-15 分钟。输出完整 Markdown 报告 + JSON 报
 **Files:**
 - Create: `tests/qa/test_low_confidence_reject.py`
 
-- [ ] **Step 1: 编写低置信度拒答测试**
+- [x] **Step 1: 编写低置信度拒答测试**
 
 ```python
 """低置信度拒答机制测试。
@@ -673,13 +673,13 @@ def test_reject_threshold_configurable(tmp_path):
     assert 0 < default_threshold < 1
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/qa/test_low_confidence_reject.py -v`
 
 Expected: `test_low_confidence_triggers_reject` 和 `test_empty_results_triggers_reject` 可能 PASS（因为现有代码已有 `low_conf` 逻辑），但 `test_high_confidence_proceeds_to_llm` 可能因为 mock 配置问题需要调整。具体看失败原因。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add tests/qa/test_low_confidence_reject.py
@@ -694,7 +694,7 @@ git commit -m "test: 低置信度拒答机制测试"
 - Modify: `core/qa/chain.py` (ask 方法中检索后加拒答判断)
 - Modify: `config.py` (加 `reject_confidence_threshold` 配置)
 
-- [ ] **Step 1: 在 config.py 加拒答阈值配置**
+- [x] **Step 1: 在 config.py 加拒答阈值配置**
 
 找到 `core/qa/chain.py` 顶部的 `DEFAULT_CONFIDENCE_THRESHOLD` 定义，确认其值。然后在 `config.py` 的 `Settings` 类中加一个新字段。
 
@@ -708,7 +708,7 @@ Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-
     reject_confidence_threshold: float = 0.15
 ```
 
-- [ ] **Step 2: 在 chain.py 的 ask 方法中加拒答逻辑**
+- [x] **Step 2: 在 chain.py 的 ask 方法中加拒答逻辑**
 
 在 `core/qa/chain.py` 的 `ask` 方法中，找到第 4 步"确定最终使用的结果"之后、"Parent-Document 上下文扩展"之前，加拒答判断：
 
@@ -736,7 +736,7 @@ Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-
                 )
 ```
 
-- [ ] **Step 3: 在 ask_stream 方法中加同样的拒答逻辑**
+- [x] **Step 3: 在 ask_stream 方法中加同样的拒答逻辑**
 
 在 `core/qa/chain.py` 的 `ask_stream` 方法中，找到对应位置（"确定最终使用的结果"之后），加：
 ```python
@@ -749,19 +749,19 @@ Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-
                 return
 ```
 
-- [ ] **Step 4: 运行测试验证通过**
+- [x] **Step 4: 运行测试验证通过**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/qa/test_low_confidence_reject.py -v`
 
 Expected: 4 个测试全部 PASS。如果 `test_high_confidence_proceeds_to_llm` 因 mock 问题失败，调整 mock 配置使其通过。
 
-- [ ] **Step 5: 运行全量测试确认无回归**
+- [x] **Step 5: 运行全量测试确认无回归**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/ --tb=short -q`
 
 Expected: 所有测试通过（730 + 4 新增 = 734）。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add core/qa/chain.py config.py
@@ -776,25 +776,25 @@ git commit -m "feat: 低置信度拒答机制
 
 ## Task 6: 重新跑检索评测验证 negative 类修复
 
-- [ ] **Step 1: 跑检索评测确认 negative 类提升**
+- [x] **Step 1: 跑检索评测确认 negative 类提升**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && export HF_ENDPOINT=https://hf-mirror.com && python scripts/eval_retrieval.py --no-rerank 2>&1 | grep -E "negative|总体|Recall|HitRate"`
 
 Expected: negative 类 HitRate 从 60% 提升到 80%+（因为 q049/q050 会被拒答机制拦住，不再算 MISS）。注意：检索评测脚本本身没有拒答逻辑，所以检索 HitRate 不变；但**端到端评测**会改善。
 
-- [ ] **Step 2: 跑端到端评测对比基线**
+- [x] **Step 2: 跑端到端评测对比基线**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && export HF_ENDPOINT=https://hf-mirror.com && python scripts/eval_answer.py --category negative --report both`
 
 Expected: negative 类准确率显著提升（因为系统现在会诚实回答"无法回答"，而不是编造答案）。
 
-- [ ] **Step 3: 跑全量端到端评测对比基线**
+- [x] **Step 3: 跑全量端到端评测对比基线**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && export HF_ENDPOINT=https://hf-mirror.com && python scripts/eval_answer.py --report both 2>&1 | tee storage/eval_answer_after_reject.log`
 
 Expected: 整体幻觉率下降（negative 类不再编造），准确率持平或略升。
 
-- [ ] **Step 4: 对比数据写入 plan**
+- [x] **Step 4: 对比数据写入 plan**
 
 把对比数据写到 plan 末尾：
 
@@ -808,7 +808,7 @@ Expected: 整体幻觉率下降（negative 类不再编造），准确率持平�
 | negative 类准确率 | XX.X% | XX.X% | +/- |
 ```
 
-- [ ] **Step 5: 提交最终报告**
+- [x] **Step 5: 提交最终报告**
 
 ```bash
 git add storage/eval_answer_baseline.log storage/eval_answer_after_reject.log docs/superpowers/plans/2026-07-30-end-to-end-eval-and-reject.md

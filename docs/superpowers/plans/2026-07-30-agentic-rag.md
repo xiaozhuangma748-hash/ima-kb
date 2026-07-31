@@ -27,7 +27,7 @@
 **Files:**
 - Create: `tests/qa/test_agentic_reflect.py`
 
-- [ ] **Step 1: 编写反思模块单元测试**
+- [x] **Step 1: 编写反思模块单元测试**
 
 ```python
 """Agentic RAG 反思模块单元测试。
@@ -171,13 +171,13 @@ def test_reflect_and_rewrite_query_empty_response_returns_original():
     assert new_query == "海葬怎么办理？"
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/qa/test_agentic_reflect.py -v`
 
 Expected: 8 个测试全部 FAIL，因为 `core/qa/agentic_reflect.py` 不存在。
 
-- [ ] **Step 3: 提交测试**
+- [x] **Step 3: 提交测试**
 
 ```bash
 git add tests/qa/test_agentic_reflect.py
@@ -191,7 +191,7 @@ git commit -m "test: Agentic RAG 反思模块单元测试"
 **Files:**
 - Create: `core/qa/agentic_reflect.py`
 
-- [ ] **Step 1: 创建 agentic_reflect.py**
+- [x] **Step 1: 创建 agentic_reflect.py**
 
 ```python
 """Agentic RAG 反思模块。
@@ -323,13 +323,13 @@ def reflect_and_rewrite_query(
         return question
 ```
 
-- [ ] **Step 2: 运行测试验证通过**
+- [x] **Step 2: 运行测试验证通过**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/qa/test_agentic_reflect.py -v`
 
 Expected: 8 个测试全部 PASS。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add core/qa/agentic_reflect.py
@@ -347,7 +347,7 @@ git commit -m "feat: Agentic RAG 反思模块
 **Files:**
 - Modify: `config.py`
 
-- [ ] **Step 1: 加配置字段**
+- [x] **Step 1: 加配置字段**
 
 在 `config.py` 的 `Settings` 类中，找到 `self_verify_max_retries` 字段之后，加：
 
@@ -360,13 +360,13 @@ git commit -m "feat: Agentic RAG 反思模块
     agentic_max_rounds: int = field(default_factory=lambda: int(_get_env("AGENTIC_MAX_ROUNDS", "2")))
 ```
 
-- [ ] **Step 2: 验证配置加载**
+- [x] **Step 2: 验证配置加载**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -c "from config import settings; print('enable_agentic_rag:', settings.enable_agentic_rag); print('max_rounds:', settings.agentic_max_rounds)"`
 
 Expected: 输出 `enable_agentic_rag: False` 和 `max_rounds: 2`
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add config.py
@@ -380,7 +380,7 @@ git commit -m "feat: 加 Agentic RAG 配置开关 enable_agentic_rag"
 **Files:**
 - Create: `tests/qa/test_agentic_chain.py`
 
-- [ ] **Step 1: 编写 AgenticRAGChain 测试**
+- [x] **Step 1: 编写 AgenticRAGChain 测试**
 
 ```python
 """AgenticRAGChain 单元测试。
@@ -555,13 +555,13 @@ def test_agentic_chain_no_retry_when_low_confidence(tmp_path):
     assert chain.chain.ask.call_count == 1
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/qa/test_agentic_chain.py -v`
 
 Expected: 4 个测试全部 FAIL，因为 `core/qa/agentic_chain.py` 不存在。
 
-- [ ] **Step 3: 提交测试**
+- [x] **Step 3: 提交测试**
 
 ```bash
 git add tests/qa/test_agentic_chain.py
@@ -575,7 +575,7 @@ git commit -m "test: AgenticRAGChain 单元测试"
 **Files:**
 - Create: `core/qa/agentic_chain.py`
 
-- [ ] **Step 1: 创建 agentic_chain.py**
+- [x] **Step 1: 创建 agentic_chain.py**
 
 ```python
 """Agentic RAG 链：多轮检索 + 反思。
@@ -727,13 +727,13 @@ class AgenticRAGChain:
         return self.chain.ask_stream(question=question, **kwargs)
 ```
 
-- [ ] **Step 2: 运行测试验证通过**
+- [x] **Step 2: 运行测试验证通过**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/qa/test_agentic_chain.py -v`
 
 Expected: 4 个测试全部 PASS。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add core/qa/agentic_chain.py
@@ -749,19 +749,19 @@ git commit -m "feat: AgenticRAGChain 多轮检索+反思
 
 ## Task 6: 运行全量测试确认无回归
 
-- [ ] **Step 1: 跑全量测试**
+- [x] **Step 1: 跑全量测试**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/ --tb=short -q 2>&1 | tail -10`
 
 Expected: 全部通过（809 + 12 新增 = 821 passed, 0 failed）。
 
-- [ ] **Step 2: 修复任何回归（如有）**
+- [x] **Step 2: 修复任何回归（如有）**
 
 如果有测试因 AgenticRAGChain 初始化失败：
 1. 检查是否误触发了 agentic 模式
 2. 默认 `enable_agentic_rag=False`，不应影响现有流程
 
-- [ ] **Step 3: 提交修复（如有）**
+- [x] **Step 3: 提交修复（如有）**
 
 ```bash
 git add tests/
@@ -772,13 +772,13 @@ git commit -m "fix: 修复 Agentic RAG 接入导致的测试回归"
 
 ## Task 7: 端到端评测验证（可选）
 
-- [ ] **Step 1: 开启 Agentic RAG 跑 policy 类评测**
+- [x] **Step 1: 开启 Agentic RAG 跑 policy 类评测**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && export HF_ENDPOINT=https://hf-mirror.com && export PYTHONUNBUFFERED=1 && export ENABLE_AGENTIC_RAG=1 && python scripts/eval_answer.py --category policy --limit 10 --report both --output storage/eval_answer_policy_with_agentic.json 2>&1`
 
 Expected: 10 题约 15-20 分钟（多轮检索+反思）。对比幻觉率是否进一步下降。
 
-- [ ] **Step 2: 对比数据**
+- [x] **Step 2: 对比数据**
 
 对比三组数据：
 - Baseline（无 Self-RAG、无 Agentic）
@@ -787,7 +787,7 @@ Expected: 10 题约 15-20 分钟（多轮检索+反思）。对比幻觉率是�
 
 预期：Agentic RAG 对难问题（第一轮答不好）有提升，但会增加 LLM 调用次数和延迟。
 
-- [ ] **Step 3: 提交评测报告**
+- [x] **Step 3: 提交评测报告**
 
 ```bash
 git add storage/eval_answer_policy_with_agentic.json

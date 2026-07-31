@@ -24,7 +24,7 @@
 **Files:**
 - Create: `tests/qa/test_self_verifier.py`
 
-- [ ] **Step 1: 编写验证模块的单元测试**
+- [x] **Step 1: 编写验证模块的单元测试**
 
 ```python
 """Self-RAG 答案验证模块单元测试。
@@ -181,13 +181,13 @@ def test_self_verifier_disabled_returns_none():
     mock_llm.chat.assert_not_called()
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/qa/test_self_verifier.py -v`
 
 Expected: 9 个测试全部 FAIL，因为 `core/qa/self_verifier.py` 不存在。
 
-- [ ] **Step 3: 提交测试**
+- [x] **Step 3: 提交测试**
 
 ```bash
 git add tests/qa/test_self_verifier.py
@@ -201,7 +201,7 @@ git commit -m "test: Self-RAG 答案验证模块单元测试"
 **Files:**
 - Create: `core/qa/self_verifier.py`
 
-- [ ] **Step 1: 创建 self_verifier.py**
+- [x] **Step 1: 创建 self_verifier.py**
 
 ```python
 """Self-RAG 答案自我验证模块。
@@ -411,13 +411,13 @@ class SelfVerifier:
         )
 ```
 
-- [ ] **Step 2: 运行测试验证通过**
+- [x] **Step 2: 运行测试验证通过**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/qa/test_self_verifier.py -v`
 
 Expected: 9 个测试全部 PASS。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add core/qa/self_verifier.py
@@ -437,7 +437,7 @@ git commit -m "feat: Self-RAG 答案验证模块
 **Files:**
 - Modify: `config.py`
 
-- [ ] **Step 1: 加配置字段**
+- [x] **Step 1: 加配置字段**
 
 在 `config.py` 的 `Settings` 类中，找到 `reject_confidence_threshold` 字段附近，加：
 
@@ -450,13 +450,13 @@ git commit -m "feat: Self-RAG 答案验证模块
     self_verify_max_retries: int = field(default_factory=lambda: int(_get_env("SELF_VERIFY_MAX_RETRIES", "0")))
 ```
 
-- [ ] **Step 2: 验证配置加载**
+- [x] **Step 2: 验证配置加载**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -c "from config import settings; print('enable_self_verify:', settings.enable_self_verify); print('max_retries:', settings.self_verify_max_retries)"`
 
 Expected: 输出 `enable_self_verify: True` 和 `max_retries: 0`
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add config.py
@@ -470,7 +470,7 @@ git commit -m "feat: 加 Self-RAG 验证配置开关 enable_self_verify"
 **Files:**
 - Modify: `core/qa/chain.py`
 
-- [ ] **Step 1: 在 chain.py 顶部加 import**
+- [x] **Step 1: 在 chain.py 顶部加 import**
 
 在 `core/qa/chain.py` 的 import 区域（现有 `from core.qa.citation_validator import ...` 附近），加：
 
@@ -478,7 +478,7 @@ git commit -m "feat: 加 Self-RAG 验证配置开关 enable_self_verify"
 from core.qa.self_verifier import SelfVerifier, VerificationResult
 ```
 
-- [ ] **Step 2: 在 RAGChain.__init__ 中初始化 SelfVerifier**
+- [x] **Step 2: 在 RAGChain.__init__ 中初始化 SelfVerifier**
 
 找到 `RAGChain.__init__` 方法，在 `self.reranker = ...` 之后加：
 
@@ -496,7 +496,7 @@ from core.qa.self_verifier import SelfVerifier, VerificationResult
                 self.self_verifier = None
 ```
 
-- [ ] **Step 3: 在 ask() 的 LLM 生成之后接入验证**
+- [x] **Step 3: 在 ask() 的 LLM 生成之后接入验证**
 
 在 `core/qa/chain.py` 的 `ask` 方法中，找到 line 445 `content = self.llm.chat(...)` 之后、line 459 `# 7. 构造引用列表` 之前，加：
 
@@ -519,7 +519,7 @@ from core.qa.self_verifier import SelfVerifier, VerificationResult
                 logging.getLogger(__name__).warning(f"Self-RAG 验证异常，跳过: {e}")
 ```
 
-- [ ] **Step 4: 在 ask_stream() 中也接入验证**
+- [x] **Step 4: 在 ask_stream() 中也接入验证**
 
 在 `ask_stream` 方法中，找到流式生成结束后（`full_content = "".join(...)` 之后），加：
 
@@ -539,7 +539,7 @@ from core.qa.self_verifier import SelfVerifier, VerificationResult
                 pass
 ```
 
-- [ ] **Step 5: 运行已有测试确认无回归**
+- [x] **Step 5: 运行已有测试确认无回归**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/qa/ tests/test_context_engine.py -v --tb=short 2>&1 | tail -20`
 
@@ -547,7 +547,7 @@ Expected: 所有现有测试继续通过（SelfVerifier 在 mock 测试中 llm.c
 
 如果 `test_context_engine.py` 的 mock chain 因为新增 SelfVerifier 初始化失败，在 mock chain 构造时设置 `chain.self_verifier = None` 跳过验证。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add core/qa/chain.py
@@ -563,13 +563,13 @@ LLM 生成答案后逐句验证是否被资料支持：
 
 ## Task 5: 跑 negative 类端到端评测对比
 
-- [ ] **Step 1: 跑 negative 类评测（Self-RAG 启用）**
+- [x] **Step 1: 跑 negative 类评测（Self-RAG 启用）**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && export HF_ENDPOINT=https://hf-mirror.com && export PYTHONUNBUFFERED=1 && python scripts/eval_answer.py --category negative --report both --output storage/eval_answer_negative_with_selfrag.json 2>&1`
 
 Expected: 5 题约 5-8 分钟（每题多一次 LLM 验证调用）。记录平均分、准确率、幻觉率、引用率。
 
-- [ ] **Step 2: 对比数据**
+- [x] **Step 2: 对比数据**
 
 对比三组数据：
 - Baseline（无硬拒答、无 Self-RAG）：平均 4.6，准确率 80%，幻觉率 0%，引用率 40%
@@ -578,13 +578,13 @@ Expected: 5 题约 5-8 分钟（每题多一次 LLM 验证调用）。记录平�
 
 预期：Self-RAG 对 negative 类影响不大（因为这些答案本来就是"无法回答"），但对其他类别（policy/process 等）可能有显著幻觉下降效果。
 
-- [ ] **Step 3: 跑其他类别评测（可选，验证 Self-RAG 对真实问题的效果）**
+- [x] **Step 3: 跑其他类别评测（可选，验证 Self-RAG 对真实问题的效果）**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && export HF_ENDPOINT=https://hf-mirror.com && export PYTHONUNBUFFERED=1 && python scripts/eval_answer.py --category policy --limit 10 --report both --output storage/eval_answer_policy_with_selfrag.json 2>&1`
 
 Expected: 10 题约 10-15 分钟。对比幻觉率是否下降。
 
-- [ ] **Step 4: 提交评测报告**
+- [x] **Step 4: 提交评测报告**
 
 ```bash
 git add storage/eval_answer_negative_with_selfrag.json storage/eval_answer_policy_with_selfrag.json
@@ -595,19 +595,19 @@ git commit -m "chore: Self-RAG 端到端评测对比报告"
 
 ## Task 6: 运行全量测试确认无回归
 
-- [ ] **Step 1: 跑全量测试**
+- [x] **Step 1: 跑全量测试**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/ --tb=short -q 2>&1 | tail -10`
 
 Expected: 全部通过（740 + 9 新增 = 749 passed, 0 failed）。如果 `test_context_engine.py` 因 SelfVerifier 初始化失败，在 mock chain 构造时加 `chain.self_verifier = None`。
 
-- [ ] **Step 2: 修复任何回归（如有）**
+- [x] **Step 2: 修复任何回归（如有）**
 
 如果有测试因 SelfVerifier 初始化或验证逻辑失败：
 1. 在 mock chain 测试中设置 `chain.self_verifier = None`
 2. 不要禁用生产环境的 SelfVerifier
 
-- [ ] **Step 3: 提交修复（如有）**
+- [x] **Step 3: 提交修复（如有）**
 
 ```bash
 git add tests/

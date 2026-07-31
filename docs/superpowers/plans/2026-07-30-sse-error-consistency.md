@@ -22,7 +22,7 @@
 **Files:**
 - Create: `tests/web/test_qa_sse_error.py`
 
-- [ ] **Step 1: 编写测试文件**
+- [x] **Step 1: 编写测试文件**
 
 ```python
 """验证 /api/qa/stream 早期错误响应使用 SSE 格式（而非 JSON）。
@@ -101,13 +101,13 @@ def test_whitespace_question_returns_sse_error(client):
     assert events[0]["type"] == "error"
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/web/test_qa_sse_error.py -v`
 
 Expected: 3 个测试全部 FAIL，因为当前早期错误返回 JSON（`{"error": "..."}`），不是 SSE 格式。`content-type` 是 `application/json`，`_parse_sse_events` 解析不出事件。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add tests/web/test_qa_sse_error.py
@@ -121,7 +121,7 @@ git commit -m "test: 添加 SSE 早期错误响应测试（当前失败）"
 **Files:**
 - Modify: `web/routes/qa.py:27-55`
 
-- [ ] **Step 1: 修改 qa_stream 早期错误响应**
+- [x] **Step 1: 修改 qa_stream 早期错误响应**
 
 把 `web/routes/qa.py` 中第 27-55 行的 `qa_stream` 函数早期返回改为 SSE 流。
 
@@ -195,13 +195,13 @@ async def qa_stream(request: Request):
         return StreamingResponse(_sse_error("LLM 不可用，请检查配置"), media_type="text/event-stream")
 ```
 
-- [ ] **Step 2: 运行测试验证通过**
+- [x] **Step 2: 运行测试验证通过**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/web/test_qa_sse_error.py -v`
 
 Expected: 3 个测试全部 PASS。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add web/routes/qa.py
@@ -219,7 +219,7 @@ git commit -m "fix: /api/qa/stream 早期错误响应改为 SSE 格式
 **Files:**
 - Modify: `web/routes/qa.py:106-112`
 
-- [ ] **Step 1: 修改 _run_in_thread 中的错误格式**
+- [x] **Step 1: 修改 _run_in_thread 中的错误格式**
 
 把 `web/routes/qa.py` 中第 106-112 行的错误响应从手写 JSON 改为用 `_build_sse_event` helper。
 
@@ -245,13 +245,13 @@ git commit -m "fix: /api/qa/stream 早期错误响应改为 SSE 格式
                 loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
 ```
 
-- [ ] **Step 2: 运行全量 qa 相关测试验证无回归**
+- [x] **Step 2: 运行全量 qa 相关测试验证无回归**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/web/ -v`
 
 Expected: 所有 web 测试通过，无回归。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add web/routes/qa.py
@@ -265,13 +265,13 @@ git commit -m "refactor: 流式中错误用 _build_sse_event 统一格式
 
 ## Task 4: 运行全量测试验证无回归
 
-- [ ] **Step 1: 运行全量 pytest**
+- [x] **Step 1: 运行全量 pytest**
 
 Run: `cd "/Users/4u/Desktop/项目/拱墅区/2025身后事（殡葬）项目/34-知识库" && source .venv/bin/activate && python -m pytest tests/ --tb=short -q`
 
 Expected: 727 + 3 = 730 passed, 0 failed。
 
-- [ ] **Step 2: 提交最终状态（如有需要）**
+- [x] **Step 2: 提交最终状态（如有需要）**
 
 如果前面所有 commit 都已成功，此步骤可跳过。否则补一个 squash commit：
 ```bash

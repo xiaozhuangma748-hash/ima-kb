@@ -338,7 +338,13 @@ def main():
     import config
     config.settings.parent_window = 0  # 关闭 parent window 加速
     storage = Storage()
-    chain = RAGChain(storage=storage)
+    # 如果开启 Agentic RAG，用 AgenticRAGChain 包装
+    if getattr(config.settings, "enable_agentic_rag", False):
+        from core.qa.agentic_chain import AgenticRAGChain
+        chain = AgenticRAGChain(storage=storage)
+        print(f"  Agentic RAG 已启用，max_rounds={chain.max_rounds}")
+    else:
+        chain = RAGChain(storage=storage)
 
     from core.llm.client import get_llm
     judge_llm = get_llm()
