@@ -112,6 +112,13 @@ class Settings:
     # Self-RAG 验证失败后是否重新生成（0=只标注不重生成，推荐；1=重生成一次）
     self_verify_max_retries: int = field(default_factory=lambda: int(_get_env("SELF_VERIFY_MAX_RETRIES", "0")))
 
+    # ---- Agentic RAG（多轮检索+反思）----
+    # 启用后 Self-RAG 验证发现幻觉或答案不充分时，LLM 反思改写 query 重检索
+    # 关闭后只做单轮检索（现有行为）
+    enable_agentic_rag: bool = field(default_factory=lambda: _get_env("ENABLE_AGENTIC_RAG", "0") == "1")
+    # Agentic RAG 最大检索轮次（含首轮，2=最多检索 2 次）
+    agentic_max_rounds: int = field(default_factory=lambda: int(_get_env("AGENTIC_MAX_ROUNDS", "2")))
+
     # ---- 版面分析（扫描件/图片结构化）----
     # 启用后对图片和扫描 PDF 使用 PaddleX layout_parsing pipeline，
     # 保留标题/正文/表格分区结构，表格转 Markdown，显著提升结构化检索准确率。
