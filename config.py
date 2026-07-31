@@ -105,6 +105,13 @@ class Settings:
     # 区别于 prompt 提示阈值（DEFAULT_CONFIDENCE_THRESHOLD=0.05）：那个只在 prompt 加提示，LLM 仍生成
     reject_confidence_threshold: float = field(default_factory=lambda: float(_get_env("REJECT_CONFIDENCE_THRESHOLD", "0.15")))
 
+    # ---- Self-RAG 答案验证 ----
+    # 启用后 LLM 生成答案后逐句验证是否被资料支持，幻觉句子标注 ⚠️
+    # 关闭后直接返回 LLM 原始答案（省一次 LLM 调用）
+    enable_self_verify: bool = field(default_factory=lambda: _get_env("ENABLE_SELF_VERIFY", "1") == "1")
+    # Self-RAG 验证失败后是否重新生成（0=只标注不重生成，推荐；1=重生成一次）
+    self_verify_max_retries: int = field(default_factory=lambda: int(_get_env("SELF_VERIFY_MAX_RETRIES", "0")))
+
     # ---- 版面分析（扫描件/图片结构化）----
     # 启用后对图片和扫描 PDF 使用 PaddleX layout_parsing pipeline，
     # 保留标题/正文/表格分区结构，表格转 Markdown，显著提升结构化检索准确率。

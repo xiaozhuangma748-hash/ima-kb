@@ -34,6 +34,7 @@ from core.retrieval.context_optimizer import (
 )
 from core.retrieval.semantic_cache import SemanticCache
 from core.qa.citation_validator import validate_answer
+from core.qa.self_verifier import SelfVerifier, VerificationResult
 from core.search.bm25 import BM25Index
 from core.retrieval.vector import VectorIndex
 from core.context.token_budget import TokenBudget, count_tokens
@@ -202,6 +203,18 @@ class RAGChain:
             self.reranker = create_reranker()
 
         self.llm = get_llm()
+
+        # Self-RAG 答案验证器（可选，失败回退原答案）
+        self.self_verifier: Optional[SelfVerifier] = None
+        if getattr(settings, "enable_self_verify", True) and self.llm is not None:
+            try:
+                self.self_verifier = SelfVerifier(
+                    llm=self.llm,
+                    enabled=True,
+                    max_retries=getattr(settings, "self_verify_max_retries", 0),
+                )
+            except Exception:
+                self.self_verifier = None
 
         # 答案语义缓存：复用宠物同款阈值与持久化库，但用 "qa:" 前缀隔离
         # key 空间，避免与宠物模式相互污染。任何异常都降级为无缓存。
@@ -456,6 +469,23 @@ class RAGChain:
                 low_confidence=low_conf,
             )
 
+        # 6.1 Self-RAG 答案验证：逐句检查答案是否被资料支持
+        # 幻觉句子标注 ⚠️ 未经资料支持，失败回退原答案
+        if self.self_verifier is not None and content.strip():
+            try:
+                snippets_for_verify = [r.content or "" for r in final_results[:5]]
+                verify_result = self.self_verifier.verify(
+                    question=question,
+                    answer=content,
+                    snippets=snippets_for_verify,
+                )
+                if verify_result is not None and verify_result.has_hallucination:
+                    # 用标注后的答案替换
+                    content = verify_result.verified_answer
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Self-RAG 验证异常，跳过: {e}")
+
         # 7. 构造引用列表（验证引用合法性后只保留 LLM 实际引用的文档）
         # 同时从正文中删除越界 [n] 标记，保证正文编号与引用列表一致
         valid_citations, invalid_citations, citation_warning = validate_answer(
@@ -709,6 +739,21 @@ class RAGChain:
         # 6.2 缺失引用提示
         if citation_warning:
             yield "\n\n" + citation_warning
+
+        # 6.25 Self-RAG 验证（流式版：验证后只追加警告，不替换已流式输出的内容）
+        if self.self_verifier is not None and answer_text.strip():
+            try:
+                snippets_for_verify = [r.content or "" for r in final_results[:5]]
+                verify_result = self.self_verifier.verify(
+                    question=question,
+                    answer=answer_text,
+                    snippets=snippets_for_verify,
+                )
+                if verify_result is not None and verify_result.has_hallucination:
+                    yield "\n\n⚠️ 注意：以上回答中部分内容未经资料支持，请谨慎参考。"
+            except Exception:
+                pass
+
         # 6.3 引用列表
         if cited_results:
             yield "\n\n" + "=" * 50 + "\n"
