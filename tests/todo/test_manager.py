@@ -192,16 +192,63 @@ class TestClearDay:
 # ---- 跨天处理 ----
 
 class TestCarryOver:
-    def test_get_yesterday_pending(self, tmp_mgr: TodoManager):
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        tmp_mgr.add("昨日任务1", date_str=yesterday)
-        tmp_mgr.add("昨日任务2", date_str=yesterday, priority="high")
+    def test_get_pending_before_collects_multiple_days(self, tmp_mgr: TodoManager):
+        """跨多天 + 跨月的 pending 任务都应被收集，排除 done/cancelled。"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        tmp_mgr.add("七月任务", date_str="2026-07-28")
+        tmp_mgr.add("七月高优", date_str="2026-07-28", priority="high")
+        tmp_mgr.add("八月一日", date_str="2026-08-01")
         # 一个完成的任务不应出现
-        tmp_mgr.update_status("1", "done", date_str=yesterday)
+        tmp_mgr.update_status("1", "done", date_str="2026-07-28")
+        # 一个取消的任务不应出现（序号是单日内编号，2026-08-01 只有 1 条）
+        tmp_mgr.update_status("1", "cancelled", date_str="2026-08-01")
 
-        pending = tmp_mgr.get_yesterday_pending()
+        pending = tmp_mgr.get_pending_before(today)
         assert len(pending) == 1
-        assert pending[0].description == "昨日任务2"
+        assert pending[0].description == "七月高优"
+        assert pending[0].date < today
+
+    def test_get_pending_before_excludes_today_and_future(self, tmp_mgr: TodoManager):
+        """今天和未来的 pending 不应被收集。"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        tmp_mgr.add("今日任务", date_str=today)
+        tmp_mgr.add("明日任务", date_str="2099-12-31")
+
+        pending = tmp_mgr.get_pending_before(today)
+        assert pending == []
+
+    def test_auto_carry_over_to_today_moves_all_pending(self, tmp_mgr: TodoManager):
+        """跨多天的 pending 全部搬到今天，原日期清空，date 更新。"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        tmp_mgr.add("七月任务A", date_str="2026-07-28")
+        tmp_mgr.add("七月任务B", date_str="2026-07-28", priority="high")
+        tmp_mgr.add("八月一日任务", date_str="2026-08-01")
+
+        moved, source_dates = tmp_mgr.auto_carry_over_to_today()
+        assert moved == 3
+        assert source_dates == ["2026-07-28", "2026-08-01"]
+
+        # 原日期的 pending 已被搬走
+        assert tmp_mgr.list_day("2026-07-28") == []
+        assert tmp_mgr.list_day("2026-08-01") == []
+        # 今日应有 3 条，date 字段都更新为今天
+        today_items = tmp_mgr.list_day(today)
+        assert len(today_items) == 3
+        assert all(t.date == today for t in today_items)
+
+    def test_auto_carry_over_to_today_idempotent(self, tmp_mgr: TodoManager):
+        """同日重复调用应幂等：第二次没有可搬任务，返回 0。"""
+        tmp_mgr.add("历史任务", date_str="2026-07-28")
+        moved1, _ = tmp_mgr.auto_carry_over_to_today()
+        assert moved1 == 1
+        moved2, _ = tmp_mgr.auto_carry_over_to_today()
+        assert moved2 == 0
+
+    def test_auto_carry_over_to_today_empty(self, tmp_mgr: TodoManager):
+        """无历史 pending 时返回 (0, [])。"""
+        moved, source_dates = tmp_mgr.auto_carry_over_to_today()
+        assert moved == 0
+        assert source_dates == []
 
     def test_carry_over_moves_tasks(self, tmp_mgr: TodoManager):
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")

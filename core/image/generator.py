@@ -1,6 +1,8 @@
 """图像生成器：封装 Agnes Image 2.1 Flash API 调用。
 
-使用 OpenAI 兼容接口（与 LLM 相同的 base_url + api_key）。
+使用 OpenAI 兼容接口，支持独立的图像 API 配置。
+当 LLM 切换到 DeepSeek 等不提供图像生成的 API 时，
+可通过 IMAGE_API_KEY/IMAGE_BASE_URL 单独配置图像服务。
 
 注意：Agnes Image API 不接受 response_format/size 等标准 OpenAI 参数，
 这些必须通过 extra_body 透传。
@@ -11,6 +13,8 @@ import time
 import logging
 from pathlib import Path
 from typing import List, Optional
+
+from openai import OpenAI
 
 from config import settings
 from core.llm.client import LLMClient, get_llm
@@ -25,14 +29,41 @@ class ImageError(Exception):
 class ImageGenerator:
     """Agnes Image 2.1 Flash 客户端。
 
-    复用 LLMClient 的 OpenAI 客户端（相同的 base_url 和 api_key），
-    只是调用不同的 model。
+    优先使用独立的 IMAGE_API_KEY/IMAGE_BASE_URL 配置（Bug 3 修复），
+    未配置时回退到 LLM 的 client（向后兼容）。
     """
 
     def __init__(self, llm_client: Optional[LLMClient] = None) -> None:
-        if not settings.has_llm():
-            raise ImageError("未配置 AGNES_API_KEY，请在 .env 中设置。")
-        self._client = llm_client._client if llm_client else get_llm()._client
+        # 优先使用独立的图像 API 配置
+        image_key = getattr(settings, "image_api_key", "") or ""
+        image_base = getattr(settings, "image_base_url", "") or ""
+
+        if image_key:
+            # 独立配置：创建专属 client，避免与 LLM 共享
+            self._client = OpenAI(
+                api_key=image_key,
+                base_url=image_base or "https://apihub.agnes-ai.com/v1",
+            )
+            logger.debug(f"ImageGenerator 使用独立配置: base_url={image_base}")
+        elif llm_client is not None:
+            # 显式传入 LLM client（向后兼容）
+            self._client = llm_client._client
+        else:
+            # 回退到 LLM 配置（agnes_api_key/agnes_base_url）创建独立 client
+            # Bug 13 修复：不使用 get_llm()._client（可能是已缓存的 DeepSeek client），
+            # 而是直接读 settings.agnes_api_key/agnes_base_url 创建新 client，
+            # 确保图像 API 用的是当前 settings 中的 LLM 配置
+            llm_key = getattr(settings, "agnes_api_key", "") or ""
+            llm_base = getattr(settings, "agnes_base_url", "") or ""
+            if not llm_key:
+                raise ImageError(
+                    "未配置 API_KEY，请在 .env 中设置 IMAGE_API_KEY 或 AGNES_API_KEY。"
+                )
+            self._client = OpenAI(
+                api_key=llm_key,
+                base_url=llm_base or "https://apihub.agnes-ai.com/v1",
+            )
+            logger.debug(f"ImageGenerator 回退到 LLM 配置: base_url={llm_base}")
         self._model = settings.image_model
 
     def text_to_image(

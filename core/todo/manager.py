@@ -302,15 +302,34 @@ class TodoManager:
 
     # ---- 跨天处理 ----
 
-    def get_yesterday_pending(self) -> List[TodoItem]:
-        """获取昨日未完成任务（pending 状态）。"""
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-        tasks = self._get_day(yesterday)
-        return [
-            TodoItem.from_dict(t)
-            for t in tasks
-            if t.get("status") == "pending"
-        ]
+    def get_pending_before(self, date_str: str) -> List[TodoItem]:
+        """获取所有早于 date_str 的日期中的 pending 任务（按日期升序）。
+
+        用于自动延续：覆盖今天之前的所有历史日期，不限于昨天。
+        """
+        data = self._load()
+        result: List[TodoItem] = []
+        for d_str in sorted(data["days"].keys()):
+            if d_str >= date_str:
+                continue
+            for t in data["days"][d_str]:
+                if t.get("status") == "pending":
+                    result.append(TodoItem.from_dict(t))
+        return result
+
+    def auto_carry_over_to_today(self) -> Tuple[int, List[str]]:
+        """扫描所有早于今天的 pending 任务，自动延续到今天。
+
+        Returns:
+            (moved_count, source_dates) — 搬运数量与涉及的源日期列表（去重升序）。
+        """
+        today = self._today()
+        pending = self.get_pending_before(today)
+        if not pending:
+            return 0, []
+        source_dates = sorted({item.date for item in pending})
+        moved = self.carry_over(pending, to_date=today)
+        return moved, source_dates
 
     def carry_over(self, items: List[TodoItem], to_date: Optional[str] = None) -> int:
         """把指定任务顺延到目标日期（默认今天）。

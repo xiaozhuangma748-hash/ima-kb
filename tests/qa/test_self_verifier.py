@@ -68,6 +68,24 @@ def test_mark_ungrounded_sentences():
     assert "海葬是骨灰撒入海洋 ⚠️" not in result
 
 
+def test_mark_ungrounded_sentences_preserves_separators():
+    """Bug 8 修复验证：句子之间应有分隔符，避免粘连。
+
+    场景：LLM 切分句子时丢失原文标点，拼接后 [1]海葬 会连在一起破坏引用语义。
+    """
+    from core.qa.self_verifier import mark_ungrounded_sentences
+    sentences = [
+        {"text": "海葬是骨灰撒入海洋 [1]", "grounded": True, "citation": 1},
+        {"text": "海葬完全免费", "grounded": False, "citation": None},
+    ]
+    result = mark_ungrounded_sentences(sentences)
+    # 两句之间应有分隔符（空格或换行），不能直接粘连
+    assert "[1]海葬" not in result, \
+        f"句子粘连破坏引用语义: {result}"
+    assert "[1] 海葬" in result or "[1]\n海葬" in result or "[1]\n\n海葬" in result, \
+        f"句子间应有分隔符: {result}"
+
+
 def test_build_verify_messages_contains_required_fields():
     """验证 prompt 应包含问题、答案、参考资料。"""
     from core.qa.self_verifier import build_verify_messages
@@ -150,3 +168,51 @@ def test_self_verifier_disabled_returns_none():
     result = verifier.verify("问题", "答案", ["资料"])
     assert result is None
     mock_llm.chat.assert_not_called()
+
+
+def test_self_verifier_empty_sentences_with_hallucination_keeps_original():
+    """Bug 2 修复验证：LLM 返回空 sentences + has_hallucination=True 时，
+    不应把答案替换为空串，而应保留原答案。
+
+    场景：LLM 异常返回 {"sentences": [], "has_hallucination": true}，
+    mark_ungrounded_sentences([]) 返回 ""，若直接替换会导致用户拿到空答案。
+    """
+    from core.qa.self_verifier import SelfVerifier
+
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = '{"sentences": [], "has_hallucination": true}'
+    verifier = SelfVerifier(llm=mock_llm)
+    result = verifier.verify(
+        question="什么是海葬？",
+        answer="海葬是骨灰撒入海洋 [1]。",
+        snippets=["海葬是指将骨灰撒入海洋的生态安葬方式"]
+    )
+    # 不应返回空答案，应保留原答案
+    assert result is not None
+    assert result.verified_answer == "海葬是骨灰撒入海洋 [1]。"
+    # has_hallucination 应为 True（LLM 说了有幻觉），但没有可标注的句子
+    assert result.has_hallucination is True
+    assert result.hallucinated_sentences == []
+
+
+def test_parse_verify_response_string_boolean_false():
+    """Bug 7 修复验证：LLM 返回字符串型 "false" 时应正确转为 False。
+
+    场景：LLM 返回 {"has_hallucination": "false"}（字符串而非布尔），
+    bool("false") 为 True（非空字符串均为真），导致无幻觉被误判为有幻觉。
+    """
+    from core.qa.self_verifier import parse_verify_response
+    raw = '{"sentences": [{"text": "海葬是骨灰撒入海洋", "grounded": true, "citation": 1}], "has_hallucination": "false"}'
+    result = parse_verify_response(raw)
+    assert result is not None
+    assert result["has_hallucination"] is False, \
+        "字符串 'false' 应转为布尔 False，而非 bool('false')=True"
+
+
+def test_parse_verify_response_string_boolean_true():
+    """Bug 7 修复验证：LLM 返回字符串型 "true" 时应正确转为 True。"""
+    from core.qa.self_verifier import parse_verify_response
+    raw = '{"sentences": [{"text": "海葬完全免费", "grounded": false, "citation": null}], "has_hallucination": "true"}'
+    result = parse_verify_response(raw)
+    assert result is not None
+    assert result["has_hallucination"] is True

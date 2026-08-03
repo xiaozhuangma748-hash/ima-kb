@@ -74,10 +74,10 @@ _PROMPT_FOOTER = (
     "即使问题可以直接回答（如问候、自我介绍），也必须在最终答案前输出 Thought：\n"
     "\n"
     "Thought: 用户在问候，我直接回答即可。\n"
-    '{"tool": "done", "args": "你好！我是 Agnes-2.0-Flash，由 Sapiens AI 开发的智能助手。"}\n'
+    '{"tool": "done", "args": "你好！我是知识库管理助手，可以帮你查询和检索知识库中的文档。"}\n'
     "\n"
     "Thought: 用户问我的身份，我简要回答。\n"
-    '{"tool": "done", "args": "我是 Agnes-2.0-Flash，由 Sapiens AI 开发的智能助手。"}\n'
+    '{"tool": "done", "args": "我是知识库管理助手，专门帮你从知识库中检索信息。"}\n'
     "\n"
     "绝对禁止：直接输出答案而不带 Thought 前缀。\n"
     "\n"

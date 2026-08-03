@@ -887,8 +887,10 @@ def _parse_image(file_path: Path) -> ParsedDocument:
     from PIL import Image  # type: ignore
 
     try:
-        image = Image.open(file_path)
-        text = _ocr_image(image)
+        # Bug 10 修复：用 with 语句确保文件句柄关闭
+        # 批量 OCR 场景下未关闭句柄会触发 ResourceWarning 并可能耗尽 fd
+        with Image.open(file_path) as image:
+            text = _ocr_image(image)
     except Exception as e:
         raise ParseError(f"图片 OCR 失败 [{file_path.name}]: {type(e).__name__}: {e}")
 

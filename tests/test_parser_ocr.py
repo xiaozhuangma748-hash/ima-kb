@@ -100,3 +100,45 @@ def test_parse_pdf_records_ocr_empty_pages_as_failed(tmp_path):
         result = parser._parse_pdf(pdf_path)
 
     assert "ocr_failed_pages" in result.meta
+
+
+def test_parse_image_closes_file_handle(tmp_path):
+    """Bug 10 修复验证：Image.open 应使用 with 语句关闭文件句柄。
+
+    场景：批量 OCR 时未关闭文件句柄会触发 ResourceWarning 并可能耗尽 fd。
+    验证：调用 _parse_image 后，PIL Image 的 fp 应为 None（已关闭）。
+    """
+    import sys
+
+    # 构造一个最小 PNG 图片
+    try:
+        from PIL import Image  # type: ignore
+    except ImportError:
+        pytest.skip("Pillow 未安装")
+
+    img_path = tmp_path / "test.png"
+    Image.new("RGB", (10, 10), color="white").save(str(img_path))
+
+    # 捕获 Image.open 返回的对象，验证它被关闭
+    opened_images = []
+    real_image_open = Image.open
+
+    def spy_image_open(path, *args, **kwargs):
+        img = real_image_open(path, *args, **kwargs)
+        opened_images.append(img)
+        return img
+
+    # 模拟 OCR 可用 + _ocr_image 返回文本
+    with patch.object(parser, "_check_ocr", return_value=True), \
+         patch.object(parser, "_ocr_image", return_value="模拟 OCR 文本"), \
+         patch("PIL.Image.open", side_effect=spy_image_open):
+        result = parser._parse_image(img_path)
+
+    # 验证返回了非空文本
+    assert result.text == "模拟 OCR 文本"
+
+    # Bug 10 修复关键断言：with 语句退出后 Image 对象的 fp 应已关闭
+    assert len(opened_images) == 1, "Image.open 应被调用一次"
+    # with 语句会调用 __exit__，PIL Image 的 __exit__ 会关闭 fp
+    assert opened_images[0].fp is None, \
+        "Image.open 应使用 with 语句，确保文件句柄已关闭（fp 应为 None）"

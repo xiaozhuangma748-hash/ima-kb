@@ -87,11 +87,12 @@ class AgenticRAGChain:
             )
 
         # Agentic 多轮检索
+        # 关键：多轮检索时禁用答案缓存，避免首轮次优答案被缓存后绕过多轮反思
         current_query = question
         current_answer: Optional[Answer] = None
 
         for round_num in range(1, self.max_rounds + 1):
-            # 调用父类 ask（用当前 query）
+            # 调用父类 ask（用当前 query，use_cache=False 避免缓存污染）
             current_answer = self.chain.ask(
                 question=current_query,
                 top_k=top_k,
@@ -101,19 +102,19 @@ class AgenticRAGChain:
                 doc_ids=doc_ids,
                 cross_session_context=cross_session_context,
                 summary=summary,
+                use_cache=False,
             )
 
-            # 从 Answer 提取验证信息
-            # Answer 不直接暴露 verify_result，但 RAGChain.ask 内部做完 Self-RAG
-            # 验证后会把结果挂到 _verify_result（需要 RAGChain 配合）
-            # 这里优先读 _verify_result，没有则用 content 中的 ⚠️ 标记判断
-            verify_result = getattr(current_answer, "_verify_result", None)
+            # 从 Answer 提取验证信息（Bug 4 修复：用正式字段 verify_result）
+            verify_result = getattr(current_answer, "verify_result", None)
             max_score = max(
                 (getattr(r, "score", 0.0) for r in (current_answer.retrieved or [])),
                 default=0.0,
             )
 
             # 判断是否需要重试
+            # Bug 6 修复：显式传入配置的 reject_threshold，与 RAGChain 硬拒答阈值同步
+            reject_threshold = getattr(settings, "reject_confidence_threshold", 0.15)
             if not should_retry(
                 question=question,
                 answer=current_answer.content or "",
@@ -121,6 +122,7 @@ class AgenticRAGChain:
                 max_score=max_score,
                 round_num=round_num,
                 max_rounds=self.max_rounds,
+                reject_threshold=reject_threshold,
             ):
                 break
 
@@ -144,5 +146,8 @@ class AgenticRAGChain:
 
         Agentic 多轮检索需要完整答案才能判断是否反思，
         流式版退化为单轮（与关闭 agentic 等价）。
+        Bug 9 修复：开启 Agentic 时先 yield 提示，让用户感知到已退化。
         """
-        return self.chain.ask_stream(question=question, **kwargs)
+        if self.enable_agentic and self.max_rounds > 1:
+            yield "⚠️ Agentic RAG 多轮检索在流式模式下已禁用，当前为单轮检索。\n\n"
+        yield from self.chain.ask_stream(question=question, **kwargs)

@@ -34,6 +34,10 @@ class Settings:
     llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL_OVERRIDE") or _get_env("LLM_MODEL", "agnes-2.5-flash"))
 
     # ---- 图像生成 (Agnes Image) ----
+    # 支持独立配置：LLM 切换到 DeepSeek 后图像仍可用 Agnes API
+    # 未配置 IMAGE_API_KEY 时回退到 AGNES_API_KEY（向后兼容）
+    image_api_key: str = field(default_factory=lambda: _get_env("IMAGE_API_KEY") or _get_env("AGNES_API_KEY"))
+    image_base_url: str = field(default_factory=lambda: _get_env("IMAGE_BASE_URL") or _get_env("AGNES_BASE_URL", "https://apihub.agnes-ai.com/v1"))
     image_model: str = field(default_factory=lambda: _get_env("IMAGE_MODEL", "agnes-image-2.1-flash"))
     image_size: str = field(default_factory=lambda: _get_env("IMAGE_SIZE", "1024x1024"))
     image_response_format: str = field(default_factory=lambda: _get_env("IMAGE_RESPONSE_FORMAT", "url"))

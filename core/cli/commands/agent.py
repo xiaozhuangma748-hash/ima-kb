@@ -375,13 +375,13 @@ class AgentMixin:
                     console.print(f"  [red][ERR] {err}[/red]")
 
             elif step_type == "stream_start":
-                # 流式输出开始：停止其他 spinner/live，启动带 spinner 的 Live
+                # 流式输出开始：停止其他 spinner/live，启动纯 spinner 的 Live
                 _stop_spinner()
                 _stop_live()
                 stream_text[0] = ""
-                # 流式期间持续显示 spinner（"Generating..."），下方实时渲染 Markdown
+                # 流式期间显示纯 spinner 动画（无文字），下方实时渲染 Markdown
                 gen_spinner = Spinner(
-                    "dots", text=Text(" Generating...", style="dim"), style="cyan",
+                    "dots", text=Text("", style="dim"), style="cyan",
                 )
                 stream_live[0] = Live(
                     Group(gen_spinner, Text("")),
@@ -396,7 +396,7 @@ class AgentMixin:
                 if stream_live[0]:
                     stream_text[0] += content
                     gen_spinner = Spinner(
-                        "dots", text=Text(" Generating...", style="dim"), style="cyan",
+                        "dots", text=Text("", style="dim"), style="cyan",
                     )
                     # 用 Markdown 实时渲染，保持格式一致性（不再先纯文本后 Markdown 跳变）
                     try:

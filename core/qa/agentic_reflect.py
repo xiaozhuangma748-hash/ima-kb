@@ -12,7 +12,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.qa.self_verifier import VerificationResult
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +27,7 @@ logger = logging.getLogger(__name__)
 def should_retry(
     question: str,
     answer: str,
-    verify_result,
+    verify_result: Optional["VerificationResult"],
     max_score: float,
     round_num: int,
     max_rounds: int,

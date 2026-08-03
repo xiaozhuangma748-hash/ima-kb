@@ -89,14 +89,14 @@ def test_agentic_chain_enabled_retries_on_hallucination(tmp_path):
     answer1.low_confidence = False
     answer1.confidence = 0.8
     answer1.retrieved = [_make_mock_result(score=0.8)]
-    answer1._verify_result = _make_mock_verify_result(has_hallucination=True)
+    answer1.verify_result = _make_mock_verify_result(has_hallucination=True)
 
     answer2 = MagicMock()
     answer2.content = "正确答案 [1]"
     answer2.low_confidence = False
     answer2.confidence = 0.9
     answer2.retrieved = [_make_mock_result(score=0.9)]
-    answer2._verify_result = _make_mock_verify_result(has_hallucination=False)
+    answer2.verify_result = _make_mock_verify_result(has_hallucination=False)
 
     chain.chain.ask = MagicMock(side_effect=[answer1, answer2])
     # Mock 反思
@@ -129,7 +129,7 @@ def test_agentic_chain_respects_max_rounds(tmp_path):
     bad_answer.low_confidence = False
     bad_answer.confidence = 0.8
     bad_answer.retrieved = [_make_mock_result(score=0.8)]
-    bad_answer._verify_result = _make_mock_verify_result(has_hallucination=True)
+    bad_answer.verify_result = _make_mock_verify_result(has_hallucination=True)
 
     chain.chain.ask = MagicMock(return_value=bad_answer)
     chain._reflect = MagicMock(return_value="改写后的 query")
@@ -160,7 +160,7 @@ def test_agentic_chain_no_retry_when_low_confidence(tmp_path):
     bad_answer.low_confidence = True
     bad_answer.confidence = 0.05
     bad_answer.retrieved = [_make_mock_result(score=0.05)]
-    bad_answer._verify_result = None
+    bad_answer.verify_result = None
 
     chain.chain.ask = MagicMock(return_value=bad_answer)
 
@@ -190,14 +190,14 @@ def test_agentic_chain_retries_when_cannot_answer_but_has_results(tmp_path):
     answer1.low_confidence = False
     answer1.confidence = 0.5
     answer1.retrieved = [_make_mock_result(score=0.5)]
-    answer1._verify_result = None
+    answer1.verify_result = None
 
     answer2 = MagicMock()
     answer2.content = "正确答案 [1]"
     answer2.low_confidence = False
     answer2.confidence = 0.9
     answer2.retrieved = [_make_mock_result(score=0.9)]
-    answer2._verify_result = None
+    answer2.verify_result = None
 
     chain.chain.ask = MagicMock(side_effect=[answer1, answer2])
     chain._reflect = MagicMock(return_value="改写后的 query")
@@ -228,7 +228,7 @@ def test_agentic_chain_restores_original_question(tmp_path):
     answer1.low_confidence = False
     answer1.confidence = 0.8
     answer1.retrieved = [_make_mock_result(score=0.8)]
-    answer1._verify_result = _make_mock_verify_result(has_hallucination=True)
+    answer1.verify_result = _make_mock_verify_result(has_hallucination=True)
     answer1.question = "改写后的 query"  # 父类用改写后的 query
 
     answer2 = MagicMock()
@@ -236,7 +236,7 @@ def test_agentic_chain_restores_original_question(tmp_path):
     answer2.low_confidence = False
     answer2.confidence = 0.9
     answer2.retrieved = [_make_mock_result(score=0.9)]
-    answer2._verify_result = _make_mock_verify_result(has_hallucination=False)
+    answer2.verify_result = _make_mock_verify_result(has_hallucination=False)
     answer2.question = "改写后的 query 2"
 
     chain.chain.ask = MagicMock(side_effect=[answer1, answer2])
@@ -246,3 +246,47 @@ def test_agentic_chain_restores_original_question(tmp_path):
 
     # 返回的 Answer.question 应恢复为用户原始问题
     assert result.question == "用户原始问题"
+
+
+def test_agentic_chain_bypasses_answer_cache(tmp_path):
+    """Bug 1 修复验证：Agentic 多轮检索时不应被答案缓存命中绕过。
+
+    场景：第一轮 ask 产生幻觉被缓存；第二次相同问题不应直接返回缓存答案，
+    而应走完整的 Agentic 多轮流程（chain.ask 应使用 use_cache=False）。
+    """
+    from core.qa.agentic_chain import AgenticRAGChain
+    from core.storage import Storage
+
+    storage = Storage(storage_path=tmp_path)
+    import config
+    original = config.settings.parent_window
+    config.settings.parent_window = 0
+    try:
+        chain = AgenticRAGChain(storage=storage, enable_agentic=True, max_rounds=2)
+    finally:
+        config.settings.parent_window = original
+
+    # Mock 父类 ask，捕获 use_cache 参数
+    answer1 = MagicMock()
+    answer1.content = "幻觉答案"
+    answer1.low_confidence = False
+    answer1.confidence = 0.8
+    answer1.retrieved = [_make_mock_result(score=0.8)]
+    answer1.verify_result = _make_mock_verify_result(has_hallucination=True)
+
+    answer2 = MagicMock()
+    answer2.content = "正确答案 [1]"
+    answer2.low_confidence = False
+    answer2.confidence = 0.9
+    answer2.retrieved = [_make_mock_result(score=0.9)]
+    answer2.verify_result = _make_mock_verify_result(has_hallucination=False)
+
+    chain.chain.ask = MagicMock(side_effect=[answer1, answer2])
+    chain._reflect = MagicMock(return_value="改写后的 query")
+
+    chain.ask("测试问题")
+
+    # 验证每次 chain.ask 调用都传了 use_cache=False
+    for call_args in chain.chain.ask.call_args_list:
+        assert call_args.kwargs.get("use_cache") is False, \
+            "Agentic RAG 调用 chain.ask 时必须传 use_cache=False，避免缓存绕过多轮检索"

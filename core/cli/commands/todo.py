@@ -73,11 +73,11 @@ class TodoMixin:
         elif sub == "add":
             self._todo_add(sub_arg)
         elif sub == "done":
-            self._todo_set_status(sub_arg, "done")
+            self._todo_set_status(sub_arg, "done", "done")
         elif sub == "cancel":
-            self._todo_set_status(sub_arg, "cancelled")
+            self._todo_set_status(sub_arg, "cancelled", "cancel")
         elif sub == "reopen":
-            self._todo_set_status(sub_arg, "pending")
+            self._todo_set_status(sub_arg, "pending", "reopen")
         elif sub == "del":
             self._todo_delete(sub_arg)
         elif sub == "edit":
@@ -196,11 +196,12 @@ class TodoMixin:
 
     # ---- 状态变更 ----
 
-    def _todo_set_status(self, arg: str, status: str) -> None:
+    def _todo_set_status(self, arg: str, status: str, cmd_name: str = "") -> None:
         """标记任务状态。"""
         if not arg:
-            labels = {"done": "完成", "cancelled": "取消", "pending": "重开"}
-            console.print(f"[yellow]用法: /todo {status} <序号|id>[/yellow]")
+            if not cmd_name:
+                cmd_name = status
+            console.print(f"[yellow]用法: /todo {cmd_name} <序号|id>[/yellow]")
             console.print(f"[dim]序号参考 /todo 列表中的编号[/dim]")
             return
 
@@ -407,85 +408,36 @@ class TodoMixin:
     # ---- 跨天处理 ----
 
     def _todo_carry_prompt(self) -> None:
-        """手动触发跨天提示。"""
+        """手动触发跨天扫描：立即执行自动延续，非交互。"""
         self._check_carry_over(force=True)
 
     def _check_carry_over(self, force: bool = False) -> None:
-        """检查并提示昨日未完成任务。
+        """扫描所有早于今天的 pending 任务，自动延续到今日（非交互）。
 
         Args:
-            force: True 表示强制提示（忽略 carry_notice 标记）
+            force: True 表示强制扫描（忽略 carry_notice 标记），用于 /todo carry
         """
+        # 同一天已处理过则跳过（除非 force）
         if not force and not self.todo_mgr.should_ask_carry():
             return
 
-        pending = self.todo_mgr.get_yesterday_pending()
-        if not pending:
-            # 没有未完成任务也要标记已询问，避免重复检查
-            if not force:
-                self.todo_mgr.mark_carry_asked()
-            return
+        moved, source_dates = self.todo_mgr.auto_carry_over_to_today()
 
-        yesterday = pending[0].date
-        console.print(
-            f"\n[bold yellow]昨日 ({yesterday}) 有 {len(pending)} 个未完成任务[/bold yellow]\n"
-        )
-        # 显示昨日未完成任务
-        for i, item in enumerate(pending, 1):
-            pri = _PRIORITY_TAG.get(item.priority, "med")
-            console.print(f"  [ ] [{pri}] {i}. {item.description}")
-        console.print()
+        if moved > 0:
+            # 源日期去重后用顿号拼接，超过 3 个则显示前 3 个 + 省略
+            if len(source_dates) <= 3:
+                dates_str = "、".join(source_dates)
+            else:
+                dates_str = "、".join(source_dates[:3]) + f" 等 {len(source_dates)} 天"
+            console.print(
+                f"[green]v 已从 {dates_str} 顺延 {moved} 个未完成任务到今日[/green]\n"
+            )
+            if _try_pet_push:
+                _try_pet_push(f"✓ 已顺延 {moved} 个未完成任务到今日", "success")
 
-        # 询问处理方式
-        console.print("[bold]如何处理？[/bold]")
-        console.print("  [cyan]1[/cyan] 全部顺延到今日")
-        console.print("  [cyan]2[/cyan] 全部归档（保留为已取消）")
-        console.print("  [cyan]3[/cyan] 逐个询问")
-        console.print("  [cyan]4[/cyan] 暂不处理（下次再问）")
-
-        from core.cli.terminal_helpers import repl_input
-        choice = repl_input("选择 (1/2/3/4)", default="1")
-
-        if choice == "1":
-            moved = self.todo_mgr.carry_over(pending)
-            console.print(f"[green]v 已顺延 {moved} 个任务到今日[/green]\n")
-        elif choice == "2":
-            count = self.todo_mgr.archive_pending(yesterday)
-            console.print(f"[green]v 已归档 {count} 个任务[/green]\n")
-        elif choice == "3":
-            self._carry_over_one_by_one(pending, yesterday)
-        # choice == "4" 暂不处理
-
-        # 标记今天已询问
+        # 无论是否有任务要搬，都标记今天已处理过，避免重复扫描
         if not force:
             self.todo_mgr.mark_carry_asked()
-
-    def _carry_over_one_by_one(self, items: list[TodoItem], yesterday: str) -> None:
-        """逐个询问任务处理方式。"""
-        carry_items: list[TodoItem] = []
-        for item in items:
-            pri = _PRIORITY_TAG.get(item.priority, "med")
-            console.print(f"\n  [ ] [{pri}] {item.description}")
-            console.print(f"  [dim]  {item.id}[/dim]")
-            from core.cli.terminal_helpers import repl_input
-            choice = repl_input("处理方式 (1/2/3/4/5)", default="1")
-            if choice == "1":
-                carry_items.append(item)
-            elif choice == "2":
-                self.todo_mgr.update_status(item.id, "done", date_str=yesterday)
-                console.print("[green]v 已标记完成[/green]")
-            elif choice == "3":
-                self.todo_mgr.update_status(item.id, "cancelled", date_str=yesterday)
-                console.print("[green]v 已取消[/green]")
-            elif choice == "4":
-                self.todo_mgr.delete(item.id, date_str=yesterday)
-                console.print("[green]v 已删除[/green]")
-            # choice == "5" 跳过（保留未处理）
-
-        if carry_items:
-            moved = self.todo_mgr.carry_over(carry_items)
-            console.print(f"\n[green]v 已顺延 {moved} 个任务到今日[/green]")
-        console.print()
 
     # ---- 帮助 ----
 
@@ -502,7 +454,7 @@ class TodoMixin:
         console.print("  [cyan]/todo del[/cyan] <序号|id> [...]  彻底删除（支持批量）")
         console.print("  [cyan]/todo history[/cyan] [N|日期]    历史记录")
         console.print("  [cyan]/todo clear[/cyan]               清空今日")
-        console.print("  [cyan]/todo carry[/cyan]               手动触发跨天处理")
+        console.print("  [cyan]/todo carry[/cyan]               手动扫描并延续历史未完成任务")
         console.print()
         console.print("[dim]优先级: high(高) / medium(中, 默认) / low(低)[/dim]")
         console.print("[dim]引用方式: 序号(今日列表编号) 或 id 前缀[/dim]\n")

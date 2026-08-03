@@ -50,6 +50,9 @@ class Answer:
     reranked: List[RerankResult] = field(default_factory=list)
     confidence: float = 0.0  # 最高检索结果的分数
     low_confidence: bool = False  # 是否低于置信度阈值
+    # Bug 4 修复：作为正式 dataclass 字段，避免运行时挂载
+    # AgenticRAGChain 用此字段判断是否需要多轮重检索
+    verify_result: Optional["VerificationResult"] = None
 
     @property
     def has_answer(self) -> bool:
@@ -301,6 +304,7 @@ class RAGChain:
         doc_ids: Optional[List[str]] = None,
         cross_session_context: Optional[str] = None,
         summary: Optional[str] = None,
+        use_cache: bool = True,
     ) -> Answer:
         """同步问答（含答案语义缓存）。
 
@@ -313,13 +317,15 @@ class RAGChain:
             doc_ids: 元数据预过滤，只在这些文档中检索（None 不过滤）
             cross_session_context: 跨会话记忆文本（注入 LLM 上下文）
             summary: 之前的对话摘要（注入 LLM 上下文）
+            use_cache: 是否使用答案语义缓存（Agentic RAG 多轮检索时应传 False，
+                避免首轮的次优答案被缓存后绕过多轮反思）
 
         Returns:
             Answer 对象
         """
         # 0. 答案语义缓存（多轮对话/跨会话/摘要存在时不缓存，保证上下文新鲜）
         has_extra_context = bool(history or cross_session_context or summary)
-        if self._answer_cache is not None and not has_extra_context:
+        if use_cache and self._answer_cache is not None and not has_extra_context:
             try:
                 q_emb = self._query_embedding(question)
                 if q_emb is not None:
@@ -517,8 +523,8 @@ class RAGChain:
         # 8. 计算置信度（用最高分，不依赖重排后的顺序）
         confidence = max((r.score for r in final_results), default=0.0) if final_results else 0.0
 
-        # 8.1 写入答案语义缓存（仅单轮、有实质答案、embedding 可用时）
-        if self._answer_cache is not None and content.strip() and not has_extra_context:
+        # 8.1 写入答案语义缓存（仅单轮、有实质答案、embedding 可用、未禁用缓存时）
+        if use_cache and self._answer_cache is not None and content.strip() and not has_extra_context:
             try:
                 q_emb = self._query_embedding(question)
                 if q_emb is not None:
@@ -540,10 +546,8 @@ class RAGChain:
             reranked=reranked,
             confidence=confidence,
             low_confidence=low_conf,
+            verify_result=verify_result,  # Bug 4 修复：正式字段而非运行时挂载
         )
-        # 挂载 Self-RAG 验证结果供 AgenticRAGChain 判断是否需要重检索
-        # 不影响现有行为（Answer dataclass 未声明此字段，仅作为运行时属性）
-        answer_obj._verify_result = verify_result
         return answer_obj
 
     def ask_stream(
@@ -636,8 +640,10 @@ class RAGChain:
                 top_n = min(settings.reranker_top_n, len(results))
                 # 用原 question 做重排打分
                 reranked = self.reranker.rerank(question, results, top_n=top_n)
-            except Exception:
-                pass
+            except Exception as e:
+                # Bug 5 修复：流式版与同步版对齐，加 warning log 而非静默 pass
+                import logging
+                logging.getLogger(__name__).warning(f"流式重排序失败，使用原混合结果: {e}")
 
         final_results = reranked if reranked else results
 
@@ -756,8 +762,10 @@ class RAGChain:
                 )
                 if verify_result is not None and verify_result.has_hallucination:
                     yield "\n\n⚠️ 注意：以上回答中部分内容未经资料支持，请谨慎参考。"
-            except Exception:
-                pass
+            except Exception as e:
+                # Bug 5 修复：流式版与同步版对齐，加 warning log 而非静默 pass
+                import logging
+                logging.getLogger(__name__).warning(f"流式 Self-RAG 验证失败，跳过: {e}")
 
         # 6.3 引用列表
         if cited_results:

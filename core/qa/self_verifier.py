@@ -103,9 +103,16 @@ def parse_verify_response(raw: str) -> Optional[dict]:
         data = json.loads(text)
         if "sentences" not in data or "has_hallucination" not in data:
             return None
+        # Bug 7 修复：LLM 可能返回字符串型 "true"/"false"，bool("false") 为 True（错误）
+        # 需要正确转换字符串型布尔值
+        raw_halluc = data["has_hallucination"]
+        if isinstance(raw_halluc, str):
+            has_halluc = raw_halluc.strip().lower() in ("true", "1", "yes")
+        else:
+            has_halluc = bool(raw_halluc)
         return {
             "sentences": data["sentences"],
-            "has_hallucination": bool(data["has_hallucination"]),
+            "has_hallucination": has_halluc,
         }
     except (json.JSONDecodeError, ValueError, TypeError):
         return None
@@ -132,7 +139,9 @@ def mark_ungrounded_sentences(sentences: List[dict]) -> str:
             parts.append(text)
         else:
             parts.append(f"{text} ⚠️ 未经资料支持")
-    return "".join(parts)
+    # Bug 8 修复：用空格分隔句子，避免 LLM 切句丢失标点后句子粘连
+    # 粘连会破坏引用标记语义（如 "[1]海葬" 连在一起）
+    return " ".join(parts)
 
 
 # ============================================================
@@ -194,7 +203,9 @@ class SelfVerifier:
 
         sentences = parsed["sentences"]
         has_halluc = parsed["has_hallucination"]
-        verified = mark_ungrounded_sentences(sentences) if has_halluc else answer
+        # Bug 2 修复：has_halluc=True 但 sentences=[] 时，mark_ungrounded_sentences([])
+        # 会返回空串替换原答案，导致用户拿到空答案。此时应保留原答案。
+        verified = mark_ungrounded_sentences(sentences) if (has_halluc and sentences) else answer
         hallucinated = [s["text"] for s in sentences if not s.get("grounded", True)]
 
         return VerificationResult(

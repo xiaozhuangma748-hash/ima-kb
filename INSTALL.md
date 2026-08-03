@@ -230,9 +230,10 @@ PaddleOCR 优先使用（原图直传，内部自带预处理），不可用时�
 
 ```env
 # ===== LLM API（必填）=====
-AGNES_API_KEY=sk-你的真实key          # Agnes AI 的 API Key
-AGNES_BASE_URL=https://apihub.agnes-ai.com/v1  # API 地址（一般不用改）
-LLM_MODEL=agnes-2.0-flash            # 模型名（一般不用改）
+# 默认 Agnes AI；也可切换 DeepSeek（OpenAI 兼容 API）
+AGNES_API_KEY=sk-你的真实key          # LLM API Key（Agnes 或 DeepSeek 均可）
+AGNES_BASE_URL=https://apihub.agnes-ai.com/v1  # API 地址（切换 DeepSeek 改成 https://api.deepseek.com/v1）
+LLM_MODEL=agnes-2.5-flash            # 模型名（切换 DeepSeek 改成 deepseek-chat）
 
 # ===== 存储 =====
 STORAGE_PATH=./storage               # 数据存储目录
@@ -245,10 +246,20 @@ CHUNK_OVERLAP=64                     # 块间重叠
 RAG_TOP_K=6                          # 检索返回数量
 LLM_MAX_TOKENS=1024                  # AI 回答最大长度
 
-# ===== 图像生成 =====
+# ===== 图像生成（独立 API，与 LLM 分开配置）=====
+IMAGE_API_KEY=sk-你的图像key          # 图像 API Key（与 LLM 分开；未填则回退 AGNES_API_KEY）
+IMAGE_BASE_URL=https://apihub.agnes-ai.com/v1  # 图像 API 地址
 IMAGE_MODEL=agnes-image-2.1-flash    # 图像生成模型
 IMAGE_SIZE=1024x1024                  # 图像尺寸
-IMAGE_RESPONSE_FORMAT=url             # 返回格式：url 或 base64```
+IMAGE_RESPONSE_FORMAT=url             # 返回格式：url 或 base64
+```
+
+> **💡 LLM 与图像 API 是两套独立配置**：
+> - `AGNES_API_KEY` / `AGNES_BASE_URL` / `LLM_MODEL` 控制对话问答
+> - `IMAGE_API_KEY` / `IMAGE_BASE_URL` / `IMAGE_MODEL` 控制图像生成
+>
+> 切换 LLM 到 DeepSeek 时只需改前三个，图像 API 仍用 Agnes（DeepSeek 不提供图像生成）。
+> 未配置 `IMAGE_API_KEY` 时会自动回退到 `AGNES_API_KEY`（向后兼容）。
 
 ### 向量检索配置
 
@@ -382,12 +393,16 @@ IMA 现已集成 **Agnes Image 2.1 Flash** 生图能力，可以为知识库内�
 `.env` 文件中已包含生图配置：
 
 ```env
+IMAGE_API_KEY=sk-你的图像key
+IMAGE_BASE_URL=https://apihub.agnes-ai.com/v1
 IMAGE_MODEL=agnes-image-2.1-flash
 IMAGE_SIZE=1024x1024
 IMAGE_RESPONSE_FORMAT=url
 ```
 
-> **注意**：生图使用与 LLM 相同的 `AGNES_API_KEY`，无需额外配置。
+> **注意**：图像 API 与 LLM API 是两套独立配置。
+> - 使用 Agnes 作为 LLM 时，`IMAGE_API_KEY` 可留空（自动回退到 `AGNES_API_KEY`）
+> - 使用 DeepSeek 作为 LLM 时，必须单独配置 `IMAGE_API_KEY`（用 Agnes 的 key），否则图像生成会失败
 
 ### 使用场景
 
