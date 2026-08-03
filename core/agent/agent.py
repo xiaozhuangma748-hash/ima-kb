@@ -292,8 +292,13 @@ class Agent:
             if on_step:
                 on_step("llm_start", f"Step {step + 1}")
 
+            # 方案 A：流式接收 LLM 输出，实时检测 ANSWER: 标记
+            # - 检测到 ANSWER: → 后续 token 真流式回调 stream_token
+            # - 未检测到 → 累积完整 reply 后走旧的工具调用解析路径
             try:
-                reply = self.llm.chat(messages, temperature=0.3, max_tokens=self.MAX_TOKENS)
+                reply, streamed_answer = self._run_step_streaming(
+                    messages, on_step=on_step, show_thoughts=show_thoughts,
+                )
                 self._accumulate_usage()
             except LLMError as e:
                 if on_step:
@@ -305,7 +310,14 @@ class Agent:
             # 上下文压缩（防止超出 token 限制）
             self._compress_messages(messages)
 
-            # 解析工具调用（支持 JSON 和 XML 两种格式）
+            # 流式已输出最终答案（ANSWER: 路径）—— 直接返回
+            if streamed_answer is not None:
+                answer = streamed_answer
+                # 写入语义缓存（answer 已在 _run_step_streaming 中完成 LaTeX 清理和引用检测）
+                self._write_answer_cache(task, answer)
+                return answer
+
+            # 未走流式 ANSWER: 路径 —— 解析工具调用（支持 JSON 和 XML 两种格式）
             tool_name, tool_args = self._parse_tool_call(reply)
 
             # 提取并显示 Thought（始终回调，让 CLI 层决定如何显示）
@@ -315,21 +327,21 @@ class Agent:
                     on_step("thought", thought)
 
             if tool_name is None:
-                # 没有工具调用，检查截断的 done
+                # 没有工具调用，检查截断的 done（旧格式兼容）
                 if "<tool>done" in reply or '"tool": "done"' in reply or "<args>" in reply:
                     extracted = self._extract_truncated_args(reply)
                     if extracted:
-                        # 流式输出最终答案，并写入语义缓存
+                        # 兜底：旧格式 done，走假流式
                         answer = self._stream_final_answer(extracted, on_step, messages)
                         self._write_answer_cache(task, answer)
                         return answer
-                # 流式输出最终答案，并写入语义缓存
+                # 兜底：纯文本答案，走假流式
                 answer = self._stream_final_answer(reply, on_step, messages)
                 self._write_answer_cache(task, answer)
                 return answer
 
             if tool_name == "done":
-                # 流式输出最终答案，并写入语义缓存
+                # 兜底：旧 JSON 格式 done，走假流式
                 answer = self._stream_final_answer(tool_args, on_step, messages)
                 self._write_answer_cache(task, answer)
                 return answer
@@ -450,6 +462,108 @@ class Agent:
         if on_step:
             on_step("done", full_content)
         return full_content
+
+    # ============================================================
+    # 方案 A：真流式 ANSWER: 检测
+    # ============================================================
+
+    # ANSWER: 标记的最长可能前缀（用于流式检测时做前缀匹配）
+    # 当 buffer 以这些前缀之一结尾时，不能确定是 ANSWER: 还是其他内容，需等更多 token
+    _ANSWER_MARKER = "ANSWER:"
+    _ANSWER_PREFIXES = ("A", "AN", "ANS", "ANSW", "ANSWE", "ANSWER")
+
+    def _run_step_streaming(
+        self,
+        messages: list,
+        on_step: Optional[callable] = None,
+        show_thoughts: bool = True,
+    ) -> Tuple[str, Optional[str]]:
+        """流式接收 LLM 输出，实时检测 ANSWER: 标记。
+
+        策略：
+        1. 用 ``llm.chat_stream`` 逐 token 接收
+        2. 累积到 buffer，每收到一个 token 检查是否出现 ``ANSWER:``
+        3. 检测到 → 通知 ``stream_start``，ANSWER: 之后的 token 真流式回调 ``stream_token``
+        4. 流结束 → 对完整 answer 做 LaTeX 清理 + 引用检测，回调 ``done``
+        5. 未检测到 ``ANSWER:`` → 返回完整 reply，由调用方走旧工具调用解析路径
+
+        Args:
+            messages: 对话历史
+            on_step: 回调函数
+            show_thoughts: 是否显示 thought（影响 thought 回调时机）
+
+        Returns:
+            (reply, streamed_answer)
+            - streamed_answer 非 None：已走 ANSWER: 流式路径，reply 是完整 LLM 输出
+            - streamed_answer 为 None：未检测到 ANSWER:，reply 需走旧解析路径
+        """
+        buffer = ""
+        answer_started = False
+        answer_content = ""
+
+        try:
+            for token in self.llm.chat_stream(
+                messages, temperature=0.3, max_tokens=self.MAX_TOKENS,
+            ):
+                buffer += token
+
+                if not answer_started:
+                    # 检测 ANSWER: 标记
+                    idx = buffer.find(self._ANSWER_MARKER)
+                    if idx >= 0:
+                        # 找到 ANSWER: 标记，一次性提取完整 Thought 并回调
+                        # （不在累积过程中提前回调，避免 thought 被截断到首个 token）
+                        thought_part = buffer[:idx]
+                        if on_step:
+                            thought = self._extract_thought(thought_part)
+                            if thought:
+                                on_step("thought", thought)
+
+                        # ANSWER: 之后的 token 开始真流式输出
+                        after_marker = buffer[idx + len(self._ANSWER_MARKER):]
+                        answer_started = True
+                        answer_content = after_marker
+
+                        # 通知 CLI 层开始流式输出
+                        if on_step:
+                            on_step("stream_start", "")
+
+                        # 立即输出已经累积的 answer 部分
+                        if after_marker and on_step:
+                            on_step("stream_token", after_marker)
+                    # 未检测到 ANSWER: 时不回调 thought
+                    # 因为 Thought 通常在 "Thought:" 之后，可能跨越多个 token
+                    # 提前回调会显示不完整，等 ANSWER: 出现时一次性提取最完整
+                else:
+                    # ANSWER: 已检测到，token 真流式输出
+                    answer_content += token
+                    if on_step:
+                        on_step("stream_token", token)
+
+            # 流结束
+            if answer_started:
+                # 对完整 answer 做 LaTeX 清理 + 引用检测
+                answer = _sanitize_latex(answer_content)
+                answer += _check_citation_markers(answer)
+
+                if on_step:
+                    on_step("done", answer)
+                return buffer, answer
+            else:
+                # 未检测到 ANSWER:，返回完整 buffer 走旧路径
+                # thought 由调用方在 _extract_thought(reply) 时回调
+                return buffer, None
+
+        except LLMError:
+            # 流式调用失败，如果有部分输出，回退到阻塞调用重试
+            # （流式不重试是 client.py 的策略，但 Agent 层可以做一次阻塞重试）
+            if buffer and not answer_started:
+                logger.warning("LLM 流式调用失败，回退到阻塞调用")
+                reply = self.llm.chat(
+                    messages, temperature=0.3, max_tokens=self.MAX_TOKENS,
+                )
+                return reply, None
+            raise
 
     def _compress_messages(self, messages: list) -> None:
         """压缩上下文：截断过长的 tool result，防止超出 token 限制。"""
