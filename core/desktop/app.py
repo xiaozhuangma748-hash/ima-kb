@@ -79,7 +79,7 @@ def _create_pet_administrator():
     try:
         from core.pet.storage import PetStorage
         from core.storage import Storage
-        from core.memory.store import MemoryStore
+        from core.memory.store import MemoryStore, get_default_memory_store
         from core.retrieval.hybrid import HybridRetriever
         from core.retrieval.rerank import Reranker
         from core.llm.client import get_llm
@@ -91,7 +91,7 @@ def _create_pet_administrator():
             return None
 
         storage = Storage()
-        memory = MemoryStore()
+        memory = get_default_memory_store()
 
         # VectorIndex 可选（未安装向量依赖时传 None，HybridRetriever 降级为纯 BM25）
         vector_index = None

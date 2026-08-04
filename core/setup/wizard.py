@@ -162,9 +162,9 @@ def _step_choose_persona() -> None:
     choice = Prompt.ask("  选择默认人格", choices=list(personas.keys()), default="scholar")
 
     # 写入 ProfileManager（适配实际接口）
-    from core.memory.store import MemoryStore
+    from core.memory.store import MemoryStore, get_default_memory_store
     from core.memory.profile import ProfileManager
-    memory = MemoryStore()
+    memory = get_default_memory_store()
     pm = ProfileManager(memory)
     pm.update_style_preference(choice)
 
@@ -172,7 +172,11 @@ def _step_choose_persona() -> None:
 
 
 def _step_ingest_docs() -> None:
-    """Step 4: 入库首批文档（可选）。"""
+    """Step 4: 入库首批文档（可选）。
+
+    统一入库路径：走 IngestService，与 CLI/Web 行为一致，
+    自动启用 Contextual Retrieval、自动标签等增强能力。
+    """
     console.print("\n[bold]Step 4/5: 入库首批文档[/bold]")
     console.print("[dim]拖入文件路径或输入目录，直接回车跳过。[/dim]")
 
@@ -182,6 +186,7 @@ def _step_ingest_docs() -> None:
         return
 
     from core.ingestion.parser import is_supported, SUPPORTED_EXTENSIONS
+    from services.ingest_service import IngestService
     target = Path(path.strip()).expanduser().resolve()
 
     if not target.exists():
@@ -202,31 +207,20 @@ def _step_ingest_docs() -> None:
 
     console.print(f"  发现 {len(files)} 个文件，开始入库...")
 
-    from core.storage import Storage
-    from core.ingestion.parser import parse
-    from core.ingestion.chunker import chunk_document
-    storage = Storage()
-
-    success = 0
+    service = IngestService()
+    success, skipped = 0, 0
     for f in files:
-        try:
-            if not is_supported(f):
-                continue
-            parsed = parse(f)
-            if not parsed.text.strip():
-                continue
-            chunks = chunk_document(
-                parsed,
-                chunk_size=settings.chunk_size,
-                chunk_overlap=settings.chunk_overlap,
-            )
-            record = storage.save_document(parsed, chunks, copy_file=True)
+        if not is_supported(f):
+            continue
+        result = service.ingest_file(f, auto_tag=False, copy_file=True)
+        if result.status == "success":
             success += 1
-            console.print(f"    [green]✓[/green] {f.name} ({record.chunk_count} 块)")
-        except Exception as e:
-            console.print(f"    [red]✗[/red] {f.name}: {e}")
+            console.print(f"    [green]✓[/green] {f.name} ({result.chunks} 块)")
+        else:
+            skipped += 1
+            console.print(f"    [yellow]跳过[/yellow] {f.name}: {result.error}")
 
-    console.print(f"  [green]入库完成[/green]: {success}/{len(files)} 成功")
+    console.print(f"  [green]入库完成[/green]: {success} 成功 / {skipped} 跳过 / 共 {len(files)}")
 
 
 def _step_generate_memory() -> None:
@@ -237,12 +231,12 @@ def _step_generate_memory() -> None:
 
     # 收集配置摘要
     from core.pet.storage import PetStorage
-    from core.memory.store import MemoryStore
+    from core.memory.store import MemoryStore, get_default_memory_store
     from core.memory.profile import ProfileManager
 
     pet_storage = PetStorage()
     pet = pet_storage.load()
-    memory = MemoryStore()
+    memory = get_default_memory_store()
     pm = ProfileManager(memory)
     profile = pm.get_profile()
 

@@ -134,9 +134,9 @@ class PetMixin:
         # 领养后同步初始化记忆模块（__init__ 时 self.pet 为 None 会跳过）
         if self.memory_store is None:
             try:
-                from core.memory.store import MemoryStore
+                from core.memory.store import MemoryStore, get_default_memory_store
                 from core.memory.workflow import WorkflowTracker
-                self.memory_store = MemoryStore()
+                self.memory_store = get_default_memory_store()
                 self.workflow_tracker = WorkflowTracker(self.memory_store)
             except Exception as e:
                 console.print(f"[dim]记忆系统初始化失败: {e}[/dim]")

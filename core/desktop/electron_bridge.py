@@ -39,7 +39,7 @@ def _create_pet_administrator():
             return None
 
         storage = Storage()
-        memory = MemoryStore()
+        memory = get_default_memory_store()
 
         vector_index = None
         try:
@@ -399,8 +399,8 @@ class ElectronIpcServer(IpcServer):
 
     def _exec_memory(self, sub_arg: str):
         """记忆概览。"""
-        from core.memory.store import MemoryStore
-        store = MemoryStore()
+        from core.memory.store import MemoryStore, get_default_memory_store
+        store = get_default_memory_store()
         data = store.get_data()
         profile = data.get("profile", {})
         tasks = data.get("tasks", [])

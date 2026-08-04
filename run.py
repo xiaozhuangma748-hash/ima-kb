@@ -319,23 +319,31 @@ def ingest(path: str, verbose: bool) -> None:
     from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TaskProgressColumn
 
     success, skip = 0, 0
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
-        task_id = progress.add_task("入库中", total=len(files))
-        for f in files:
-            progress.update(task_id, description=f"入库: {f.name}")
-            result = _ingest_one(storage, f, verbose=verbose)
-            if result is True:
-                success += 1
-            else:
-                skip += 1
-            progress.advance(task_id)
-        progress.update(task_id, description=f"完成: {success} 成功, {skip} 跳过")
+    # 批量入库优化：开启 BM25 batch_mode，避免每个文档都全量 pickle 索引。
+    # 循环结束后统一 flush 一次。
+    storage.bm25.batch_mode = True
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task_id = progress.add_task("入库中", total=len(files))
+            for f in files:
+                progress.update(task_id, description=f"入库: {f.name}")
+                result = _ingest_one(storage, f, verbose=verbose)
+                if result is True:
+                    success += 1
+                else:
+                    skip += 1
+                progress.advance(task_id)
+            progress.update(task_id, description=f"完成: {success} 成功, {skip} 跳过")
+    finally:
+        # 统一刷新 BM25 索引（即使中途出错也要尝试保存已入库的部分）
+        storage.bm25.batch_mode = False
+        storage.bm25.flush()
 
     console.print(
         f"\n[bold]完成[/bold] · 成功 {success} / 跳过 {skip} / 共 {len(files)}\n"
@@ -612,11 +620,11 @@ def cli_memory(args: tuple) -> None:
       ima memory task cancel <id>     取消任务
       ima memory tasks                列出所有任务
     """
-    from core.memory.store import MemoryStore
+    from core.memory.store import MemoryStore, get_default_memory_store
     from core.memory.profile import ProfileManager
     from core.memory.tasks import TaskManager
 
-    memory = MemoryStore()
+    memory = get_default_memory_store()
 
     # 无参数 → 显示概览
     if not args:
@@ -821,10 +829,21 @@ def watch(path: str, interval: int, once: bool) -> None:
 
         console.print(f"[dim]{time.strftime('%H:%M:%S')} 发现 {len(new_files)} 个新文件[/dim]")
         success = 0
-        for f in new_files:
-            seen.add(str(f))
-            if _ingest_one(storage, f, verbose=False):
-                success += 1
+        # 启用 BM25 batch_mode（与 ima ingest 命令对齐）：
+        # 批量入库多个文件时避免每个文件都全量 pickle BM25 索引。
+        storage.bm25.batch_mode = True
+        try:
+            for f in new_files:
+                seen.add(str(f))
+                if _ingest_one(storage, f, verbose=False):
+                    success += 1
+        finally:
+            # 统一刷新 BM25 索引（即使中途出错也要保存已入库部分）
+            storage.bm25.batch_mode = False
+            try:
+                storage.bm25.flush()
+            except Exception:
+                pass
         if success:
             console.print(f"[green]✓ 本次入库 {success} 个文件[/green]\n")
         return success

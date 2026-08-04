@@ -12,7 +12,7 @@ from config import settings
 from core.storage import Storage
 from core.pet.administrator import PetAdministrator
 from core.pet.storage import PetStorage
-from core.memory.store import MemoryStore
+from core.memory.store import MemoryStore, get_default_memory_store
 from core.retrieval.hybrid import HybridRetriever
 from core.retrieval.vector import VectorIndex
 from core.retrieval.rerank import Reranker, create_reranker
@@ -70,7 +70,7 @@ class QAService:
         self.llm = llm or (get_llm() if settings.has_llm() else None)
 
         # 记忆
-        self.memory_store = memory_store or MemoryStore()
+        self.memory_store = memory_store or get_default_memory_store()
 
         # 待办
         self.todo_manager = todo_manager

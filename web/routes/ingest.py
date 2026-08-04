@@ -7,7 +7,6 @@ POST /api/ingest/clip     剪贴板入库 {title, content}
 from __future__ import annotations
 
 import tempfile
-import shutil
 from pathlib import Path
 from typing import List, Optional
 
@@ -64,14 +63,12 @@ async def ingest_upload(request: Request, files: List[UploadFile] = File(...)):
                     pass
             continue
 
-        # 保留一份到 quick 目录(使用安全文件名)
-        quick_dir = Path(settings.storage_path) / "uploads" / "quick"
-        quick_dir.mkdir(parents=True, exist_ok=True)
-        dest = quick_dir / safe_name
-        try:
-            shutil.copy(tmp_path, dest)
-        except Exception:
-            pass
+        # 修复冗余复制（P1-架构 统一入库路径）：
+        # 原实现先把 tmp 复制到 uploads/quick/<safe_name>，再调 ingest_file
+        # (copy_file=True 默认) 又复制到 uploads/<doc_id[:2]>/，
+        # 导致 quick 目录留下孤儿文件。
+        # 现在：直接让 IngestService 处理复制（copy_file=True 默认），
+        # original_name 仅用作显示名，不影响实际存储路径。
 
         result = service.ingest_file(tmp_path, original_name=safe_name)
         results.append({

@@ -381,6 +381,19 @@ class DocsMixin:
                     return False
                 progress.advance(task)
 
+                # 3.5 Contextual Retrieval：为每个 chunk 生成文档级摘要前缀
+                # （统一入库路径改造：补齐与 IngestService 一致的 Contextual Retrieval 能力）
+                if getattr(settings, "contextual_retrieval", False) and self.llm_available and chunks:
+                    try:
+                        from core.ingestion.contextualizer import contextualize_chunks
+                        from core.llm.client import LLMClient
+                        progress.update(task, description=f"[cyan]上下文[/cyan] {file_path.name}")
+                        chunks = contextualize_chunks(
+                            chunks, parsed, llm_client=LLMClient(), enabled=True,
+                        )
+                    except Exception as e:
+                        console.print(f"  [dim]Contextual Retrieval 跳过: {type(e).__name__}[/dim]")
+
                 # 4. 自动打标签
                 progress.update(task, description=f"[cyan]标签[/cyan] {file_path.name}")
                 tags: list[str] = []

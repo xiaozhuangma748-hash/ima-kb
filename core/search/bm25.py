@@ -228,6 +228,11 @@ class BM25Index:
         IDF(qi) = ln((N - n(qi) + 0.5) / (n(qi) + 0.5) + 1)
 
     线程安全：所有读写操作通过 self._lock 保护。
+
+    持久化优化（P1）：
+        - _dirty 标志：add/remove 时设为 True，save 后清除。避免无变化时的无效 I/O。
+        - batch_mode：批量入库时设为 True，save() 变为 no-op（只标记 _dirty），
+          循环结束后调用 flush() 一次性写入。避免批量入库 N 个文档时全量 pickle N 次。
     """
 
     def __init__(
@@ -254,6 +259,10 @@ class BM25Index:
 
         # 读写锁（可重入，支持嵌套调用）
         self._lock = threading.RLock()
+
+        # 持久化优化标志
+        self._dirty: bool = False      # 有未保存的变更
+        self._batch_mode: bool = False  # 批量模式：save() 变为 no-op
 
         # 加载已有索引
         self._load()
@@ -286,6 +295,8 @@ class BM25Index:
                 self._doc_freq[tok] = self._doc_freq.get(tok, 0) + 1
                 self._inverted.setdefault(tok, set()).add(chunk_id)
 
+            self._dirty = True
+
     def _remove_locked(self, chunk_id: str) -> bool:
         """从索引移除一个 chunk（调用方需持有锁）。"""
         entry = self._docs.pop(chunk_id, None)
@@ -302,6 +313,7 @@ class BM25Index:
                 postings.discard(chunk_id)
                 if not postings:
                     del self._inverted[tok]
+        self._dirty = True
         return True
 
     def remove(self, chunk_id: str) -> bool:
@@ -316,6 +328,7 @@ class BM25Index:
             self._doc_freq.clear()
             self._inverted.clear()
             self._total_length = 0
+            self._dirty = True
 
     # ---- 检索 ----
 
@@ -383,19 +396,64 @@ class BM25Index:
     # ---- 持久化 ----
 
     def save(self) -> None:
-        """保存索引到磁盘。"""
+        """保存索引到磁盘。
+
+        优化（P1）：
+        - batch_mode=True 时变为 no-op（只标记 _dirty），由 flush() 统一写入。
+          批量入库 N 个文档时避免全量 pickle N 次。
+        - _dirty=False 时跳过，避免无变化时的无效 I/O。
+        """
         with self._lock:
-            self.index_path.parent.mkdir(parents=True, exist_ok=True)
-            # 注意：k1/b 不持久化，作为运行时参数由代码默认值决定，
-            # 这样调参后无需重建索引即可生效
-            data = {
-                "docs": self._docs,
-                "doc_freq": self._doc_freq,
-                "inverted": self._inverted,
-                "total_length": self._total_length,
-            }
-            with open(self.index_path, "wb") as f:
-                pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            # 批量模式：只标记 dirty，不真正写入
+            if self._batch_mode:
+                self._dirty = True
+                return
+            # 无变化时跳过
+            if not self._dirty:
+                return
+            self._save_locked()
+
+    def _save_locked(self) -> None:
+        """实际写入磁盘（调用方需持有锁）。"""
+        self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        # 注意：k1/b 不持久化，作为运行时参数由代码默认值决定，
+        # 这样调参后无需重建索引即可生效
+        data = {
+            "docs": self._docs,
+            "doc_freq": self._doc_freq,
+            "inverted": self._inverted,
+            "total_length": self._total_length,
+        }
+        # 原子写入：先写临时文件再 rename，避免崩溃导致索引损坏
+        tmp_path = self.index_path.with_suffix(self.index_path.suffix + ".tmp")
+        with open(tmp_path, "wb") as f:
+            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        tmp_path.replace(self.index_path)
+        self._dirty = False
+
+    def flush(self) -> None:
+        """显式刷新：强制写入所有未保存的变更。
+
+        批量入库结束后调用，确保所有变更持久化。
+        与 save() 的区别：忽略 batch_mode，强制写入。
+        """
+        with self._lock:
+            if self._dirty:
+                self._save_locked()
+
+    @property
+    def batch_mode(self) -> bool:
+        """是否处于批量模式（save() 变为 no-op）。"""
+        return self._batch_mode
+
+    @batch_mode.setter
+    def batch_mode(self, value: bool) -> None:
+        """开启/关闭批量模式。
+
+        开启时：add/remove 只更新内存，save() 变为 no-op。
+        关闭时：不会自动 flush，调用方需显式调用 flush()。
+        """
+        self._batch_mode = bool(value)
 
     def _load(self) -> None:
         """从磁盘加载索引。

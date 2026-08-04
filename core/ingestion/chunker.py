@@ -401,7 +401,14 @@ def _chunk_pdf(text: str, chunk_size: int, chunk_overlap: int) -> List[tuple[int
         page_num = int(m.group(1))
         page_start = m.end()
         page_end = markers[i + 1].start() if i + 1 < len(markers) else len(text)
-        page_text = text[page_start:page_end].strip()
+        # 修复偏移错位：strip() 会去掉前导/后缀空白，但 page_start 仍指向标记末尾，
+        # 导致 abs_start 计算时把前导空白算进去，chunk.start_char 偏小。
+        # 修正：记录前导空白长度，page_text 的实际起始位置 = page_start + leading_ws_len。
+        raw_page_text = text[page_start:page_end]
+        leading_ws_len = len(raw_page_text) - len(raw_page_text.lstrip())
+        page_text = raw_page_text.strip()
+        # page_text 在原 text 中的真实起始位置（用于后续 abs_start 计算）
+        page_text_start = page_start + leading_ws_len
 
         if not page_text:
             continue
@@ -410,6 +417,7 @@ def _chunk_pdf(text: str, chunk_size: int, chunk_overlap: int) -> List[tuple[int
         sections = _split_pdf_page_by_headings(page_text)
 
         # 对每个 section 做二级切分
+        # section_offset 基于 stripped page_text 内部累加
         section_offset = 0
         current_heading = ""
         for section_text, section_heading in sections:
@@ -418,10 +426,14 @@ def _chunk_pdf(text: str, chunk_size: int, chunk_overlap: int) -> List[tuple[int
             # 在 section 内部用通用策略切分
             sub_pieces = _chunk_text(section_text, chunk_size, chunk_overlap)
             for local_s, local_e, sub_text in sub_pieces:
-                abs_start = page_start + section_offset + local_s
-                abs_end = page_start + section_offset + local_e
+                # 用 page_text_start（修正后的位置）计算绝对偏移
+                abs_start = page_text_start + section_offset + local_s
+                abs_end = page_text_start + section_offset + local_e
                 pieces.append((abs_start, abs_end, sub_text, page_num, current_heading))
-            section_offset += len(section_text) + 2  # +2 for \n\n separator
+            # section 之间用 \n 分隔（_split_pdf_page_by_headings 按行切分），
+            # 但 _chunk_text 内部会做合并，section_text 长度是 stripped 后的，
+            # 用 +1 估算分隔符（避免 +2 多算导致后续 section 偏移）
+            section_offset += len(section_text) + 1  # +1 for \n separator
 
     return pieces
 

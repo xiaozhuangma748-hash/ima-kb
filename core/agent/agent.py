@@ -39,27 +39,9 @@ from core.agent.tools.base import ToolContext
 logger = logging.getLogger(__name__)
 
 
-# LaTeX 命令 → Unicode 字符映射（流式和最终清理共用）
-_LATEX_REPLACEMENTS = {
-    r"\times": "×", r"\div": "÷", r"\approx": "≈",
-    r"\leq": "≤", r"\le": "≤", r"\geq": "≥", r"\ge": "≥",
-    r"\neq": "≠", r"\equiv": "≡", r"\pm": "±", r"\cdot": "·",
-}
-
-
-def _sanitize_latex(text: str) -> str:
-    """清理 LaTeX 数学公式语法（与 core.pet.administrator._sanitize_latex 保持一致）。
-
-    Agent 最终答案流式输出前调用，确保 LaTeX 公式在终端 Markdown 中可读。
-    """
-    text = re.sub(r"\$\$(.*?)\$\$", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"\$(.*?)\$", r"\1", text, flags=re.DOTALL)
-    for latex, char in _LATEX_REPLACEMENTS.items():
-        text = text.replace(latex, char)
-    text = re.sub(r"\\mathbf\{(.*?)\}", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"\\text\{(.*?)\}", r"\1", text, flags=re.DOTALL)
-    text = text.replace("\\\\", "\n")
-    return text.replace("  ", " ")
+# LaTeX 清理：统一委托给 core.format.latex.sanitize_latex（DRY）
+# 保留本模块 _sanitize_latex 名称以兼容现有调用点和 tests/test_sanitize_latex.py
+from core.format.latex import sanitize_latex as _sanitize_latex
 
 
 def _check_citation_markers(text: str) -> str:

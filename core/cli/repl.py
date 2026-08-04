@@ -37,7 +37,7 @@ from core.pet.interact import PetInteractor
 from core.pet.tasks import DailyTaskManager
 from core.pet.shop import Shop
 from core.pet.administrator import PetAdministrator
-from core.memory.store import MemoryStore
+from core.memory.store import MemoryStore, get_default_memory_store
 from core.memory.workflow import WorkflowTracker
 from core.memory.cross_session import CrossSessionMemory
 
@@ -126,7 +126,7 @@ class REPL(
         self._vector_available: Optional[bool] = None  # None=未检测, True/False=已检测
         if self.pet:
             try:
-                self.memory_store = MemoryStore()
+                self.memory_store = get_default_memory_store()
                 self.workflow_tracker = WorkflowTracker(self.memory_store)
             except Exception as e:
                 console.print(f"[dim]记忆系统初始化失败: {e}[/dim]")

@@ -207,7 +207,7 @@ def cmd_ask(question: str) -> int:
         from core.pet.administrator import PetAdministrator
         from core.pet.storage import PetStorage
         from core.storage import Storage
-        from core.memory.store import MemoryStore
+        from core.memory.store import MemoryStore, get_default_memory_store
         from core.retrieval.hybrid import HybridRetriever
         from core.retrieval.rerank import Reranker
         from core.llm.client import get_llm
@@ -224,7 +224,7 @@ def cmd_ask(question: str) -> int:
             return 2
 
         storage = Storage()
-        memory = MemoryStore()
+        memory = get_default_memory_store()
 
         vector_index = None
         try:

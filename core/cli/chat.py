@@ -148,52 +148,13 @@ class ChatMixin:
 
     @staticmethod
     def _sanitize_latex(text: str) -> str:
-        """清理 LLM 输出的 LaTeX 数学公式，使其在 Markdown 中可读。
+        """清理 LLM 输出的 LaTeX 数学公式（公共实现见 core.format.latex）。
 
-        处理规则：
-        - $$...$$ / $...$  → 去掉 $ 符号，保留内容
-        - \\times          → ×
-        - \\div            → ÷
-        - \\approx         → ≈
-        - \\leq / \\le     → ≤
-        - \\geq / \\ge     → ≥
-        - \\mathbf{...}    → 只保留花括号内容
-        - \\text{...}      → 只保留花括号内容
+        保留此方法名以兼容 tests/test_sanitize_latex.py 等调用点，
+        实际逻辑委托给 core.format.latex.sanitize_latex（DRY）。
         """
-        import re
-
-        # 1. 去掉 $$...$$ 和 $...$ 的外层符号（保留内容）
-        text = re.sub(r"\$\$(.*?)\$\$", r"\1", text, flags=re.DOTALL)
-        text = re.sub(r"\$(.*?)\$", r"\1", text, flags=re.DOTALL)
-
-        # 2. 常见 LaTeX 命令替换
-        replacements = {
-            r"\times": "×",
-            r"\div": "÷",
-            r"\approx": "≈",
-            r"\leq": "≤",
-            r"\le": "≤",
-            r"\geq": "≥",
-            r"\ge": "≥",
-            r"\neq": "≠",
-            r"\equiv": "≡",
-            r"\pm": "±",
-            r"\cdot": "·",
-        }
-        for latex, char in replacements.items():
-            text = text.replace(latex, char)
-
-        # 3. \\mathbf{...} / \\text{...} → 只保留花括号内容
-        text = re.sub(r"\\mathbf\{(.*?)\}", r"\1", text, flags=re.DOTALL)
-        text = re.sub(r"\\text\{(.*?)\}", r"\1", text, flags=re.DOTALL)
-
-        # 4. LaTeX 换行 \\ → 换行符
-        text = text.replace("\\\\", "\n")
-
-        # 5. 清理因去掉 $ 后可能残留的换行空格
-        text = text.replace("  ", " ")
-
-        return text
+        from core.format.latex import sanitize_latex
+        return sanitize_latex(text)
 
     @staticmethod
     def _sanitize_citations(text: str, num_sources: int) -> str:

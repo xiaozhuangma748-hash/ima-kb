@@ -26,29 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 def _sanitize_latex(text: str) -> str:
-    """清理 LaTeX 数学公式语法（与 core.cli.chat.ChatMixin._sanitize_latex 保持一致）。"""
-    import re
-    text = re.sub(r"\$\$(.*?)\$\$", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"\$(.*?)\$", r"\1", text, flags=re.DOTALL)
-    replacements = {
-        r"\times": "×",
-        r"\div": "÷",
-        r"\approx": "≈",
-        r"\leq": "≤",
-        r"\le": "≤",
-        r"\geq": "≥",
-        r"\ge": "≥",
-        r"\neq": "≠",
-        r"\equiv": "≡",
-        r"\pm": "±",
-        r"\cdot": "·",
-    }
-    for latex, char in replacements.items():
-        text = text.replace(latex, char)
-    text = re.sub(r"\\mathbf\{(.*?)\}", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"\\text\{(.*?)\}", r"\1", text, flags=re.DOTALL)
-    text = text.replace("\\\\", "\n")
-    return text.replace("  ", " ")
+    """清理 LaTeX 数学公式语法（公共实现见 core.format.latex）。
+
+    保留此函数名以兼容现有调用点（administrator.py 内部和 tests/test_sanitize_latex.py），
+    实际逻辑委托给 core.format.latex.sanitize_latex。
+    """
+    from core.format.latex import sanitize_latex
+    return sanitize_latex(text)
 
 
 def _sanitize_memory_markers(text: str) -> str:

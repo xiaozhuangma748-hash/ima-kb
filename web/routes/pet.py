@@ -23,8 +23,8 @@ def _get_preferred_style() -> str:
     """从 ProfileManager 读取当前风格偏好，失败回退 'auto'。"""
     try:
         from core.memory.profile import ProfileManager
-        from core.memory.store import MemoryStore
-        mgr = ProfileManager(MemoryStore())
+        from core.memory.store import MemoryStore, get_default_memory_store
+        mgr = ProfileManager(get_default_memory_store())
         return mgr.get_profile().preferred_style
     except Exception:
         return "auto"
@@ -129,9 +129,9 @@ async def pet_style(body: PetStyleBody):
 
     try:
         from core.memory.profile import ProfileManager
-        from core.memory.store import MemoryStore
+        from core.memory.store import MemoryStore, get_default_memory_store
 
-        mgr = ProfileManager(MemoryStore())
+        mgr = ProfileManager(get_default_memory_store())
         mgr.update_style_preference(body.style)
 
         return {

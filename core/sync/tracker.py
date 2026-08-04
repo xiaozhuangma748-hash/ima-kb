@@ -228,10 +228,11 @@ class FileTracker:
         """增量同步整个目录。
 
         检测新增/修改/删除的文件，自动入库/更新/清理。
+
+        统一入库路径：所有新增/修改文件统一走 IngestService，
+        保证 Contextual Retrieval、自动标签等增强能力一致启用。
         """
-        from core.ingestion.parser import parse, is_supported
-        from core.ingestion.chunker import chunk_document
-        from config import settings
+        from services.ingest_service import IngestService
 
         result = SyncResult()
         d = Path(dir_path)
@@ -271,24 +272,22 @@ class FileTracker:
                         result.errors.append(f"删除失败 {fp}: {e}")
 
         # 4. 检测新增和修改的文件
+        # 统一通过 IngestService 入库（启用 Contextual Retrieval + auto_tag）
+        service = IngestService(storage=storage)
         for fp in current_files:
             status = self.check_file_status(fp)
             if status == "new":
                 try:
-                    parsed = parse(Path(fp))
-                    if not parsed.text.strip():
-                        result.skipped.append(fp)
-                        continue
-                    chunks = chunk_document(
-                        parsed,
-                        chunk_size=settings.chunk_size,
-                        chunk_overlap=settings.chunk_overlap,
+                    ingest_result = service.ingest_file(
+                        Path(fp), auto_tag=False, copy_file=True,
                     )
-                    record = storage.save_document(parsed, chunks, copy_file=True)
-                    self.track_file(fp, record.id)
-                    result.added.append(fp)
-                    if on_progress:
-                        on_progress("added", fp)
+                    if ingest_result.status == "success":
+                        self.track_file(fp, ingest_result.doc_id)
+                        result.added.append(fp)
+                        if on_progress:
+                            on_progress("added", fp)
+                    else:
+                        result.skipped.append(fp)
                 except Exception as e:
                     result.errors.append(f"入库失败 {fp}: {e}")
 
@@ -302,20 +301,16 @@ class FileTracker:
                     if row:
                         storage.delete_document(row["doc_id"])
 
-                    parsed = parse(Path(fp))
-                    if not parsed.text.strip():
-                        result.skipped.append(fp)
-                        continue
-                    chunks = chunk_document(
-                        parsed,
-                        chunk_size=settings.chunk_size,
-                        chunk_overlap=settings.chunk_overlap,
+                    ingest_result = service.ingest_file(
+                        Path(fp), auto_tag=False, copy_file=True,
                     )
-                    record = storage.save_document(parsed, chunks, copy_file=True)
-                    self.track_file(fp, record.id)
-                    result.updated.append(fp)
-                    if on_progress:
-                        on_progress("updated", fp)
+                    if ingest_result.status == "success":
+                        self.track_file(fp, ingest_result.doc_id)
+                        result.updated.append(fp)
+                        if on_progress:
+                            on_progress("updated", fp)
+                    else:
+                        result.skipped.append(fp)
                 except Exception as e:
                     result.errors.append(f"更新失败 {fp}: {e}")
 

@@ -262,19 +262,25 @@ class TestStepChoosePersona:
     def test_each_persona_can_be_selected(self, tmp_path, monkeypatch, choice):
         """四种人格风格都能被正确保存。"""
         monkeypatch.setattr(wizard.settings, "storage_path", tmp_path)
+        # 单例改造后：wizard 写入 get_default_memory_store() 单例，
+        # 测试需读取同一单例（或先 reset 后用独立实例）
+        from core.memory.store import reset_default_memory_store
+        reset_default_memory_store()
 
         with patch.object(wizard.Prompt, "ask", return_value=choice):
             wizard._step_choose_persona()
 
-        from core.memory.store import MemoryStore
+        from core.memory.store import get_default_memory_store
         from core.memory.profile import ProfileManager
-        pm = ProfileManager(MemoryStore())
+        pm = ProfileManager(get_default_memory_store())
         profile = pm.get_profile()
         assert profile.preferred_style == choice
 
     def test_default_is_scholar(self, tmp_path, monkeypatch):
         """默认人格是 scholar。"""
         monkeypatch.setattr(wizard.settings, "storage_path", tmp_path)
+        from core.memory.store import reset_default_memory_store
+        reset_default_memory_store()
 
         # Prompt.ask 返回 default 值时传 default="scholar"
         def fake_ask(prompt, **kwargs):
@@ -282,9 +288,9 @@ class TestStepChoosePersona:
         with patch.object(wizard.Prompt, "ask", side_effect=fake_ask):
             wizard._step_choose_persona()
 
-        from core.memory.store import MemoryStore
+        from core.memory.store import get_default_memory_store
         from core.memory.profile import ProfileManager
-        pm = ProfileManager(MemoryStore())
+        pm = ProfileManager(get_default_memory_store())
         assert pm.get_profile().preferred_style == "scholar"
 
 

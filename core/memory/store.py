@@ -5,6 +5,7 @@ import copy
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -82,3 +83,43 @@ class MemoryStore:
         """清空所有记忆。"""
         self._data = copy.deepcopy(DEFAULT_MEMORY)
         self.save()
+
+
+# ============================================================
+# 单例工厂：默认 MemoryStore 共享同一实例
+# ============================================================
+# 背景：生产代码中多处 MemoryStore() 无参调用会创建独立实例，
+# 每个实例都重新 load 文件且内存数据不共享，导致跨模块修改不可见。
+# 通过 get_default_memory_store() 获取单例，保证全局一致。
+# 测试代码继续用 MemoryStore(storage_path=tmp_path) 显式传路径以隔离。
+_default_instance: Optional["MemoryStore"] = None
+_default_lock = threading.Lock()
+
+
+def get_default_memory_store() -> "MemoryStore":
+    """获取默认 MemoryStore 单例（线程安全）。
+
+    首次调用时惰性创建，后续调用返回同一实例。
+    生产代码应优先使用此函数而非 MemoryStore()，
+    测试代码隔离场景仍可用 MemoryStore(storage_path=...) 创建独立实例。
+
+    Returns:
+        全局共享的 MemoryStore 实例
+    """
+    global _default_instance
+    if _default_instance is None:
+        with _default_lock:
+            # 双重检查锁定，避免多个线程同时进入临界区
+            if _default_instance is None:
+                _default_instance = MemoryStore()
+    return _default_instance
+
+
+def reset_default_memory_store() -> None:
+    """重置单例（主要用于测试场景）。
+
+    一般生产代码不需要调用此函数。
+    """
+    global _default_instance
+    with _default_lock:
+        _default_instance = None
