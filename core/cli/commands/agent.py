@@ -375,16 +375,14 @@ class AgentMixin:
                     console.print(f"  [red][ERR] {err}[/red]")
 
             elif step_type == "stream_start":
-                # 流式输出开始：停止其他 spinner/live，启动纯 spinner 的 Live
+                # 流式输出开始：停止其他 spinner/live
                 _stop_spinner()
                 _stop_live()
                 stream_text[0] = ""
-                # 流式期间显示纯 spinner 动画（无文字），下方实时渲染 Markdown
-                gen_spinner = Spinner(
-                    "dots", text=Text("", style="dim"), style="cyan",
-                )
+                # 流式期间只渲染 Markdown（文字逐个出现就是进度指示，不需要 spinner）
+                # 之前的 Spinner("dots") 会在 done 时残留 ⠋ 字符（transient 擦除不干净）
                 stream_live[0] = Live(
-                    Group(gen_spinner, Text("")),
+                    Text(""),
                     console=console,
                     refresh_per_second=30,
                     transient=True,
@@ -395,15 +393,12 @@ class AgentMixin:
                 # 流式输出 token：实时更新 Markdown（不降级纯文本）
                 if stream_live[0]:
                     stream_text[0] += content
-                    gen_spinner = Spinner(
-                        "dots", text=Text("", style="dim"), style="cyan",
-                    )
-                    # 用 Markdown 实时渲染，保持格式一致性（不再先纯文本后 Markdown 跳变）
+                    # 用 Markdown 实时渲染，保持格式一致性
                     try:
                         md = Markdown(stream_text[0])
                     except Exception:
                         md = Text(stream_text[0])
-                    stream_live[0].update(Group(gen_spinner, md))
+                    stream_live[0].update(md)
 
             elif step_type == "done":
                 _stop()
