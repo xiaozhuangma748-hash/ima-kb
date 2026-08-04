@@ -536,19 +536,22 @@ def _ocr_pdf_page(page) -> str:
 # 各格式解析函数
 # ============================================================
 
-def _extract_pdf_page_blocks(page) -> list[str]:
+def _extract_pdf_page_blocks(page) -> list[dict]:
     """用 get_text("dict") 提取单页文本块，按阅读顺序排序。
 
     相比 page.get_text() 的改进：
     - 按 (y0, x0) 排序，恢复阅读顺序（多栏布局下避免左右栏交错）
     - 返回块列表，每块是 span 文本拼接，保留段落边界
     - 检测多栏布局，按栏内顺序输出
+    - 保留 font_size 供下游推断标题层级
 
     Args:
         page: fitz.Page 对象
 
     Returns:
-        该页的文本块列表（每块对应一个 block，已按阅读顺序排序）
+        该页的文本块列表，每块是 dict：
+        {"text": str, "font_size": float, "x0/y0/x1/y1": float}
+        （已按阅读顺序排序）
     """
     import fitz  # noqa: F401  PyMuPDF
     page_dict = page.get_text("dict")
@@ -604,7 +607,237 @@ def _extract_pdf_page_blocks(page) -> list[str]:
     else:
         text_blocks.sort(key=lambda b: (b["y0"], b["x0"]))
 
-    return [b["text"] for b in text_blocks]
+    return text_blocks
+
+
+def _infer_heading_level(block_font_size: float, body_font_size: float) -> int:
+    """根据字号相对大小推断标题层级。
+
+    策略：以正文字号为基准，相对大小判断层级
+    - font_size >= body * 1.8 → H1 (文档标题级)
+    - font_size >= body * 1.4 → H2 (章节级)
+    - font_size >= body * 1.15 → H3 (小节级)
+    - 其他 → 0 (正文，不标记)
+
+    Args:
+        block_font_size: 当前块的字号
+        body_font_size: 该页正文字号（众数）
+
+    Returns:
+        标题层级 1/2/3，0 表示非标题
+    """
+    if body_font_size <= 0 or block_font_size <= 0:
+        return 0
+    ratio = block_font_size / body_font_size
+    if ratio >= 1.8:
+        return 1
+    if ratio >= 1.4:
+        return 2
+    if ratio >= 1.15:
+        return 3
+    return 0
+
+
+def _detect_body_font_size(blocks: list[dict]) -> float:
+    """检测页面正文字号（出现次数最多的字号）。
+
+    用众数作为正文字号基准，避免被标题字号干扰。
+    """
+    if not blocks:
+        return 0.0
+    from collections import Counter
+    # 按块文本长度加权统计（正文块通常比标题块长）
+    weighted: Counter = Counter()
+    for b in blocks:
+        sz = round(b.get("font_size", 0), 1)
+        if sz > 0:
+            # 用文本长度作权重，让正文字号占主导
+            weighted[sz] += len(b.get("text", ""))
+    if not weighted:
+        return 0.0
+    return weighted.most_common(1)[0][0]
+
+
+def _mark_headings(blocks: list[dict]) -> None:
+    """为块标注标题层级（原地修改，添加 'heading_level' 字段）。
+
+    仅对短文本块（<= 80 字符）标记为标题，长文本即使字号大也不标
+    （可能是大字号的引言段落）。
+    """
+    body_size = _detect_body_font_size(blocks)
+    if body_size <= 0:
+        for b in blocks:
+            b["heading_level"] = 0
+        return
+    for b in blocks:
+        text = b.get("text", "").strip()
+        # 标题判定：字号达标 + 文本短 + 不以句号结尾
+        if (
+            len(text) <= 80
+            and not text.endswith(("。", "！", "？", "；", "."))
+            and _infer_heading_level(b.get("font_size", 0), body_size) > 0
+        ):
+            b["heading_level"] = _infer_heading_level(b["font_size"], body_size)
+        else:
+            b["heading_level"] = 0
+
+
+def _bbox_in_table(bbox: list, table_bbox: tuple, tolerance: float = 3.0) -> bool:
+    """判断文本块 bbox 是否在表格 bbox 内（带容差）。
+
+    Args:
+        bbox: 文本块 bbox [x0, y0, x1, y1]
+        table_bbox: 表格 bbox (x0, y0, x1, y1)
+        tolerance: 容差（点），允许块稍微超出表格边界
+    """
+    if not bbox or not table_bbox:
+        return False
+    x0, y0, x1, y1 = bbox[0], bbox[1], bbox[2], bbox[3]
+    tx0, ty0, tx1, ty1 = table_bbox
+    return (
+        x0 >= tx0 - tolerance and y0 >= ty0 - tolerance
+        and x1 <= tx1 + tolerance and y1 <= ty1 + tolerance
+    )
+
+
+def _table_to_markdown(table_data: list, max_rows: int = 30) -> str:
+    """把 find_tables().extract() 的二维数组转成 Markdown 表格。
+
+    Args:
+        table_data: 二维列表，每行是单元格文本列表
+        max_rows: 最大行数（防止超大表格爆 token）
+
+    Returns:
+        Markdown 表格字符串，如：
+        | 列1 | 列2 |
+        |---|---|
+        | 值1 | 值2 |
+    """
+    if not table_data:
+        return ""
+
+    # 截断超长表格
+    if len(table_data) > max_rows:
+        table_data = table_data[:max_rows]
+        truncated = True
+    else:
+        truncated = False
+
+    # 清理单元格文本（去换行、去首尾空格）
+    def _clean(cell) -> str:
+        if cell is None:
+            return ""
+        return str(cell).replace("\n", " ").replace("|", "\\|").strip()
+
+    rows = [[_clean(c) for c in row] for row in table_data]
+    if not rows:
+        return ""
+
+    # 确定列数（取最大）
+    col_count = max(len(row) for row in rows)
+    if col_count == 0:
+        return ""
+
+    # 补齐每行列数
+    for row in rows:
+        while len(row) < col_count:
+            row.append("")
+
+    # 第一行作表头，如果只有一行则补空表头
+    if len(rows) == 1:
+        header = rows[0]
+        body = []
+    else:
+        header = rows[0]
+        body = rows[1:]
+
+    lines = []
+    # 表头
+    lines.append("| " + " | ".join(header) + " |")
+    # 分隔行
+    lines.append("|" + "|".join(["---"] * col_count) + "|")
+    # 数据行
+    for row in body:
+        lines.append("| " + " | ".join(row) + " |")
+
+    if truncated:
+        lines.append(f"*（表格已截断，共显示 {max_rows} 行）*")
+
+    return "\n".join(lines)
+
+
+def _mark_table_blocks(page, blocks: list[dict]) -> list[tuple]:
+    """用 find_tables() 检测表格，转 Markdown 表格插入 blocks。
+
+    策略：
+    1. 用 page.find_tables() 找到所有表格
+    2. 把表格区域的文本块从 blocks 中移除（避免重复）
+    3. 把 Markdown 表格作为新块按 y 坐标位置插入 blocks
+
+    原地修改 blocks（移除表格内文本块，插入表格块）。
+    返回表格 bbox 列表（供调试/统计）。
+    """
+    try:
+        tables = page.find_tables()
+    except Exception:
+        return []
+
+    table_list = getattr(tables, "tables", []) or []
+    if not table_list:
+        return []
+
+    table_bboxes: list[tuple] = []
+    table_dicts: list[dict] = []
+
+    for tbl in table_list:
+        try:
+            data = tbl.extract()
+        except Exception:
+            continue
+        md = _table_to_markdown(data)
+        if not md.strip():
+            continue
+        bbox = tuple(tbl.bbox) if tbl.bbox else None
+        table_bboxes.append(bbox)
+        # 用表格中心点 y 作排序键
+        y_center = (bbox[1] + bbox[3]) / 2 if bbox else 0
+        table_dicts.append({
+            "text": md,
+            "font_size": 0,  # 表格块不参与标题判定
+            "x0": bbox[0] if bbox else 0,
+            "y0": bbox[1] if bbox else 0,
+            "x1": bbox[2] if bbox else 0,
+            "y1": bbox[3] if bbox else 0,
+            "heading_level": 0,
+            "is_table": True,
+        })
+
+    if not table_dicts:
+        return []
+
+    # 移除在表格 bbox 内的文本块
+    filtered_blocks = []
+    for b in blocks:
+        in_table = False
+        for tbbox in table_bboxes:
+            if _bbox_in_table([b["x0"], b["y0"], b["x1"], b["y1"]], tbbox):
+                in_table = True
+                break
+        if not in_table:
+            filtered_blocks.append(b)
+
+    # 清空原 blocks 再重新填充
+    blocks.clear()
+    blocks.extend(filtered_blocks)
+
+    # 把表格块按 y 坐标插入到正确位置
+    for td in table_dicts:
+        blocks.append(td)
+
+    # 重新排序
+    blocks.sort(key=lambda b: (b.get("y0", 0), b.get("x0", 0)))
+
+    return table_bboxes
 
 
 def _detect_header_footer(page_texts: list[list[str]], min_repeat: int = 3) -> tuple[set[str], set[str]]:
@@ -775,11 +1008,14 @@ def _merge_visual_line_breaks(text: str) -> str:
 def _parse_pdf(file_path: Path) -> ParsedDocument:
     """解析 PDF：先尝试提取文本层（结构感知），若为空则走 OCR。
 
-    改进点（P0）：
+    改进点：
     - 用 get_text("dict") 按阅读顺序提取，检测多栏布局
     - 检测并去除重复的页眉页脚
     - 合并视觉换行（单 \\n），保留段落分隔（双 \\n）
     - 保留页码分隔标记（\\n\\n--- Page N ---\\n\\n），供下游分块使用
+    - O3: 用 font_size 推断标题层级，转成 Markdown #/##/### 标记
+    - O1: 用 find_tables() 还原表格结构为 Markdown 表格
+    - O2: 文本块少的页提取图片块走 OCR
 
     Args:
         file_path: PDF 文件路径
@@ -789,7 +1025,8 @@ def _parse_pdf(file_path: Path) -> ParsedDocument:
     """
     import fitz  # PyMuPDF
 
-    raw_page_texts: list[list[str]] = []  # 每页的文本块列表（未去页眉页脚）
+    # 每页的块列表（dict 格式，含 font_size/heading_level）
+    raw_page_blocks: list[list[dict]] = []
     page_count = 0
     ocr_pages: list[int] = []
     ocr_failed_pages: list[int] = []
@@ -798,45 +1035,71 @@ def _parse_pdf(file_path: Path) -> ParsedDocument:
         page_count = len(doc)
         for i, page in enumerate(doc):
             blocks = _extract_pdf_page_blocks(page)
-            total_text = "\n".join(blocks).strip()
+            # O1: 提取表格并标记表格区域，避免文本块重复
+            table_bboxes = _mark_table_blocks(page, blocks)
+            # O3: 标注标题层级
+            _mark_headings(blocks)
+            total_text = "\n".join(b["text"] for b in blocks).strip()
+
             # 判断该页是否需要 OCR：文本层几乎为空（< 50 字符）
             if total_text and len(total_text) >= 50:
-                raw_page_texts.append(blocks)
+                raw_page_blocks.append(blocks)
             else:
-                # 走 OCR
+                # O2: 文本块少 + 有图片块 → 提取图片块走 OCR
+                ocr_text = ""
                 if _check_ocr():
                     try:
+                        # 先尝试整页 OCR（扫描件兜底）
                         ocr_text = _ocr_pdf_page(page)
                         if ocr_text.strip():
-                            # _ocr_image 已内置 _clean_ocr_text 后处理（含视觉换行合并）
-                            raw_page_texts.append([ocr_text])
                             ocr_pages.append(i + 1)
                         else:
-                            raw_page_texts.append([])
                             ocr_failed_pages.append(i + 1)
                     except Exception:
-                        raw_page_texts.append([])
                         ocr_failed_pages.append(i + 1)
+                if ocr_text.strip():
+                    raw_page_blocks.append([{
+                        "text": ocr_text, "font_size": 0, "heading_level": 0,
+                    }])
                 else:
-                    raw_page_texts.append([])
+                    raw_page_blocks.append([])
 
-    # 检测页眉页脚
-    header_set, footer_set = _detect_header_footer(raw_page_texts)
+    # 检测页眉页脚（用 text 字符串）
+    header_set, footer_set = _detect_header_footer(
+        [[b["text"] for b in blocks] for blocks in raw_page_blocks]
+    )
 
-    # 组装最终文本：去页眉页脚 + 合并视觉换行 + 页码分隔标记
+    # 组装最终文本：去页眉页脚 + 标题转 # + 合并视觉换行 + 页码分隔标记
     page_sections: list[str] = []
-    for i, blocks in enumerate(raw_page_texts):
+    for i, blocks in enumerate(raw_page_blocks):
         if not blocks:
             continue
         filtered: list[str] = []
         for b in blocks:
-            if not _is_header_footer(b, header_set, footer_set):
-                filtered.append(b)
+            if not _is_header_footer(b["text"], header_set, footer_set):
+                # O3: 标题块转 Markdown 标记
+                level = b.get("heading_level", 0)
+                if level > 0:
+                    filtered.append("#" * level + " " + b["text"])
+                else:
+                    filtered.append(b["text"])
         if not filtered:
             continue
+        # O1: 表格块（含 |---|）不参与视觉换行合并，用双换行与正文分隔
+        # 策略：把表格块用占位符替换 → 合并正文换行 → 换回表格
+        _TABLE_PLACEHOLDER_PREFIX = "\x00TABLE_"
+        placeholders: dict[str, str] = {}
+        for idx_b, b in enumerate(filtered):
+            if "|---|" in b:
+                key = f"{_TABLE_PLACEHOLDER_PREFIX}{idx_b}\x00"
+                placeholders[key] = b
+                filtered[idx_b] = key
         page_text = "\n".join(filtered)
-        # 合并视觉换行
+        # 合并视觉换行（只作用于正文，表格已替换为占位符）
         page_text = _merge_visual_line_breaks(page_text)
+        # 换回表格块
+        for key, original in placeholders.items():
+            page_text = page_text.replace(key, original)
         # 加页码分隔标记（供 chunker 识别页边界）
         page_sections.append(f"--- Page {i + 1} ---\n{page_text}")
 
