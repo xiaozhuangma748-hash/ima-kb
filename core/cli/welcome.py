@@ -368,16 +368,6 @@ def _render_welcome_panel(stats: dict, llm_available: bool, pet: Optional["Pet"]
     console.print()
 
 
-def _pad_to_width(text: Text, width: int) -> Text:
-    """将 Text 填充/截断到指定列宽（中文按 2 列计算）。"""
-    cur = cell_len(text.plain)
-    if cur < width:
-        text.append(" " * (width - cur))
-    elif cur > width:
-        truncated = set_cell_size(text.plain, width - 1) + "…"
-        text = Text(truncated, style=text.style)
-    return text
-
 
 def _render_pet_compact(pet: "Pet") -> tuple:
     """渲染宠物紧凑横版（2 行）。返回 (line1, line2)。

@@ -39,6 +39,14 @@ from core.agent.tools.base import ToolContext
 logger = logging.getLogger(__name__)
 
 
+# LaTeX 命令 → Unicode 字符映射（流式和最终清理共用）
+_LATEX_REPLACEMENTS = {
+    r"\times": "×", r"\div": "÷", r"\approx": "≈",
+    r"\leq": "≤", r"\le": "≤", r"\geq": "≥", r"\ge": "≥",
+    r"\neq": "≠", r"\equiv": "≡", r"\pm": "±", r"\cdot": "·",
+}
+
+
 def _sanitize_latex(text: str) -> str:
     """清理 LaTeX 数学公式语法（与 core.pet.administrator._sanitize_latex 保持一致）。
 
@@ -46,12 +54,7 @@ def _sanitize_latex(text: str) -> str:
     """
     text = re.sub(r"\$\$(.*?)\$\$", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"\$(.*?)\$", r"\1", text, flags=re.DOTALL)
-    replacements = {
-        r"\times": "×", r"\div": "÷", r"\approx": "≈",
-        r"\leq": "≤", r"\le": "≤", r"\geq": "≥", r"\ge": "≥",
-        r"\neq": "≠", r"\equiv": "≡", r"\pm": "±", r"\cdot": "·",
-    }
-    for latex, char in replacements.items():
+    for latex, char in _LATEX_REPLACEMENTS.items():
         text = text.replace(latex, char)
     text = re.sub(r"\\mathbf\{(.*?)\}", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"\\text\{(.*?)\}", r"\1", text, flags=re.DOTALL)
@@ -538,7 +541,12 @@ class Agent:
                     # ANSWER: 已检测到，token 真流式输出
                     answer_content += token
                     if on_step:
-                        on_step("stream_token", token)
+                        # 流式时做简单 LaTeX 替换（不需要上下文的）
+                        # $$...$$ 和 $...$ 等需要上下文的在流结束后统一清理
+                        clean_token = token
+                        for latex, char in _LATEX_REPLACEMENTS.items():
+                            clean_token = clean_token.replace(latex, char)
+                        on_step("stream_token", clean_token)
 
             # 流结束
             if answer_started:

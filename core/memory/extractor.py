@@ -125,11 +125,18 @@ class MemoryExtractor:
         if not isinstance(facts, list):
             facts = [facts] if isinstance(facts, str) else []
 
-        # 过滤掉非字符串元素
-        topics = [str(t) for t in topics if t]
-        questions = [str(q) for q in questions if q]
-        facts = [str(f) for f in facts if f]
-        preferences = {str(k): str(v) for k, v in preferences.items() if k and v}
+        # 过滤掉非字符串元素和纯空白
+        topics = [str(t).strip() for t in topics if t]
+        topics = [t for t in topics if t]
+        questions = [str(q).strip() for q in questions if q]
+        questions = [q for q in questions if q]
+        facts = [str(f).strip() for f in facts if f]
+        facts = [f for f in facts if f]
+        preferences = {
+            str(k).strip(): str(v).strip()
+            for k, v in preferences.items()
+            if k and v and str(k).strip() and str(v).strip()
+        }
 
         return self.memory.merge_extraction(
             preferences=preferences,

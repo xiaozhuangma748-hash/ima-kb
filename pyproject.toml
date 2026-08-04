@@ -77,10 +77,15 @@ Homepage = "https://github.com/xiaozhuangma748-hash/ima-kb"
 packages = ["core", "core.classify", "core.ingestion", "core.llm", "core.qa", "core.search",
     "core.retrieval", "core.memory", "core.persona", "core.pet", "core.pet.arts",
     "core.session", "core.sync", "core.analyze", "core.report", "core.reader",
-    "core.agent", "core.agent.tools", "core.graph", "core.classify", "core.ui",
+    "core.agent", "core.agent.tools", "core.graph", "core.ui",
     "core.cli", "core.cli.commands", "core.setup",
+    "core.image", "core.todo", "core.desktop", "core.context",
     "web", "web.routes"]
 # 根目录的顶层 .py 文件（run.py / repl.py / config.py）
 py-modules = ["run", "repl", "config"]
 # 包含非 Python 文件
 include-package-data = true
+
+[tool.setuptools.package-data]
+core.pet.arts = ["*.txt"]
+core.desktop = ["*.json", "*.html", "*.js", "*.css"]

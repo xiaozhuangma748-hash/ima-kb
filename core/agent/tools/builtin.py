@@ -428,6 +428,16 @@ class AnalyzeTool(Tool):
 
     def execute(self, context: Optional[ToolContext] = None, *, file_path: str, **_: Any) -> str:
         path = Path(file_path).expanduser().resolve()
+        # 安全：限制在允许的目录内，防止路径遍历（如 /etc/passwd、~/.ssh/id_rsa）
+        from config import settings
+        allowed_dirs = [Path(settings.storage_path).resolve(), Path.cwd().resolve()]
+        if hasattr(settings, "data_dir"):
+            allowed_dirs.append(Path(settings.data_dir).resolve())
+        if not any(str(path).startswith(str(d)) for d in allowed_dirs):
+            return "拒绝访问：文件不在允许的目录内。仅支持 storage_path / data_dir / 当前工作目录下的文件。"
+        # 仅允许数据文件扩展名
+        if path.suffix.lower() not in {".xlsx", ".xls", ".csv", ".json"}:
+            return f"不支持的文件格式：{path.suffix}。仅支持 .xlsx/.xls/.csv/.json"
         if not path.exists():
             return f"文件不存在: {path}"
 

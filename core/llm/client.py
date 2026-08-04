@@ -87,13 +87,15 @@ class LLMClient:
             except Exception as e:
                 last_err = e
                 err_type = type(e).__name__
-                # 判断是否可重试
+                # 4xx 客户端错误不重试（鉴权/参数错误，重试只会浪费成本）
+                status_code = getattr(e, "status_code", None)
+                if status_code is not None and 400 <= status_code < 500:
+                    raise LLMError(f"LLM 调用失败: {err_type}: {e}") from e
+                # 判断是否可重试（网络/超时/5xx 服务端错误）
                 should_retry = (
                     any(t in err_type for t in _RETRYABLE_ERRORS)
                     and attempt < max_retries
                 )
-                # 对 5xx 状态码单独判断（APIStatusError 可能是 4xx 也可能 5xx）
-                status_code = getattr(e, "status_code", None)
                 if status_code is not None and 500 <= status_code < 600 and attempt < max_retries:
                     should_retry = True
                 if not should_retry:

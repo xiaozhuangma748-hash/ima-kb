@@ -897,11 +897,13 @@ def _is_header_footer(text: str, header_set: set, footer_set: set) -> bool:
     if normalized in header_set or normalized in footer_set:
         return True
     # 模糊匹配：页眉页脚集合中的项是否是当前文本的前缀/后缀
+    # 限制：匹配项长度 ≥ 4 字符，且原文长度不超过匹配项 + 5 字符
+    # （避免"附件"误匹配"附件1：XXX"等正文标题）
     for h in header_set:
-        if h and (normalized.startswith(h) or normalized.endswith(h)):
+        if len(h) >= 4 and len(normalized) <= len(h) + 5 and (normalized.startswith(h) or normalized.endswith(h)):
             return True
     for f in footer_set:
-        if f and (normalized.startswith(f) or normalized.endswith(f)):
+        if len(f) >= 4 and len(normalized) <= len(f) + 5 and (normalized.startswith(f) or normalized.endswith(f)):
             return True
     return False
 

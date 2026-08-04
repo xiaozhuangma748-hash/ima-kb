@@ -118,9 +118,14 @@ def _run_headless(question: str, output: str = "text") -> None:
     _sync_pet_state("listening")
     _sync_pet_state("thinking")
 
-    with console.status("[bold yellow]AI 检索 + 思考中...[/bold yellow]", spinner="dots"):
-        result = service.ask(question)
-    service.save_state()
+    try:
+        with console.status("[bold yellow]AI 检索 + 思考中...[/bold yellow]", spinner="dots"):
+            result = service.ask(question)
+    except Exception as e:
+        console.print(f"[red]问答失败: {type(e).__name__}: {e}[/red]")
+        return
+    finally:
+        service.save_state()
 
     # 桌面宠物状态联动：完成
     _sync_pet_state("celebrating")
