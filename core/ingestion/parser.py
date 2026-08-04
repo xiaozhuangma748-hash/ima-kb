@@ -23,6 +23,7 @@ OCR 流程：图片预处理（灰度+二值化+放大）→ PaddleOCR → 降�
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Optional
@@ -1204,26 +1205,20 @@ def _parse_docx(file_path: Path) -> ParsedDocument:
         else:
             parts.append(text)
 
-    # 2. 表格内容（键值对序列化，与 xlsx 一致）
+    # 2. 表格内容（Markdown 表格格式，与 PDF 统一）
     for tbl_idx, table in enumerate(doc.tables):
         rows = table.rows
         if not rows:
             continue
-        # 第一行作为表头
-        headers = [
-            (cell.text.strip() if cell.text.strip() else f"列{i+1}")
-            for i, cell in enumerate(rows[0].cells)
-        ]
-        for row in rows[1:]:
-            pairs = []
-            for i, cell in enumerate(row.cells):
-                if i >= len(headers):
-                    break
-                val = cell.text.strip()
-                if val:
-                    pairs.append(f"{headers[i]}={val}")
-            if pairs:
-                parts.append("[表格] " + " | ".join(pairs))
+        # 提取二维列表
+        table_data = []
+        for row in rows:
+            row_data = [cell.text.strip() for cell in row.cells]
+            table_data.append(row_data)
+        # 转成 Markdown 表格
+        md_table = _table_to_markdown(table_data)
+        if md_table:
+            parts.append(md_table)
 
     text = "\n\n".join(parts)
     return ParsedDocument(
@@ -1236,8 +1231,81 @@ def _parse_docx(file_path: Path) -> ParsedDocument:
     )
 
 
+def _find_libreoffice() -> str | None:
+    """查找 LibreOffice 可执行文件（跨平台）。
+
+    查找顺序：
+    1. PATH 中的 soffice / libreoffice
+    2. macOS 应用包 /Applications/LibreOffice.app/Contents/MacOS/soffice
+
+    Returns:
+        可执行文件路径，未找到返回 None
+    """
+    from shutil import which
+
+    # 1. PATH 查找
+    for cmd in ("soffice", "libreoffice"):
+        path = which(cmd)
+        if path:
+            return path
+
+    # 2. macOS 应用包
+    if sys.platform == "darwin":
+        macos_path = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+        if Path(macos_path).exists():
+            return macos_path
+
+    return None
+
+
+def _doc_to_docx_via_libreoffice(file_path: Path) -> Path | None:
+    """用 LibreOffice headless 把 .doc 转成 .docx。
+
+    Args:
+        file_path: .doc 文件路径
+
+    Returns:
+        转换后的 .docx 临时文件路径，失败返回 None
+    """
+    import subprocess
+    import tempfile
+
+    soffice = _find_libreoffice()
+    if not soffice:
+        return None
+
+    # 用临时目录接收转换结果
+    out_dir = tempfile.mkdtemp(prefix="ima_doc_convert_")
+    try:
+        result = subprocess.run(
+            [
+                soffice, "--headless",
+                "--convert-to", "docx",
+                "--outdir", out_dir,
+                str(file_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,  # 防止卡死
+        )
+        if result.returncode != 0:
+            return None
+        # 转换后的文件名：原文件名 + .docx
+        docx_path = Path(out_dir) / (file_path.stem + ".docx")
+        if docx_path.exists():
+            return docx_path
+        return None
+    except (subprocess.TimeoutExpired, Exception):
+        return None
+
+
 def _parse_doc(file_path: Path) -> ParsedDocument:
-    """解析旧版 Word .doc：用 macOS 自带 textutil 转成纯文本。
+    """解析旧版 Word .doc：优先用 LibreOffice 转 DOCX，降级用 textutil。
+
+    转换策略：
+    1. 优先用 LibreOffice headless 转成 .docx → 复用 _parse_docx（保留样式 + 表格）
+    2. LibreOffice 不可用时，macOS 降级用 textutil 转 txt（丢样式）
+    3. 都不可用则报错
 
     Args:
         file_path: .doc 文件路径
@@ -1246,35 +1314,53 @@ def _parse_doc(file_path: Path) -> ParsedDocument:
         ParsedDocument
 
     Raises:
-        ParseError: textutil 不可用或转换失败
+        ParseError: 无可用转换工具或转换失败
     """
     import subprocess
     from shutil import which
 
-    if which("textutil") is None:
-        raise ParseError(
-            f"解析 .doc 需要 macOS textutil（系统自带），当前环境不可用: {file_path.name}"
-        )
+    # 1. 优先用 LibreOffice 转 DOCX（保留样式 + 表格）
+    docx_path = _doc_to_docx_via_libreoffice(file_path)
+    if docx_path is not None:
+        try:
+            parsed = _parse_docx(docx_path)
+            # 修正 file_path 和 file_type 为原始 .doc
+            parsed.file_path = file_path
+            parsed.file_type = ".doc"
+            parsed.meta["converter"] = "libreoffice"
+            return parsed
+        finally:
+            # 清理临时文件
+            try:
+                docx_path.unlink()
+                docx_path.parent.rmdir()
+            except Exception:
+                pass
 
-    try:
-        # textutil -convert txt -stdout 输出到 stdout
-        result = subprocess.run(
-            ["textutil", "-convert", "txt", "-stdout", str(file_path)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        text = result.stdout.strip()
-    except subprocess.CalledProcessError as e:
-        raise ParseError(f"textutil 转换失败 [{file_path.name}]: {e.stderr}") from e
+    # 2. 降级：macOS textutil 转 txt（丢样式）
+    if which("textutil") is not None:
+        try:
+            result = subprocess.run(
+                ["textutil", "-convert", "txt", "-stdout", str(file_path)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            text = result.stdout.strip()
+            return ParsedDocument(
+                text=text,
+                title=file_path.stem,
+                file_path=file_path,
+                file_type=".doc",
+                meta={"converter": "textutil"},
+                format_tag="docx",
+            )
+        except subprocess.CalledProcessError as e:
+            raise ParseError(f"textutil 转换失败 [{file_path.name}]: {e.stderr}") from e
 
-    return ParsedDocument(
-        text=text,
-        title=file_path.stem,
-        file_path=file_path,
-        file_type=".doc",
-        meta={"converter": "textutil"},
-        format_tag="docx",
+    # 3. 都不可用
+    raise ParseError(
+        f"解析 .doc 需要安装 LibreOffice（推荐）或在 macOS 上使用 textutil: {file_path.name}"
     )
 
 
@@ -1375,26 +1461,21 @@ def _parse_pptx(file_path: Path) -> ParsedDocument:
                     line = para.text.strip()
                     if line:
                         texts.append(line)
-            # 2.2 表格 shape
+            # 2.2 表格 shape（Markdown 表格格式，与 PDF/DOCX 统一）
             if shape.has_table:
                 tbl = shape.table
                 rows = tbl.rows
                 if not rows:
                     continue
-                headers = [
-                    (cell.text.strip() if cell.text.strip() else f"列{i+1}")
-                    for i, cell in enumerate(rows[0].cells)
-                ]
-                for row in rows[1:]:
-                    pairs = []
-                    for i, cell in enumerate(row.cells):
-                        if i >= len(headers):
-                            break
-                        val = cell.text.strip()
-                        if val:
-                            pairs.append(f"{headers[i]}={val}")
-                    if pairs:
-                        texts.append("[幻灯片表格] " + " | ".join(pairs))
+                # 提取二维列表
+                table_data = []
+                for row in rows:
+                    row_data = [cell.text.strip() for cell in row.cells]
+                    table_data.append(row_data)
+                # 转成 Markdown 表格
+                md_table = _table_to_markdown(table_data)
+                if md_table:
+                    texts.append(md_table)
 
         # 3. 备注（notes_slide）— 讲者备注常含关键补充信息
         try:
@@ -1427,11 +1508,132 @@ def _parse_pptx(file_path: Path) -> ParsedDocument:
     )
 
 
-def _parse_html(file_path: Path) -> ParsedDocument:
-    """解析 HTML：用 trafilatura 抽取正文。"""
-    import trafilatura
+def _html_to_markdown(html_text: str) -> str:
+    """把 HTML 转成结构化 Markdown：保留 H1-H6 标题层级 + 表格。
 
+    策略：
+    1. 先用 trafilatura 提取正文（去导航/广告/侧栏）
+    2. 用 trafilatura 的 extract 结果作为纯净 HTML 基础
+    3. 但 trafilatura 2.0 的 markdown 输出实测不保留 # 标记
+    4. 所以用 BeautifulSoup 直接解析原始 HTML，保留 H1-H6 + 表格 + 段落
+
+    Args:
+        html_text: 原始 HTML 字符串
+
+    Returns:
+        结构化 Markdown 文本（含 # 标题和 Markdown 表格）
+    """
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html_text, "html.parser")
+
+    # 移除 script/style/nav/footer 等干扰元素
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header", "aside"]):
+        tag.decompose()
+
+    # 找到正文容器（优先 article/main，否则用 body）
+    content = soup.find("article") or soup.find("main") or soup.body or soup
+
+    parts: list[str] = []
+
+    def _process_tag(element) -> None:
+        """递归处理 HTML 元素，转成 Markdown。"""
+        from bs4 import NavigableString, Tag
+
+        if isinstance(element, NavigableString):
+            text = str(element).strip()
+            if text:
+                parts.append(text)
+            return
+
+        if not isinstance(element, Tag):
+            return
+
+        name = element.name.lower()
+
+        # 标题 H1-H6 → Markdown #/##/###
+        if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            level = int(name[1])
+            text = element.get_text(strip=True)
+            if text:
+                parts.append("#" * level + " " + text)
+            return
+
+        # 段落
+        if name == "p":
+            text = element.get_text(strip=True)
+            if text:
+                parts.append(text)
+            return
+
+        # 列表
+        if name in ("ul", "ol"):
+            for i, li in enumerate(element.find_all("li", recursive=False), 1):
+                text = li.get_text(strip=True)
+                if text:
+                    prefix = f"{i}. " if name == "ol" else "- "
+                    parts.append(prefix + text)
+            return
+
+        # 表格 → Markdown 表格（复用 _table_to_markdown）
+        if name == "table":
+            table_data: list[list[str]] = []
+            for tr in element.find_all("tr"):
+                row = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
+                if row:
+                    table_data.append(row)
+            if table_data:
+                md = _table_to_markdown(table_data)
+                if md:
+                    parts.append(md)
+            return
+
+        # 引用块
+        if name == "blockquote":
+            text = element.get_text(strip=True)
+            if text:
+                parts.append("> " + text)
+            return
+
+        # 其他容器：递归处理子元素
+        for child in element.children:
+            _process_tag(child)
+
+    _process_tag(content)
+
+    # 合并并清理多余空行
+    result = "\n\n".join(p for p in parts if p.strip())
+    return result
+
+
+def _parse_html(file_path: Path) -> ParsedDocument:
+    """解析 HTML：trafilatura 提正文 + BeautifulSoup 保结构。
+
+    两层处理：
+    1. trafilatura.extract() 提取正文（去导航/广告/侧栏）
+    2. _html_to_markdown() 保留 H1-H6 标题层级 + 表格结构
+
+    如果 trafilatura 提取失败，降级为直接 BeautifulSoup 解析。
+    """
     html_text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    # 优先用 _html_to_markdown（保留结构）
+    try:
+        md_text = _html_to_markdown(html_text)
+        if md_text and len(md_text.strip()) >= 20:
+            return ParsedDocument(
+                text=md_text.strip(),
+                title=file_path.stem,
+                file_path=file_path,
+                file_type=".html",
+                meta={"extractor": "bs4"},
+                format_tag="html",
+            )
+    except Exception:
+        pass
+
+    # 降级：trafilatura 纯文本提取
+    import trafilatura
     text = trafilatura.extract(html_text) or ""
     return ParsedDocument(
         text=text.strip(),
