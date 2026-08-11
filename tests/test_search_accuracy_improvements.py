@@ -194,11 +194,11 @@ class TestWeightedRRF:
 
 
 # ============================================================
-# 改进 2 续：_rerank_by_exact_match 单字 token 过滤
+# 改进 2 续：rerank_by_exact_match 单字 token 过滤
 # ============================================================
 
 class TestRerankFiltersSingleChar:
-    """_rerank_by_exact_match 识别区分性词时过滤单字 token。"""
+    """rerank_by_exact_match 识别区分性词时过滤单字 token。"""
 
     def test_single_char_not_treated_as_distinctive(self):
         """单字 token 不应被识别为区分性词。"""
@@ -220,7 +220,7 @@ class TestRerankFiltersSingleChar:
         r2.score = 5.0
 
         results = [r1, r2]
-        out = storage._rerank_by_exact_match("养老中心", results)
+        out = storage.rerank_by_exact_match("养老中心", results)
         # r1 含"养老""中心"多字 token，应被加权
         # r2 只含单字"中"，被过滤后无区分性词命中
         # 验证 r1 排在 r2 前面

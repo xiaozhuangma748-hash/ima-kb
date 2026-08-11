@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from rich.live import Live
 from rich.spinner import Spinner
@@ -28,11 +28,14 @@ except ImportError:
 
 from core.ui.theme import get_theme
 from core.llm.client import LLMError
-from core.qa.chain import RAGChain
-from core.pet.administrator import AnswerResult
 from core.cli.constants import console
 from core.cli.welcome import _record_activity
 from config import settings
+
+# 类型检查时才导入的重模块（运行时按需在方法内局部导入，避免冷启动 ~388ms 开销）
+if TYPE_CHECKING:
+    from core.qa.chain import RAGChain
+    from core.pet.administrator import AnswerResult
 
 
 # 宠物互动意图识别：自然语言 → 互动动作
@@ -537,6 +540,7 @@ class ChatMixin:
         # 懒加载 RAGChain（已升级为混合检索 + 多轮 query expansion）
         if self.rag is None:
             try:
+                from core.qa.chain import RAGChain  # 局部导入：避免冷启动加载重检索模块
                 self.rag = RAGChain(storage=self.storage)
             except LLMError as e:
                 console.print(f"[red]LLM 初始化失败:[/red] {e}")
@@ -710,8 +714,12 @@ class ChatMixin:
                             session=session_name,
                             source=source,
                         )
-                except Exception:
-                    pass  # SQLite 写入失败不应影响主流程
+                except Exception as e:
+                    # SQLite 写入失败不应影响主流程，但需记录以便排查
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"跨会话关键事实写入 SQLite 失败: {type(e).__name__}: {e}"
+                    )
 
             # 详细反馈：显示新增的记忆
             new_items: list[str] = []

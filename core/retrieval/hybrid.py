@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import List, Optional
@@ -9,6 +10,7 @@ from typing import List, Optional
 from core.search.bm25 import BM25Index, SearchResult
 from core.retrieval.vector import VectorIndex, VectorResult
 from core.retrieval.semantic_cache import SemanticCache
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +46,16 @@ _PRECISE_MARKERS = (
 
 # 并发检索线程池（复用，避免每次创建）
 _executor: Optional[ThreadPoolExecutor] = None
+_executor_lock = threading.Lock()
 
 
 def _get_executor() -> ThreadPoolExecutor:
-    """获取共享线程池（lazy init）。"""
+    """获取共享线程池（lazy init，线程安全双检锁）。"""
     global _executor
     if _executor is None:
-        _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="hybrid")
+        with _executor_lock:
+            if _executor is None:
+                _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="hybrid")
     return _executor
 
 
@@ -66,6 +71,9 @@ class HybridResult:
     paragraph_num: int = 0  # 真实段落号（chunk 的 index_in_doc + 1，由 storage.enrich_hybrid_results 填充）
     format_tag: str = ""    # 格式标签（由 storage.enrich_hybrid_results 从 file_type 映射填充）
     heading: str = ""       # 所属章节标题（由 storage.enrich_hybrid_results 填充，PDF rerank 用）
+    # 优化：一次查询同时取回 parent_content，让下游 parent_document.enrich_results
+    # 直接复用，避免对每个 doc_id 再次 SELECT *（N+1 查询）
+    parent_content: str = ""
 
 
 class HybridRetriever:
@@ -91,8 +99,11 @@ class HybridRetriever:
         # content/doc_title/paragraph_num（修复引用溯源标题缺失问题）
         self.storage = storage
         # 语义缓存（默认启用，threshold=0.92, ttl=30min）
+        # 修复：显式指定独立 db_path，避免与 PetAdministrator 默认路径冲突
+        # （两者原本都落到 storage_path/semantic_cache.db，并发写入会触发 SQLite lock）
         self.cache = semantic_cache if semantic_cache is not None else (
-            SemanticCache() if enable_cache else None
+            SemanticCache(db_path=settings.cache_dir / "hybrid_cache.db")
+            if enable_cache else None
         )
 
     def search(
@@ -183,7 +194,7 @@ class HybridRetriever:
         if self.storage is not None and results:
             results = self.storage.enrich_hybrid_results(results)
             # 精确匹配重排序：对包含查询区分性词的结果加分
-            results = self.storage._rerank_by_exact_match(query, results)
+            results = self.storage.rerank_by_exact_match(query, results)
 
         # 3. 写入语义缓存（只缓存有结果的查询）
         if (

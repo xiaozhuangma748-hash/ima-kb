@@ -11,16 +11,25 @@
 - 摘要 prompt 简短（< 200 tokens 输入 + < 100 tokens 输出）
 - 失败 chunk 跳过（不阻塞入库）
 - 可通过开关禁用
+
+性能：
+- 并行化：多 chunk 摘要通过 ThreadPoolExecutor 并发请求
+  （OpenAI SDK 基于 httpx，线程安全；并发度可通过 max_workers 配置）
 """
 from __future__ import annotations
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional
 
 from .chunker import Chunk
 from .parser import ParsedDocument
 
 logger = logging.getLogger(__name__)
+
+# 并发度：默认 4，可通过环境变量 IMA_CONTEXTUAL_WORKERS 覆盖
+_DEFAULT_WORKERS = 4
 
 
 # 摘要 prompt 模板（参考 Anthropic Contextual Retrieval）
@@ -101,17 +110,22 @@ def contextualize_chunks(
     doc: ParsedDocument,
     llm_client=None,
     enabled: bool = True,
+    max_workers: Optional[int] = None,
 ) -> List[Chunk]:
     """为 chunks 列表批量生成上下文摘要并前缀到 content。
 
     原地修改 chunks 的 content 字段（前缀摘要），返回同一列表。
     失败的 chunk 保持原样（不阻塞入库）。
 
+    并行化：通过 ThreadPoolExecutor 并发请求 LLM，大幅缩短大文档处理时间。
+    OpenAI SDK 基于 httpx，连接池线程安全，可放心并发。
+
     Args:
         chunks: 待处理的分块列表
         doc: 所属文档
         llm_client: LLM 客户端（None 时不做处理）
         enabled: 是否启用（默认 True，可通过配置关闭）
+        max_workers: 并发度（默认从 IMA_CONTEXTUAL_WORKERS 环境变量读取，否则 4）
 
     Returns:
         处理后的 chunks 列表（与输入同一对象）
@@ -119,16 +133,58 @@ def contextualize_chunks(
     if not enabled or llm_client is None or not chunks:
         return chunks
 
+    # 单 chunk 直接串行，避免线程池开销
+    if len(chunks) == 1:
+        summary = generate_context_for_chunk(chunks[0], doc, llm_client)
+        if summary:
+            chunks[0].content = f"[文档上下文] {summary}\n[内容] {chunks[0].content}"
+        logger.info("Contextual Retrieval 完成: 1/1 chunks 成功生成摘要")
+        return chunks
+
+    # 解析并发度
+    if max_workers is None:
+        try:
+            max_workers = int(os.environ.get("IMA_CONTEXTUAL_WORKERS", _DEFAULT_WORKERS))
+        except (TypeError, ValueError):
+            max_workers = _DEFAULT_WORKERS
+    # 并发度不超过 chunk 数
+    max_workers = max(1, min(max_workers, len(chunks)))
+
     success_count = 0
+    # 用 chunk.index 作为键，保证写入顺序与原 chunks 一致（避免内容错位）
+    summaries: dict = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_chunk = {
+            executor.submit(
+                generate_context_for_chunk, chunk, doc, llm_client
+            ): chunk
+            for chunk in chunks
+        }
+        for future in as_completed(future_to_chunk):
+            chunk = future_to_chunk[future]
+            try:
+                summary = future.result()
+            except Exception as e:
+                logger.warning(
+                    f"Contextual Retrieval 并行任务异常 chunk#{chunk.index}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                summary = None
+            if summary:
+                summaries[id(chunk)] = summary
+                success_count += 1
+
+    # 主线程串行写入结果，避免对 chunks 的并发写
     for chunk in chunks:
-        summary = generate_context_for_chunk(chunk, doc, llm_client)
+        summary = summaries.get(id(chunk))
         if summary:
             # 摘要前缀到 content，用分隔符隔开
             # 注意：BM25 索引也会看到这个前缀（提升关键词召回）
             chunk.content = f"[文档上下文] {summary}\n[内容] {chunk.content}"
-            success_count += 1
 
     logger.info(
-        f"Contextual Retrieval 完成: {success_count}/{len(chunks)} chunks 成功生成摘要"
+        f"Contextual Retrieval 完成: {success_count}/{len(chunks)} chunks 成功生成摘要 "
+        f"(并发度 {max_workers})"
     )
     return chunks

@@ -152,12 +152,26 @@ class SessionStore:
         return sessions
 
     def delete(self, name: str) -> bool:
-        """删除会话。返回是否删除成功。"""
+        """删除会话。返回是否删除成功。
+
+        同时清理对应的跨会话记忆目录，避免同名新会话继承旧记忆。
+        """
         path = self._path(name)
+        deleted = False
         if path.exists():
             path.unlink()
-            return True
-        return False
+            deleted = True
+        # 清理跨会话记忆目录（与 _init_session_memory 的路径规则一致）
+        try:
+            from config import settings
+            session_safe = self._safe_name(name)
+            memory_dir = settings.storage_path / "memory" / "sessions" / session_safe
+            if memory_dir.exists():
+                import shutil
+                shutil.rmtree(memory_dir)
+        except Exception:
+            pass  # 记忆目录清理失败不阻断会话删除
+        return deleted
 
     def get_meta(self, name: str) -> Optional[Dict[str, Any]]:
         """获取会话元信息。"""

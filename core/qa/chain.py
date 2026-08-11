@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Iterator, List, Optional, Tuple
@@ -30,7 +31,6 @@ from core.retrieval.query_transform import transform_query, QueryTransformResult
 from core.retrieval.parent_document import enrich_results as enrich_parent_context
 from core.retrieval.context_optimizer import (
     reorder_lost_in_middle,
-    compress_results,
 )
 from core.retrieval.semantic_cache import SemanticCache
 from core.qa.citation_validator import validate_answer
@@ -38,6 +38,8 @@ from core.qa.self_verifier import SelfVerifier, VerificationResult
 from core.search.bm25 import BM25Index
 from core.retrieval.vector import VectorIndex
 from core.context.token_budget import TokenBudget, count_tokens
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -228,8 +230,7 @@ class RAGChain:
                 threshold=0.92, ttl=1800, max_size=500, db_path=cache_db,
             )
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"RAGChain 答案缓存初始化失败，降级无缓存: {e}")
+            logger.warning(f"RAGChain 答案缓存初始化失败，降级无缓存: {e}")
 
     def _query_embedding(self, query: str) -> Optional[List[float]]:
         """取 query 的 embedding 向量（供答案缓存使用）。
@@ -275,8 +276,7 @@ class RAGChain:
             try:
                 return self.hybrid.search(q, top_k=top_k, use_cache=False, doc_ids=doc_ids)
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"子问题检索失败 '{q[:30]}': {e}")
+                logger.warning(f"子问题检索失败 '{q[:30]}': {e}")
                 return []
 
         # 并行检索
@@ -331,8 +331,7 @@ class RAGChain:
                 if q_emb is not None:
                     cached = self._answer_cache.get("qa:" + question, q_emb)
                     if cached is not None and cached.answer:
-                        import logging
-                        logging.getLogger(__name__).info(f"RAGChain 答案缓存命中: {question[:30]}...")
+                        logger.info(f"RAGChain 答案缓存命中: {question[:30]}...")
                         return Answer(
                             question=question,
                             content=cached.answer,
@@ -343,8 +342,7 @@ class RAGChain:
                             low_confidence=False,
                         )
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"RAGChain 答案缓存查询失败，跳过: {e}")
+                logger.warning(f"RAGChain 答案缓存查询失败，跳过: {e}")
 
         # 1. Query 变换：HyDE + 子问题分解
         # 历史感知检索：把多轮上下文补强到检索 query（配置开关控制，失败回退原 query）
@@ -390,6 +388,9 @@ class RAGChain:
                 reranked = self.reranker.rerank(question, results, top_n=top_n)
             except Exception as e:
                 # 重排序失败，保留原混合结果
+                logger.warning(
+                    f"重排序失败，使用原混合结果: {type(e).__name__}: {e}"
+                )
                 reranked = results
 
         # 4. 确定最终使用的结果
@@ -416,13 +417,11 @@ class RAGChain:
         if self.storage is not None and getattr(settings, "parent_window", 0) > 0:
             final_results = enrich_parent_context(self.storage, final_results)
 
-        # 4.6 Lost in Middle 重排 + Context 压缩
+        # 4.6 Lost in Middle 重排
         # 重排：最相关放两端，避免 LLM 忽略中间信息
         final_results = reorder_lost_in_middle(final_results)
-        # 压缩：超长 content 截断
-        max_chars = getattr(settings, "context_max_chars", 0)
-        if max_chars > 0:
-            compress_results(final_results, max_chars=max_chars)
+        # 注：删除 compress_results 字符截断 — TokenBudget.allocate 已按 token 精确截断
+        # 双重截断会污染下游 SelfVerifier 的输入（拿到截断后的 content 误判幻觉）
 
         # 4.7 Token 预算分配（上下文工程 P0）
         # 按 token 预算截断 retrieval/history/summary/cross_session
@@ -490,8 +489,7 @@ class RAGChain:
                     # 用标注后的答案替换
                     content = verify_result.verified_answer
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Self-RAG 验证异常，跳过: {e}")
+                logger.warning(f"Self-RAG 验证异常，跳过: {e}")
 
         # 7. 构造引用列表（验证引用合法性后只保留 LLM 实际引用的文档）
         # 同时从正文中删除越界 [n] 标记，保证正文编号与引用列表一致
@@ -535,8 +533,7 @@ class RAGChain:
                         citations=citations,
                     )
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"RAGChain 答案缓存写入失败，忽略: {e}")
+                logger.warning(f"RAGChain 答案缓存写入失败，忽略: {e}")
 
         answer_obj = Answer(
             question=question,
@@ -584,14 +581,12 @@ class RAGChain:
                 if q_emb is not None:
                     cached = self._answer_cache.get("qa:" + question, q_emb)
                     if cached is not None and cached.answer:
-                        import logging
-                        logging.getLogger(__name__).info(f"RAGChain 流式答案缓存命中: {question[:30]}...")
+                        logger.info(f"RAGChain 流式答案缓存命中: {question[:30]}...")
                         yield "⚡ 命中答案缓存（已加速）\n\n"
                         yield cached.answer
                         return
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"RAGChain 流式答案缓存查询失败，跳过: {e}")
+                logger.warning(f"RAGChain 流式答案缓存查询失败，跳过: {e}")
 
         # 1. Query 变换：HyDE + 子问题分解
         # 历史感知检索：把多轮上下文补强到检索 query（配置开关控制，失败回退原 query）
@@ -642,8 +637,7 @@ class RAGChain:
                 reranked = self.reranker.rerank(question, results, top_n=top_n)
             except Exception as e:
                 # Bug 5 修复：流式版与同步版对齐，加 warning log 而非静默 pass
-                import logging
-                logging.getLogger(__name__).warning(f"流式重排序失败，使用原混合结果: {e}")
+                logger.warning(f"流式重排序失败，使用原混合结果: {e}")
 
         final_results = reranked if reranked else results
 
@@ -659,11 +653,10 @@ class RAGChain:
         if self.storage is not None and getattr(settings, "parent_window", 0) > 0:
             final_results = enrich_parent_context(self.storage, final_results)
 
-        # 3.6 Lost in Middle 重排 + Context 压缩
+        # 3.6 Lost in Middle 重排
         final_results = reorder_lost_in_middle(final_results)
-        max_chars = getattr(settings, "context_max_chars", 0)
-        if max_chars > 0:
-            compress_results(final_results, max_chars=max_chars)
+        # 注：删除 compress_results 字符截断 — TokenBudget.allocate 已按 token 精确截断
+        # 双重截断会污染下游 SelfVerifier 的输入（拿到截断后的 content 误判幻觉）
 
         # 3.7 Token 预算分配（上下文工程 P0）
         budget = TokenBudget(total=getattr(settings, "token_budget_total", 4096))
@@ -730,8 +723,7 @@ class RAGChain:
                         ],
                     )
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"RAGChain 流式答案缓存写入失败，忽略: {e}")
+                logger.warning(f"RAGChain 流式答案缓存写入失败，忽略: {e}")
 
         valid_citations, invalid_citations, citation_warning = validate_answer(
             answer_text, len(final_results)
@@ -764,8 +756,7 @@ class RAGChain:
                     yield "\n\n⚠️ 注意：以上回答中部分内容未经资料支持，请谨慎参考。"
             except Exception as e:
                 # Bug 5 修复：流式版与同步版对齐，加 warning log 而非静默 pass
-                import logging
-                logging.getLogger(__name__).warning(f"流式 Self-RAG 验证失败，跳过: {e}")
+                logger.warning(f"流式 Self-RAG 验证失败，跳过: {e}")
 
         # 6.3 引用列表
         if cited_results:

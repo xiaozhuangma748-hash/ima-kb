@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import threading
 from datetime import datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from rich.panel import Panel
 from rich.text import Text
@@ -29,14 +29,12 @@ from core.cli.terminal_helpers import repl_input as _repl_input
 
 from config import settings, PROJECT_ROOT
 from core.storage import Storage
-from core.qa.chain import RAGChain
 from core.pet.pet import Pet
 from core.pet.storage import PetStorage
 from core.pet.art import ArtLibrary
 from core.pet.interact import PetInteractor
 from core.pet.tasks import DailyTaskManager
 from core.pet.shop import Shop
-from core.pet.administrator import PetAdministrator
 from core.memory.store import MemoryStore, get_default_memory_store
 from core.memory.workflow import WorkflowTracker
 from core.memory.cross_session import CrossSessionMemory
@@ -56,6 +54,11 @@ from core.cli.commands.graph import GraphMixin
 from core.cli.commands.pet import PetMixin
 from core.cli.commands.pipe import PipeMixin
 from core.cli.commands.todo import TodoMixin
+
+# 类型检查时才导入的重模块（运行时按需在方法内局部导入，避免冷启动 388ms 开销）
+if TYPE_CHECKING:
+    from core.qa.chain import RAGChain
+    from core.pet.administrator import PetAdministrator
 
 
 class REPL(
@@ -380,7 +383,7 @@ class REPL(
             if choice == len(sessions):
                 # 新建会话
                 default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
-                name = _repl_input("[dim]新会话名称[/dim]", default=default_name)
+                name = _repl_input("新会话名称", default=default_name)
                 ss.create_session(name)
                 self.active_session_name = name
                 self.history = []
@@ -411,7 +414,7 @@ class REPL(
         else:
             # 无历史会话：直接问新名称
             default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
-            name = _repl_input("[dim]新会话名称[/dim]", default=default_name)
+            name = _repl_input("新会话名称", default=default_name)
             ss.create_session(name)
             self.active_session_name = name
             self.history = []
@@ -421,8 +424,10 @@ class REPL(
     def _init_session_memory(self, session_name: str) -> None:
         """为指定会话初始化独立的跨会话记忆文件。"""
         try:
-            from pathlib import Path as _Path
-            session_safe = session_name.replace("/", "_").replace("\\", "_").replace(" ", "_")
+            from core.session.store import SessionStore
+            # 复用 SessionStore._safe_name 保证会话 JSON 与记忆目录名称一致
+            # （否则同一会话名可能映射到不同安全名，记忆目录与实际会话不匹配）
+            session_safe = SessionStore()._safe_name(session_name)
             memory_path = settings.storage_path / "memory" / "sessions" / session_safe
             self.cross_session_memory = CrossSessionMemory(storage_path=memory_path)
         except Exception as e:

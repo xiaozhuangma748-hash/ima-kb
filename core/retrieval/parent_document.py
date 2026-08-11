@@ -77,10 +77,11 @@ def enrich_results(
     """批量给检索结果附加 parent context（small-to-big 优先）。
 
     策略：
-    1. 优先使用 chunk 自身的 parent_content（与格式结构对齐的大粒度内容）
-    2. 无 parent_content 时降级到 window 方式（前后各 N 个相邻 chunk 合并）
-
-    高效实现：按 doc_id 分组，每组只查一次 chunks，避免 N+1 查询。
+    1. 优先使用 HybridResult 已携带的 parent_content（由 storage.enrich_hybrid_results
+       一次查询填充，避免本函数再次回表）
+    2. 若 result 上无 parent_content，回退到批量查 storage.get_chunks(doc_id)
+       （兼容 BM25-only 等未走 enrich_hybrid_results 的路径）
+    3. 仍无 parent_content 时降级到 window 方式（前后各 N 个相邻 chunk 合并）
 
     Args:
         storage: Storage 实例
@@ -95,12 +96,42 @@ def enrich_results(
 
     w = window if window is not None else getattr(settings, "parent_window", 1)
 
-    # 按 doc_id 分组，收集需要查询的 doc_id（保持顺序去重）
-    doc_ids = list(dict.fromkeys(r.doc_id for r in results if r.doc_id))
+    # Phase 1: 优先复用 HybridResult 已携带的 parent_content（热路径优化）
+    # storage.enrich_hybrid_results 已在单次 IN 查询中取出 parent_content，
+    # 此处直接消费，避免对每个 doc_id 再次 SELECT *（消除 N+1）
+    pending_window: List = []  # 仍需走 window 降级路径的 results
+    for r in results:
+        if not r.doc_id or not r.chunk_id:
+            continue
+
+        parent_content = getattr(r, "parent_content", "") or ""
+        if parent_content.strip():
+            # 检查 format_tag，excel 行级 chunk 不做 parent 替换
+            # （parent_content 是整 sheet 全文，会淹没精确匹配信息）
+            fmt = getattr(r, "format_tag", "") or ""
+            if fmt == "excel":
+                continue
+            # parent_content 包含当前 chunk 本身，直接替换 content
+            # 不再追加，而是用更完整的 parent 替代
+            if len(parent_content) > len(r.content):
+                r.content = parent_content.strip()
+            continue
+
+        # 标记需要走降级路径
+        pending_window.append(r)
+
+    # 没有待处理项，提前返回（覆盖 90%+ 热路径，零次额外查询）
+    if not pending_window:
+        return results
+
+    # Phase 2: 降级路径 — 对未携带 parent_content 的 results，
+    # 按 doc_id 分组批量查询 chunks（仍保持每组一次查询，避免 N+1）
+    doc_ids = list(dict.fromkeys(
+        r.doc_id for r in pending_window if r.doc_id
+    ))
     if not doc_ids:
         return results
 
-    # 批量查询每个 doc 的所有 chunk（按 doc_id 分组，每组一次查询）
     doc_chunks: Dict[str, List] = {}
     for doc_id in doc_ids:
         try:
@@ -109,15 +140,12 @@ def enrich_results(
             logger.warning(f"批量查询 chunks 失败 doc={doc_id}: {e}")
             doc_chunks[doc_id] = []
 
-    # 从 chunk_id 解析 index：chunk_id 格式为 "{doc_id}_{index}"
-    for r in results:
-        if not r.doc_id or not r.chunk_id:
-            continue
+    for r in pending_window:
         chunks = doc_chunks.get(r.doc_id, [])
         if not chunks:
             continue
 
-        # 解析当前 chunk 的 index
+        # 解析当前 chunk 的 index：chunk_id 格式为 "{doc_id}_{index}"
         try:
             current_idx = None
             current_chunk = None
@@ -137,18 +165,12 @@ def enrich_results(
             continue
 
         # 优先策略 1：使用 chunk 自身的 parent_content（small-to-big）
-        # 但对 excel 格式跳过：Excel 每个 chunk 已是完整的行记录，
-        # parent_content 是整 sheet 全文，替换后会丢失精确匹配信息
-        # （所有 chunk 都被替换成同一份 sheet 全文，再被压缩成相同前缀）
         if current_chunk is not None:
             parent_content = getattr(current_chunk, "parent_content", "")
             if parent_content and parent_content.strip():
-                # 检查 format_tag，excel 行级 chunk 不做 parent 替换
                 fmt = getattr(r, "format_tag", "") or ""
                 if fmt == "excel":
                     continue
-                # parent_content 包含当前 chunk 本身，直接替换 content
-                # 不再追加，而是用更完整的 parent 替代
                 if len(parent_content) > len(r.content):
                     r.content = parent_content.strip()
                 continue
@@ -170,7 +192,6 @@ def enrich_results(
 
         if parts:
             parent_text = "\n\n".join(parts)
-            # 附加到 content 后面，用分隔符标记
             r.content = f"{r.content}{_PARENT_SEPARATOR}{parent_text}"
 
     return results

@@ -114,6 +114,41 @@ class TestSemanticCache:
             t.join()
         assert not errors
 
+    def test_put_with_numpy_array(self, tmp_path):
+        """put 接受 numpy array 作为 query_embedding（修复 truth value of array 错误）。
+
+        背景：sentence-transformers 原生返回 numpy array，而非 List[float]。
+        旧版 _append_embedding 用 `if not embedding:` 判空，对 numpy array
+        会触发 "The truth value of an array with more than one element is ambiguous"。
+        """
+        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10, db_path=tmp_path / "cache.db")
+        # 传入 numpy array（模拟 sentence-transformers 返回值）
+        emb_np = np.random.rand(512)
+        cache.put("节地安葬补助何时发放？", emb_np, "答案内容")
+        assert cache.stats()["size"] == 1
+
+        # L1 精确命中
+        entry = cache.get("节地安葬补助何时发放？")
+        assert entry is not None
+        assert entry.answer == "答案内容"
+
+        # L2 语义命中（用相似 embedding）
+        similar_emb = emb_np + np.random.rand(512) * 0.01  # 微小扰动
+        entry2 = cache.get("节地安葬补助何时发放？", query_embedding=similar_emb)
+        assert entry2 is not None
+        assert entry2.answer == "答案内容"
+
+    def test_get_with_numpy_array(self, tmp_path):
+        """get 接受 numpy array 作为 query_embedding（L2 匹配路径）。"""
+        cache = SemanticCache(threshold=0.9, ttl=60, max_size=10, db_path=tmp_path / "cache.db")
+        emb = np.random.rand(512)
+        cache.put("问题", emb.tolist(), "答案")
+
+        # 用 numpy array 查 L2
+        entry = cache.get("另一个问题", query_embedding=np.asarray(emb, dtype=np.float32))
+        assert entry is not None
+        assert entry.answer == "答案"
+
 
 class TestQueryRouter:
     """查询路由测试。"""

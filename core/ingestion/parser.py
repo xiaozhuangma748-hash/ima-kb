@@ -87,6 +87,8 @@ class ParseError(Exception):
 # OCR 工具（PaddleOCR 优先，Tesseract 降级，可选依赖）
 # ============================================================
 
+import threading as _threading
+
 # OCR 引擎检测缓存
 _ocr_checked = False
 _ocr_available = False
@@ -94,6 +96,10 @@ _ocr_available = False
 # PaddleOCR 单例（初始化慢，全局复用）
 _paddle_ocr = None
 _paddle_ocr_failed = False  # 标记 PaddleOCR 不可用，避免反复尝试
+
+# PaddleOCR 调用锁：predict() 不保证线程安全，并行 OCR 时串行化 PaddleOCR 调用
+# Tesseract 走子进程，无需此锁
+_paddle_ocr_lock = _threading.Lock()
 
 # PaddleX layout_parsing 单例（版面分析，首次加载慢）
 _layout_pipeline = None
@@ -261,6 +267,9 @@ def _preprocess_image(image):
 def _ocr_image_paddle(image) -> str:
     """用 PaddleOCR 识别图片，返回文本。
 
+    线程安全：predict() 不保证可重入，用 _paddle_ocr_lock 串行化调用。
+    并行 OCR 场景下，多线程会在此锁处排队，但 Tesseract 分支仍可并行。
+
     Args:
         image: PIL.Image 对象
 
@@ -273,7 +282,9 @@ def _ocr_image_paddle(image) -> str:
         return ""
     # PIL → numpy array
     arr = np.array(image)
-    result = ocr.predict(arr)
+    # PaddleOCR.predict() 可能非线程安全，加锁串行化
+    with _paddle_ocr_lock:
+        result = ocr.predict(arr)
     if not result:
         return ""
     # PaddleOCR 3.x 返回结果：list of dict-like
@@ -531,6 +542,88 @@ def _ocr_pdf_page(page) -> str:
     import io
     image = Image.open(io.BytesIO(pix.tobytes("png")))
     return _ocr_image(image)
+
+
+def _render_pdf_page_to_png(page) -> bytes:
+    """渲染 PDF 单页为 PNG 字节流（必须在主线程调用，PyMuPDF 非线程安全）。
+
+    Args:
+        page: fitz.Page 对象
+
+    Returns:
+        PNG 字节流
+    """
+    import fitz  # PyMuPDF
+    pix = page.get_pixmap(dpi=200)
+    return pix.tobytes("png")
+
+
+def _ocr_png_bytes(png_bytes: bytes) -> str:
+    """对 PNG 字节流做 OCR（线程安全，可在工作线程中调用）。
+
+    与 _ocr_pdf_page 的区别：跳过 PyMuPDF 渲染步骤，
+    直接从 PNG 字节流加载 PIL Image 后调用 _ocr_image。
+    用于并行 OCR 场景：主线程预渲染所有页面，工作线程并行 OCR。
+
+    Args:
+        png_bytes: PNG 图片字节流
+
+    Returns:
+        识别出的文本
+    """
+    from PIL import Image  # type: ignore
+    import io
+    image = Image.open(io.BytesIO(png_bytes))
+    return _ocr_image(image)
+
+
+def _parallel_ocr_pages(
+    page_indices: list[int],
+    png_bytes_list: list[bytes],
+    max_workers: int | None = None,
+) -> dict[int, str]:
+    """并行对多页 PNG 字节流做 OCR。
+
+    策略：
+    - PaddleOCR 调用通过 _paddle_ocr_lock 串行化（线程安全）
+    - Tesseract 走子进程，可真正并行
+    - 实际加速来源：图片预处理（numpy/PIL）+ Tesseract 子进程并行
+
+    Args:
+        page_indices: 页码列表（1-based）
+        png_bytes_list: 对应的 PNG 字节流列表
+        max_workers: 并发度（默认从 IMA_PDF_OCR_WORKERS 读取，否则 2）
+
+    Returns:
+        {page_index: ocr_text} 映射，失败的页码值为空字符串
+    """
+    import os
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    if not page_indices:
+        return {}
+
+    if max_workers is None:
+        try:
+            max_workers = int(os.environ.get("IMA_PDF_OCR_WORKERS", "2"))
+        except (TypeError, ValueError):
+            max_workers = 2
+    # 并发度不超过任务数
+    max_workers = max(1, min(max_workers, len(page_indices)))
+
+    results: dict[int, str] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(_ocr_png_bytes, png): idx
+            for idx, png in zip(page_indices, png_bytes_list)
+        }
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                results[idx] = future.result()
+            except Exception:
+                results[idx] = ""
+    return results
 
 
 # ============================================================
@@ -1019,6 +1112,7 @@ def _parse_pdf(file_path: Path) -> ParsedDocument:
     - O3: 用 font_size 推断标题层级，转成 Markdown #/##/### 标记
     - O1: 用 find_tables() 还原表格结构为 Markdown 表格
     - O2: 文本块少的页提取图片块走 OCR
+    - P1-性能: 扫描页并行 OCR（PyMuPDF 渲染保持串行，OCR 调用并行）
 
     Args:
         file_path: PDF 文件路径
@@ -1034,6 +1128,11 @@ def _parse_pdf(file_path: Path) -> ParsedDocument:
     ocr_pages: list[int] = []
     ocr_failed_pages: list[int] = []
 
+    # Phase 1: 串行扫描所有页面，提取文本块；需要 OCR 的页面预渲染为 PNG 字节流
+    # PyMuPDF 非线程安全，渲染必须在主线程串行执行
+    pending_ocr: list[tuple[int, bytes]] = []  # [(page_index_1based, png_bytes)]
+    pending_ocr_slots: list[int] = []  # 在 raw_page_blocks 中的位置（用于回填）
+
     with fitz.open(file_path) as doc:
         page_count = len(doc)
         for i, page in enumerate(doc):
@@ -1048,24 +1147,36 @@ def _parse_pdf(file_path: Path) -> ParsedDocument:
             if total_text and len(total_text) >= 50:
                 raw_page_blocks.append(blocks)
             else:
-                # O2: 文本块少 + 有图片块 → 提取图片块走 OCR
-                ocr_text = ""
+                # 需 OCR：先在主线程渲染为 PNG（PyMuPDF 非线程安全）
+                slot = len(raw_page_blocks)
+                raw_page_blocks.append([])  # 占位，后续回填
                 if _check_ocr():
                     try:
-                        # 先尝试整页 OCR（扫描件兜底）
-                        ocr_text = _ocr_pdf_page(page)
-                        if ocr_text.strip():
-                            ocr_pages.append(i + 1)
-                        else:
-                            ocr_failed_pages.append(i + 1)
+                        png_bytes = _render_pdf_page_to_png(page)
+                        pending_ocr.append((i + 1, png_bytes))
+                        pending_ocr_slots.append(slot)
                     except Exception:
                         ocr_failed_pages.append(i + 1)
-                if ocr_text.strip():
-                    raw_page_blocks.append([{
-                        "text": ocr_text, "font_size": 0, "heading_level": 0,
-                    }])
                 else:
-                    raw_page_blocks.append([])
+                    # OCR 不可用，直接标记为失败
+                    ocr_failed_pages.append(i + 1)
+
+    # Phase 2: 并行 OCR 所有待处理页面
+    if pending_ocr:
+        ocr_results = _parallel_ocr_pages(
+            [idx for idx, _ in pending_ocr],
+            [png for _, png in pending_ocr],
+        )
+        # 回填结果
+        for (page_idx, _), slot in zip(pending_ocr, pending_ocr_slots):
+            ocr_text = ocr_results.get(page_idx, "")
+            if ocr_text.strip():
+                raw_page_blocks[slot] = [{
+                    "text": ocr_text, "font_size": 0, "heading_level": 0,
+                }]
+                ocr_pages.append(page_idx)
+            else:
+                ocr_failed_pages.append(page_idx)
 
     # 检测页眉页脚（用 text 字符串）
     header_set, footer_set = _detect_header_footer(

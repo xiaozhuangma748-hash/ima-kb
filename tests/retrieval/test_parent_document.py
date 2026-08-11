@@ -139,6 +139,46 @@ def test_enrich_results_uses_parent_content():
     assert r.content == "完整章节内容（包含小片段和其他内容）"
 
 
+def test_enrich_results_uses_hybrid_result_parent_content_no_query():
+    """优化路径：HybridResult 已携带 parent_content 时，不再回表查 storage。
+
+    场景：storage.enrich_hybrid_results 已在一次 IN 查询中取出 parent_content
+    并填入 HybridResult.parent_content。enrich_results 应直接消费，避免 N+1。
+    """
+    storage = MagicMock()
+    # 关键断言：不应调用 get_chunks（已通过 HybridResult 携带）
+    r = _make_result("doc1_1", "doc1", "小片段")
+    r.parent_content = "完整章节内容（包含小片段和其他内容）"
+    enrich_results(storage, [r], window=1)
+    assert storage.get_chunks.call_count == 0
+    assert r.content == "完整章节内容（包含小片段和其他内容）"
+
+
+def test_enrich_results_mixed_carry_and_missing():
+    """混合场景：部分 result 携带 parent_content，部分没有。
+
+    携带的不触发查询；缺失的走降级路径批量查询。
+    """
+    chunks = [
+        _make_chunk("doc1_0", "doc1", 0, "段0"),
+        _make_chunk("doc1_1", "doc1", 1, "段1"),
+    ]
+    storage = MagicMock()
+    storage.get_chunks.return_value = chunks
+
+    r1 = _make_result("doc1_1", "doc1", "段1原文")
+    r1.parent_content = "段1的父级内容（更长）" * 3  # 比 content 长
+    r2 = _make_result("doc1_0", "doc1", "段0原文")  # 无 parent_content
+    enrich_results(storage, [r1, r2], window=1)
+
+    # r1 走热路径，r2 走降级路径 → 总共只查 1 次（doc1）
+    assert storage.get_chunks.call_count == 1
+    # r1 用了携带的 parent_content
+    assert "段1的父级内容" in r1.content
+    # r2 走 window 降级，附加了相邻段
+    assert "段1" in r2.content
+
+
 def test_enrich_results_appends_parent_context():
     """附加 parent context 到 content 后面。"""
     chunks = [

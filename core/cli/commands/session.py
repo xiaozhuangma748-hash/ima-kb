@@ -117,25 +117,30 @@ class SessionMixin:
             console.print("[dim]用 /sessions 查看所有已保存会话[/dim]")
 
     def _cmd_session(self, arg: str) -> None:
-        """会话管理子命令：/session save|load|list|export|delete [参数]
+        """会话管理子命令：/session new|save|load|list|export|delete [参数]
 
-        整合了 /save /load /sessions /export 四个命令。
+        整合了 /save /load /sessions /export 四个命令，并新增 new 用于新建会话。
         """
         if not arg:
-            console.print("[bold]会话管理[/bold] [dim]（/session save|load|list|export|delete）[/dim]\n")
+            console.print("[bold]会话管理[/bold] [dim]（/session new|save|load|list|export|delete）[/dim]\n")
+            console.print("  [cyan]/session new[/cyan]             新建会话（清空当前对话历史）")
             console.print("  [cyan]/session save [名称][/cyan]     保存当前会话")
             console.print("  [cyan]/session load <名称>[/cyan]     恢复已保存的会话")
             console.print("  [cyan]/session list[/cyan]           列出所有已保存会话")
             console.print("  [cyan]/session export <名称> [路径][/cyan]  导出为 Markdown")
             console.print("  [cyan]/session delete <名称>[/cyan]  删除已保存的会话")
-            console.print("\n[dim]别名: /save /load /sessions /export 仍可使用[/dim]")
+            console.print("\n[dim]别名: /save /load /sessions /export /clear 仍可使用[/dim]")
             return
 
         parts = arg.split(maxsplit=1)
         sub = parts[0].lower()
         sub_arg = parts[1].strip() if len(parts) > 1 else ""
 
-        if sub == "save":
+        if sub in ("new", "reset"):
+            # 新建会话：清空历史 + 问新名称 + 创建会话 + 切换活跃会话
+            # 不能只调 _cmd_clear（那样 active_session_name 不变，新对话会存到旧会话下）
+            self._cmd_session_new(sub_arg)
+        elif sub == "save":
             self._cmd_save(sub_arg)
         elif sub == "load":
             self._cmd_load(sub_arg)
@@ -147,7 +152,47 @@ class SessionMixin:
             self._cmd_session_delete(sub_arg)
         else:
             console.print(f"[red]未知子命令: {sub}[/red]")
-            console.print("[dim]可用: save / load / list / export / delete[/dim]")
+            console.print("[dim]可用: new / save / load / list / export / delete[/dim]")
+
+    def _cmd_session_new(self, name: str = "") -> None:
+        """新建会话：清空历史 + 创建新会话 + 切换活跃会话。
+
+        与 /clear 的区别：/clear 只清空历史但 active_session_name 不变，
+        后续对话会存到旧会话下；/session new 会创建新会话并切换。
+        """
+        from core.session.store import SessionStore
+        from datetime import datetime
+        from core.cli.terminal_helpers import repl_input as _repl_input
+
+        # 如果未提供名称，询问
+        if not name:
+            default_name = f"会话_{datetime.now().strftime('%m%d_%H%M')}"
+            name = _repl_input("新会话名称", default=default_name)
+            if not name:
+                name = default_name
+
+        ss = SessionStore()
+        ss.create_session(name)
+        # 清空当前对话历史 + 早期摘要
+        self.history = []
+        self.conversation_summary = None
+        # 切换活跃会话
+        self.active_session_name = name
+        # 初始化新会话的跨会话记忆
+        self._init_session_memory(name)
+        # 清掉数据分析追问 + 阅读模式状态
+        cleared = []
+        if self.current_analysis is not None:
+            self.current_analysis = None
+            cleared.append("数据分析")
+        if self.reader is not None:
+            self.reader.close()
+            self.reader = None
+            cleared.append("阅读模式")
+        extra = f" + {'/'.join(cleared)}" if cleared else ""
+        console.print(
+            f"[green]✓ 已新建会话[/green] [bold]{name}[/bold] [dim](历史已清空{extra})[/dim]"
+        )
 
     def _cmd_session_delete(self, name: str) -> None:
         """删除已保存的会话，支持批量: /session delete 王七 王六 王五。"""

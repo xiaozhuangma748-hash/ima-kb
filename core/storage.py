@@ -705,10 +705,10 @@ class Storage:
             filled.append(r)
 
         # 精确匹配重排序：对包含查询区分性词的结果加分
-        filled = self._rerank_by_exact_match(query, filled)
+        filled = self.rerank_by_exact_match(query, filled)
         return filled
 
-    def _rerank_by_exact_match(
+    def rerank_by_exact_match(
         self,
         query: str,
         results: List,
@@ -804,11 +804,14 @@ class Storage:
         return results
 
     def enrich_hybrid_results(self, results: List) -> List:
-        """批量补全混合检索结果的 content/doc_title/paragraph_num。
+        """批量补全混合检索结果的 content/doc_title/paragraph_num/parent_content。
 
         BM25 的 _DocEntry 不存 content/title，VectorResult 也没有这些字段，
         所以混合检索后的 HybridResult 可能 content/doc_title 为空。
-        此方法用 chunk_id 批量从 SQLite 查出真实内容、文档标题和段落号。
+        此方法用 chunk_id 批量从 SQLite 查出真实内容、文档标题、段落号和 parent_content。
+
+        优化：一次查询同时取回 parent_content，让下游 parent_document.enrich_results
+        直接复用，避免对每个 doc_id 再次 SELECT *（N+1 查询）。
 
         同时过滤掉数据库中已不存在的过期 chunk（避免引用溯源显示空标题）。
 
@@ -825,12 +828,19 @@ class Storage:
 
         with self._conn() as conn:
             placeholders = ",".join("?" * len(chunk_ids))
+            # 优化：一次查询同时取回 parent_content（small-to-big 父级内容）
+            # 避免下游 enrich_results 对每个 doc_id 再次 SELECT *（N+1）
             rows = conn.execute(
-                f"SELECT id, content, index_in_doc, heading FROM chunks WHERE id IN ({placeholders})",
+                f"SELECT id, content, index_in_doc, heading, parent_content FROM chunks WHERE id IN ({placeholders})",
                 chunk_ids,
             ).fetchall()
             chunk_map = {
-                r["id"]: (r["content"], r["index_in_doc"], r["heading"] or "")
+                r["id"]: (
+                    r["content"],
+                    r["index_in_doc"],
+                    r["heading"] or "",
+                    r["parent_content"] if "parent_content" in r.keys() else "",
+                )
                 for r in rows
             }
 
@@ -872,6 +882,8 @@ class Storage:
             r.content = entry[0]
             r.paragraph_num = entry[1] + 1  # 0-based → 1-based 段落号
             r.heading = entry[2]
+            # 同时回填 parent_content，让下游 enrich_results 直接复用，避免 N+1 二次查询
+            r.parent_content = entry[3] or ""
             r.doc_title = doc_title.get(r.doc_id, "") or r.doc_title
             # 从 file_type 映射 format_tag
             ft = doc_file_type.get(r.doc_id, "")

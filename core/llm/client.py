@@ -10,8 +10,6 @@ import threading
 import time
 from typing import Iterator, List, Optional
 
-from openai import OpenAI
-
 from config import settings
 
 
@@ -27,6 +25,25 @@ _RETRYABLE_ERRORS = (
 )
 
 
+# 延迟导入 OpenAI SDK（冷启动 ~294ms）：
+# - LLMError / _RETRYABLE_ERRORS 保留在模块顶层，因为大量调用方依赖 `from core.llm.client import LLMError`
+# - OpenAI 类仅在真正创建客户端时才导入（get_llm() 首次调用）
+# - 这样 REPL 启动、配置检查等无 LLM 依赖的路径不再付出 294ms 代价
+_OpenAIClass = None  # type: ignore
+_openai_import_lock = threading.Lock()
+
+
+def _load_openai():
+    """线程安全地延迟加载 OpenAI 客户端类。"""
+    global _OpenAIClass
+    if _OpenAIClass is None:
+        with _openai_import_lock:
+            if _OpenAIClass is None:
+                from openai import OpenAI as _OpenAI
+                _OpenAIClass = _OpenAI
+    return _OpenAIClass
+
+
 class LLMClient:
     """Agnes AI LLM 客户端单例。"""
 
@@ -36,6 +53,8 @@ class LLMClient:
                 "未配置 AGNES_API_KEY，请在 .env 中设置。"
                 "参考 .env.example。"
             )
+        # 延迟加载 OpenAI SDK：仅在真正实例化客户端时付出 ~294ms 导入代价
+        OpenAI = _load_openai()
         self._client = OpenAI(
             api_key=settings.agnes_api_key,
             base_url=settings.agnes_base_url,

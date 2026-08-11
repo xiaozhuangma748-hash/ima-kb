@@ -103,7 +103,12 @@ class PetAdministrator:
         # 每日待办管理器（可选，未传入时忽略）
         self.todo_mgr = todo_manager
         # 答案级语义缓存（与检索层 hybrid.cache 互补：这里缓存完整 LLM 答案）
-        self._answer_cache = SemanticCache(threshold=0.92, ttl=1800, max_size=200)
+        # 修复：显式指定独立 db_path，避免与 HybridRetriever 默认路径冲突
+        # （两者原本都落到 storage_path/semantic_cache.db，并发写入会触发 SQLite lock）
+        self._answer_cache = SemanticCache(
+            threshold=0.92, ttl=1800, max_size=200,
+            db_path=settings.cache_dir / "admin_cache.db",
+        )
 
     def _expand_query_with_context(
         self,

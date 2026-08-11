@@ -271,16 +271,22 @@ class SemanticCache:
         self._emb_norms = None
         self._emb_dim = None
 
-    def _append_embedding(self, embedding: List[float]) -> None:
+    def _append_embedding(self, embedding) -> None:
         """向 embedding 矩阵追加一行（调用方需持有锁）。
 
         第一次 append 时初始化矩阵；后续用 vstack 追加。
         vstack 在大矩阵上比 list.append + np.array 慢，但缓存条目通常 < 500，
         且 put 频率远低于 get，所以追加成本可接受。
+
+        注意：embedding 可能是 numpy array（sentence-transformers 原生格式），
+        不能用 `if not embedding:` 判空（会触发 "truth value of array is ambiguous"）。
         """
-        if not embedding:
+        if embedding is None:
             return
+        # 统一转 numpy array（兼容 list 和 ndarray 两种输入）
         vec = np.asarray(embedding, dtype=np.float32)
+        if vec.size == 0:
+            return
         dim = vec.shape[0]
         if self._emb_matrix is None:
             self._emb_matrix = vec.reshape(1, -1)
@@ -411,6 +417,10 @@ class SemanticCache:
         """
         qhash = self._hash(query)
         now = time.time()
+        # 防御性归一化：sentence-transformers 原生返回 numpy array，
+        # 统一转 list 避免 pickle 序列化、SQLite 持久化、布尔判断等处的兼容性问题
+        if not isinstance(query_embedding, list):
+            query_embedding = np.asarray(query_embedding, dtype=np.float32).tolist()
         entry = CacheEntry(
             query=query,
             query_embedding=query_embedding,
