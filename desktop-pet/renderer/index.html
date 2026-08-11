@@ -37,8 +37,8 @@
   /* 宠物容器：底部对齐，让猫咪从窗口下沿探出 */
   #pet-stage {
     position: absolute;
-    left: 0; right: 0; bottom: -15px;
-    height: 90px;
+    left: 0; right: 0; bottom: -13px;
+    height: 80px;
     display: flex;
     align-items: flex-end;
     justify-content: center;
@@ -50,7 +50,7 @@
   #pet-stage:active { cursor: grabbing; }
 
   #pet-img {
-    width: 90px; height: 90px;
+    width: 80px; height: 80px;
     image-rendering: pixelated;
     object-fit: contain;
     pointer-events: auto;
@@ -73,7 +73,7 @@
   /* 气泡：默认隐藏，在宠物上方居中 */
   #bubble {
     position: absolute;
-    left: 50%; bottom: 90px;
+    left: 50%; bottom: 80px;
     transform: translateX(-50%) scale(0.96);
     width: 220px;
     min-height: 48px;
@@ -284,7 +284,7 @@
   /* 拖拽文件提示：啊~ 一口吃掉 */
   #drop-hint {
     position: absolute;
-    left: 50%; bottom: 108px;
+    left: 50%; bottom: 98px;
     transform: translateX(-50%);
     background: rgba(255, 250, 245, 0.92);
     border: 1px solid var(--pet-border);
@@ -307,7 +307,7 @@
   /* P5+: 未读徽章——气泡关闭时后台完成输出，点击重新打开 */
   #pet-badge {
     position: absolute;
-    left: 50%; bottom: 95px;
+    left: 50%; bottom: 85px;
     transform: translateX(-50%) scale(0.8);
     background: var(--pet-primary);
     color: #fff;

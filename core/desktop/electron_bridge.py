@@ -27,7 +27,7 @@ def _create_pet_administrator():
     try:
         from core.pet.storage import PetStorage
         from core.storage import Storage
-        from core.memory.store import MemoryStore
+        from core.memory.store import MemoryStore, get_default_memory_store
         from core.retrieval.hybrid import HybridRetriever
         from core.retrieval.rerank import Reranker
         from core.llm.client import get_llm

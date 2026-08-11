@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 # LaTeX 清理：统一委托给 core.format.latex.sanitize_latex（DRY）
 # 保留本模块 _sanitize_latex 名称以兼容现有调用点和 tests/test_sanitize_latex.py
 from core.format.latex import sanitize_latex as _sanitize_latex
+from core.format.latex import LATEX_REPLACEMENTS as _LATEX_REPLACEMENTS
 
 
 def _check_citation_markers(text: str) -> str:
