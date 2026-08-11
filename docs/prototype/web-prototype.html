@@ -1047,7 +1047,7 @@
   .persona-card-style.active { border: 2px solid var(--accent-orange); background: rgba(245, 158, 11, 0.04); }
 </style>
 </head>
-<!-- 注意：本原型仅作视觉布局参考，实际页面以 web/templates/index.html 为准。原型与实际实现存在多处差异，详见 docs/superpowers/specs/2026-07-08-web-backend-design.md -->
+<!-- 注意：本原型仅作视觉布局参考，实际页面以 web/templates/index.html 为准。 -->
 <body>
 <div class="app">
   <!-- Logo -->
@@ -1984,7 +1984,7 @@
 </div>
 
 <script>
-  // 差异：原型使用内联 <script>（约 50 行，3 个简单交互）。实际 index.html 改为 <script type="module" src="/static/app.js">，逻辑已模块化拆分到 web/static/js/ 下 11 个 ES Module（app/nav/qa/ingest/search/analyze/dashboard/graph/pet/state/utils），共约 800+ 行。详见 docs/superpowers/specs/2026-07-08-web-backend-design.md 第 6 节。
+  // 差异：原型使用内联 <script>（约 50 行，3 个简单交互）。实际 index.html 改为 <script type="module" src="/static/app.js">，逻辑已模块化拆分到 web/static/js/ 下 11 个 ES Module（app/nav/qa/ingest/search/analyze/dashboard/graph/pet/state/utils），共约 800+ 行。
   // 导航切换
   const navItems = document.querySelectorAll('.nav-item[data-page]');
   const pages = document.querySelectorAll('.page');

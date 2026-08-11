@@ -152,7 +152,6 @@ RAG_TOP_K=6                # 检索返回数量
 - [docs/DESKTOP_PET.md](docs/DESKTOP_PET.md) — 桌面宠物设计文档
 - [docs/PRD-web-backend.md](docs/PRD-web-backend.md) — Web 后台 PRD
 - [docs/specs/](docs/specs/) — 设计规格
-- [docs/superpowers/](docs/superpowers/) — 实施计划与设计文档
 
 ## 许可
 
