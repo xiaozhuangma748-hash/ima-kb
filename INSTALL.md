@@ -1,20 +1,20 @@
 # IMA 个人知识库 · 安装指南
 
-> 给同事的简明安装说明。如果你是开发者，详细文档请看 `HANDOFF.md`。
+> 给同事的简明安装说明。
 
 ---
 
 ## 🚀 一行命令安装（推荐）
 
 ```bash
-git clone https://github.com/xiaozhuangma748-hash/ima-kb.git && cd ima-kb && ./install.sh
+git clone https://github.com/xiaozhuangma748-hash/ima-kb.git && cd ima-kb && ./bin/install.sh
 ```
 
 **就这样。** 脚本会自动完成所有事情：检查 Python → 创建虚拟环境 → 装依赖 → 配置 `ima` 命令 → 验证。
 
 > **完整安装（含向量检索 + OCR，推荐）**：
 > ```bash
-> ./install.sh --vector --ocr
+> ./bin/install.sh --ocr
 > ```
 
 ---
@@ -31,9 +31,11 @@ cd ima-kb
 ### 第 2 步：运行安装脚本
 
 ```bash
-./install.sh                 # 标准安装
+./bin/install.sh              # 标准安装（默认含向量检索）
 # 或
-./install.sh --vector --ocr  # 完整安装（推荐：向量检索 + OCR）
+./bin/install.sh --ocr        # 完整安装（向量检索 + OCR）
+# 或
+./bin/install.sh --minimal    # 最小安装（跳过向量/OCR，体积最小）
 ```
 
 脚本会自动做 6 件事：
@@ -51,10 +53,10 @@ cd ima-kb
 
 | 选项 | 说明 |
 |---|---|
-| `--vector` | 安装向量检索依赖（chromadb + sentence-transformers，约 2GB） |
-| `--ocr` | 安装 OCR 依赖（PaddleOCR 主 + Tesseract 降级） |
-| `--dev` | 安装开发工具（pytest 等） |
-| `--no-venv` | 不创建虚拟环境 |
+| `--minimal` | 最小安装（只装核心依赖，跳过向量/OCR） |
+| `--no-vector` | 跳过向量检索依赖（chromadb + sentence-transformers，约 2GB） |
+| `--ocr` | 安装 OCR 依赖（pytesseract；需系统已装 tesseract） |
+| `--key sk-xxx` | 安装时直接配置 API Key（跳过交互询问） |
 
 ### 第 3 步：配置 API Key
 
@@ -180,10 +182,10 @@ ima                          # 进入 REPL
 
 ### 向量检索（推荐开启）
 
-向量检索让搜索更智能（语义匹配，不只是关键词）。安装：
+向量检索让搜索更智能（语义匹配，不只是关键词）。标准安装已默认包含，如需跳过：
 
 ```bash
-./install.sh --vector
+./bin/install.sh --no-vector
 ```
 
 > **注意**：首次使用会自动下载 embedding 模型（约 100MB）。
@@ -210,7 +212,7 @@ brew install tesseract tesseract-lang
 pip install pytesseract
 
 # 或用安装脚本
-./install.sh --ocr
+./bin/install.sh --ocr
 ```
 
 装好后，入库扫描版 PDF 和图片（PNG/JPG/TIFF）会自动 OCR 识别文字。
@@ -218,8 +220,11 @@ PaddleOCR 优先使用（原图直传，内部自带预处理），不可用时�
 
 ### 开发模式
 
+开发工具（pytest 等）请手动安装：
+
 ```bash
-./install.sh --dev    # 装 pytest 等开发工具
+source .venv/bin/activate
+pip install pytest pytest-cov
 ```
 
 ---
@@ -312,7 +317,7 @@ vim .env    # 改成真实 key
 
 A: 这是**正常现象**，不影响使用。原因和解决方案：
 
-1. **没装向量依赖** → 运行 `./install.sh --vector`
+1. **没装向量依赖** → 运行 `./bin/install.sh`（标准安装默认包含向量）
 2. **模型没下载完** → 参考上方的「向量检索配置」章节手动下载
 3. **网络问题** → 系统会自动降级为纯 BM25 搜索，功能正常
 
@@ -322,7 +327,7 @@ A: 项目要求 Python 3.9+。macOS 自带的 Python 可能是 3.9.6（够用）
 
 ```bash
 brew install python@3.11
-./install.sh
+./bin/install.sh
 ```
 
 ### Q: 入库时跳过了图片/扫描 PDF？
@@ -333,7 +338,7 @@ A: 没装 OCR。运行（推荐 PaddleOCR）：
 pip install paddlepaddle paddleocr
 # 或降级方案
 brew install tesseract tesseract-lang
-./install.sh --ocr
+./bin/install.sh --ocr
 ```
 
 ### Q: `/session save` 提示"当前对话为空"？
@@ -346,7 +351,7 @@ A: 拉新代码后重装：
 
 ```bash
 git pull
-./install.sh
+./bin/install.sh
 ```
 
 ### Q: 想完全卸载？
@@ -362,7 +367,7 @@ rm -rf .venv storage
 
 ## 📞 联系
 
-遇到问题看 `HANDOFF.md` 的「已知问题与注意事项」章节，或联系项目负责人。
+遇到问题请提 GitHub Issue，或联系项目负责人。
 
 ---
 

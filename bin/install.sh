@@ -235,7 +235,7 @@ else
 # LLM + 图像生成 API（Agnes AI，两功能共用一个 Key）
 AGNES_API_KEY=sk-在这里填入你的key
 AGNES_BASE_URL=https://apihub.agnes-ai.com/v1
-LLM_MODEL=agnes-2.0-flash
+LLM_MODEL=agnes-2.5-flash
 IMAGE_MODEL=agnes-image-2.1-flash
 
 # 存储路径（默认项目目录下）

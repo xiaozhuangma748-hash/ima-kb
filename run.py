@@ -593,9 +593,9 @@ def cli_rebuild(vector: bool) -> None:
                 console.print(f"[green]✓ 向量索引已重建[/green]  [dim]({v_count} 块)[/dim]")
             else:
                 console.print("[yellow]! 向量索引不可用（依赖未安装或模型加载失败）[/yellow]")
-                console.print("[dim]用 'bash install.sh --vector' 安装向量依赖[/dim]")
+                console.print("[dim]用 './bin/install.sh' 安装向量依赖（默认包含）[/dim]")
         except ImportError:
-            console.print("[yellow]! 向量依赖未安装，请用 'bash install.sh --vector' 安装[/yellow]")
+            console.print("[yellow]! 向量依赖未安装，请用 './bin/install.sh' 安装[/yellow]")
 
 
 @cli.command(name="memory", help="查看或管理记忆（格式/风格/主题/地区/任务）")

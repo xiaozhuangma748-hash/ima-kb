@@ -977,7 +977,7 @@ class DocsMixin:
                     console.print("[dim]已热更新到当前会话（无需重启）[/dim]")
                 else:
                     console.print("[yellow]! 向量索引不可用（依赖未安装）[/yellow]")
-                    console.print("[dim]用 'bash install.sh --vector' 安装[/dim]")
+                    console.print("[dim]用 './bin/install.sh' 安装向量依赖（默认包含）[/dim]")
             except ImportError:
                 console.print("[yellow]! 向量依赖未安装[/yellow]")
             except Exception as e:
