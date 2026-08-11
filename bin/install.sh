@@ -152,22 +152,30 @@ fi
 _step_pass "创建虚拟环境"
 
 if [ ! -d ".venv" ]; then
-    if $PYTHON -m venv .venv 2>/dev/null; then
+    # 不吞掉 stderr，让 ensurepip / venv 模块缺失等真实报错直接显示
+    if $PYTHON -m venv .venv; then
         _done ".venv 创建完成"
     else
-        _fail "虚拟环境创建失败"
+        _fail "虚拟环境创建失败（详见上方错误输出）"
+        echo -e "  ${YELLOW}常见原因：${NC}"
+        echo -e "  ${DIM}  1. macOS 系统 Python 受 SIP 限制 → brew install python@3.12${NC}"
+        echo -e "  ${DIM}  2. Linux 缺 venv 模块          → sudo apt install python3-venv${NC}"
+        echo -e "  ${DIM}  3. pip 未安装                 → $PYTHON -m ensurepip --upgrade${NC}"
         exit 1
     fi
 else
     _skip ".venv 已存在，跳过"
 fi
 
-# 激活
-source .venv/bin/activate 2>/dev/null
-if [ $? -eq 0 ]; then
+# 激活（保留 stderr，便于定位 activate 文件缺失等问题）
+if source .venv/bin/activate; then
     _done "虚拟环境已激活"
 else
-    _fail "虚拟环境激活失败"
+    _fail "虚拟环境激活失败（详见上方错误输出）"
+    echo -e "  ${YELLOW}常见原因：${NC}"
+    echo -e "  ${DIM}  1. .venv/bin/activate 文件不存在 → rm -rf .venv 后重跑脚本${NC}"
+    echo -e "  ${DIM}  2. 路径含空格/中文/全角字符      → 移到纯英文路径（如 ~/ima-kb）${NC}"
+    echo -e "  ${DIM}  3. shell 不兼容                 → 直接使用 .venv/bin/python run.py${NC}"
     exit 1
 fi
 
@@ -176,36 +184,45 @@ fi
 # ============================================================
 _step_pass "安装 Python 依赖"
 
-# 升级 pip（静默）
+# 升级 pip（保留 stderr，失败时可见）
 _spin_start "升级 pip..."
-python -m pip install --upgrade pip --quiet 2>/dev/null
-_spin_stop
-_done "pip 已更新"
+if python -m pip install --upgrade pip --quiet; then
+    _spin_stop; _done "pip 已更新"
+else
+    _spin_stop; _warn "pip 升级失败（详见上方错误），继续安装依赖..."
+fi
 
-# 核心依赖（带进度）
+# 核心依赖
 _spin_start "安装核心依赖（pandas/PyMuPDF/openai/click/rich/fastapi...）"
-if pip install -r requirements.txt --quiet --progress-bar off 2>/dev/null; then
+if pip install -r requirements.txt --quiet --progress-bar off; then
     _spin_stop; _done "核心依赖安装完成"
 else
     _spin_stop; _fail "核心依赖安装失败，尝试不跳过已安装的包..."
-    pip install -r requirements.txt --quiet 2>/dev/null && _done "核心依赖安装完成" || _warn "部分依赖安装失败，请检查网络"
+    if pip install -r requirements.txt --quiet; then
+        _done "核心依赖安装完成"
+    else
+        _warn "部分依赖安装失败，请检查网络或手动安装"
+        _info "常见原因：网络超时 → 配置 pip 镜像；权限不足 → 检查 .venv 所有者（不要用 sudo）；依赖冲突 → 查看错误中的版本要求"
+    fi
 fi
 
 # 注册 ima 命令
 _spin_start "注册 ima 命令..."
-if pip install -e . --quiet 2>/dev/null; then
+if pip install -e . --quiet; then
     _spin_stop; _done "ima 命令已注册"
 else
     _spin_stop; _warn "ima 命令注册失败，可用 python run.py 替代"
+    _info "常见原因：pyproject.toml 缺失 / .venv 权限异常 / 依赖未装全"
 fi
 
 # 向量检索依赖（默认安装）
 if [ "$MINIMAL" = "false" ] && [ "$VECTOR_ARG" = "true" ]; then
     _spin_start "安装向量检索依赖（chromadb + sentence-transformers，约 2GB）..."
-    if pip install chromadb sentence-transformers --quiet --progress-bar off 2>/dev/null; then
+    if pip install chromadb sentence-transformers --quiet --progress-bar off; then
         _spin_stop; _done "向量检索依赖安装完成"
     else
         _spin_stop; _warn "向量检索依赖安装失败，将降级为纯 BM25（功能正常）"
+        _info "常见原因：网络超时 / 磁盘空间不足（需 ~3GB）/ Python 版本过低（需 3.9+）"
     fi
 else
     _skip "跳过向量检索依赖（--minimal 或 --no-vector）"
@@ -214,10 +231,11 @@ fi
 # OCR 依赖
 if [ "$OCR_ARG" = "true" ]; then
     _spin_start "安装 OCR 依赖（pytesseract）..."
-    if pip install "pytesseract>=0.3.10" --quiet 2>/dev/null; then
+    if pip install "pytesseract>=0.3.10" --quiet; then
         _spin_stop; _done "OCR 依赖安装完成"
     else
         _spin_stop; _warn "OCR 依赖安装失败"
+        _info "需系统已装 tesseract：brew install tesseract tesseract-lang（macOS）或 apt install tesseract-ocr（Linux）"
     fi
 fi
 
@@ -311,7 +329,10 @@ ima() {
     fi
     (
         cd "\$_KB_DIR" || return 1
-        source .venv/bin/activate 2>/dev/null
+        if ! source .venv/bin/activate; then
+            echo "虚拟环境激活失败，请重跑安装: cd \$_KB_DIR && ./bin/install.sh" >&2
+            return 1
+        fi
         if [ \$# -eq 0 ]; then
             python run.py chat
         else
@@ -360,10 +381,11 @@ fi
 _step_pass "验证安装"
 
 _spin_start "检查 ima CLI..."
-if python run.py --help &>/dev/null; then
+if python run.py --help >/dev/null 2>&1; then
     _spin_stop; _done "ima CLI 可用"
 else
     _spin_stop; _fail "ima CLI 启动失败"
+    _info "请运行 'python run.py --help' 查看详细错误（常见：依赖未装全 / .env 配置异常）"
 fi
 
 # ============================================================
