@@ -18,8 +18,17 @@ from __future__ import annotations
 
 import os
 import threading
+import warnings
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
+
+# 过滤 macOS Python 3.9 multiprocessing resource_tracker 的 semaphore 泄漏警告
+# （uvicorn/chromadb 子线程退出时可能未完全释放 semaphore，主进程退出时触发）
+warnings.filterwarnings(
+    "ignore",
+    message=r"resource_tracker: There appear to be \d+ leaked semaphore",
+    category=UserWarning,
+)
 
 from rich.panel import Panel
 from rich.text import Text
@@ -850,6 +859,9 @@ class REPL(
 
     def _cmd_exit(self, arg: str) -> None:
         """退出 REPL。"""
+        # 先停止 Web 后台，避免 uvicorn 子线程遗留 multiprocessing semaphore
+        if self._web_server is not None:
+            self._cmd_web("stop")
         self._stop_desktop_pet()
         self.running = False
         console.print("[dim]再见[/dim]")
