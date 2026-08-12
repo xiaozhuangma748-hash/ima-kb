@@ -216,3 +216,57 @@ def test_parse_verify_response_string_boolean_true():
     result = parse_verify_response(raw)
     assert result is not None
     assert result["has_hallucination"] is True
+
+
+def test_parse_verify_response_truncated_recovers_complete_sentences():
+    """截断恢复：LLM 返回被 max_tokens 截断时，应提取已完整的 sentence 项。
+
+    场景：实测 q003 的 LLM 返回在 char 842 处被截断，最后一项 text 字段
+    没闭合引号，整体 JSON 解析失败。本测试验证能从截断 JSON 中救回前 8 项。
+    """
+    from core.qa.self_verifier import parse_verify_response
+    # 模拟真实截断：第 9 项 text 字段被截断，没有闭合引号和 }
+    raw = '''{
+  "sentences": [
+    {"text": "根据现有资料，政策包括以下项目", "grounded": true, "citation": 1},
+    {"text": "1. 遗体接运", "grounded": true, "citation": 1},
+    {"text": "2. 遗体存放", "grounded": true, "citation": 1},
+    {"text": "3. 遗体火化", "grounded": true, "citation": 1},
+    {"text": "5. 骨灰盒", "grounded": true, "citation": 3},
+    {"text": "海葬完全免费", "grounded": false, "citation": null},
+    {"text": "6. 骨灰安葬", "grounded": true, "citation": 3},
+    {"text": "* 殡仪馆内骨灰寄存费", "grounded": true, "citation": 3},
+    {"text": "* 骨灰安葬形式符合节地生态安葬条件的，按《关于对杭州市区实施'''
+    result = parse_verify_response(raw)
+    # 应至少恢复 8 项完整 sentence
+    assert result is not None, "截断的 JSON 应能恢复出已完整的 sentence 项"
+    assert len(result["sentences"]) == 8
+    # 第 6 项是幻觉，has_hallucination 应为 True
+    assert result["has_hallucination"] is True
+    # 第 6 项的 grounded 应为 False
+    assert any(s["grounded"] is False for s in result["sentences"])
+    # citation 字段类型正确
+    assert result["sentences"][0]["citation"] == 1
+    assert result["sentences"][5]["citation"] is None
+
+
+def test_parse_verify_response_truncated_no_complete_sentences_returns_none():
+    """截断恢复：如果连 1 个完整 sentence 都没有，返回 None。"""
+    from core.qa.self_verifier import parse_verify_response
+    raw = '{"sentences": [{"text": "被截断的句子没有闭合'
+    result = parse_verify_response(raw)
+    assert result is None
+
+
+def test_parse_verify_response_truncated_with_escaped_quote():
+    """截断恢复：text 字段含转义引号时应正确解析。"""
+    from core.qa.self_verifier import parse_verify_response
+    # text 字段含 \" 转义引号
+    raw = '''{
+  "sentences": [
+    {"text": "他说\\"你好\\"", "grounded": true, "citation": 1},
+    {"text": "截断的'''
+    result = parse_verify_response(raw)
+    assert result is not None
+    assert len(result["sentences"]) == 1
+    assert result["sentences"][0]["text"] == '他说"你好"'

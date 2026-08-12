@@ -102,6 +102,7 @@ def parse_verify_response(raw: str) -> Optional[dict]:
     try:
         data = json.loads(text)
         if "sentences" not in data or "has_hallucination" not in data:
+            logger.debug("Self-RAG 解析：JSON 缺少必要字段，keys=%s", list(data.keys()))
             return None
         # Bug 7 修复：LLM 可能返回字符串型 "true"/"false"，bool("false") 为 True（错误）
         # 需要正确转换字符串型布尔值
@@ -114,8 +115,59 @@ def parse_verify_response(raw: str) -> Optional[dict]:
             "sentences": data["sentences"],
             "has_hallucination": has_halluc,
         }
-    except (json.JSONDecodeError, ValueError, TypeError):
+    except (json.JSONDecodeError, ValueError, TypeError) as e:
+        # 诊断信息：记录解析失败的原貌（截断防日志爆炸）
+        logger.debug("Self-RAG 解析异常: %s, raw[:300]=%s", e, (text or "")[:300])
+        # 截断兜底：LLM 返回被 max_tokens 截断时，JSON 末尾不完整。
+        # 用正则提取已完整的 sentence 项，避免整体丢弃。
+        return _recover_truncated_sentences(text)
+
+
+def _recover_truncated_sentences(text: str) -> Optional[dict]:
+    """从截断的 JSON 中提取已完整的 sentence 项。
+
+    LLM 返回被 max_tokens 截断时，sentences 数组最后一项可能不完整。
+    本函数用正则提取所有完整的 {"text": "...", "grounded": bool, "citation": ...} 项，
+    若至少提取到 1 项则返回，否则返回 None。
+
+    Returns:
+        {"sentences": [...], "has_hallucination": bool} 或 None
+    """
+    # 匹配完整的 sentence 对象：text 字段（带转义引号）、grounded 布尔、citation 数字或 null
+    pattern = re.compile(
+        r'\{\s*"text"\s*:\s*(".*?(?<!\\)"),\s*'
+        r'"grounded"\s*:\s*(true|false),\s*'
+        r'"citation"\s*:\s*(null|\d+)\s*\}',
+        re.DOTALL,
+    )
+    matches = pattern.findall(text)
+    if not matches:
         return None
+
+    sentences = []
+    has_halluc = False
+    for text_val, grounded_str, citation_str in matches:
+        try:
+            # 解析 text 字段的 JSON 字符串（处理转义）
+            sentence_text = json.loads(text_val)
+        except (json.JSONDecodeError, ValueError):
+            # 转义异常时退化为去掉首尾引号
+            sentence_text = text_val[1:-1] if len(text_val) >= 2 else text_val
+        grounded = grounded_str == "true"
+        citation = None if citation_str == "null" else int(citation_str)
+        if not grounded:
+            has_halluc = True
+        sentences.append({
+            "text": sentence_text,
+            "grounded": grounded,
+            "citation": citation,
+        })
+
+    logger.info(
+        "Self-RAG 截断恢复：从截断 JSON 中提取了 %d 个完整 sentence 项",
+        len(sentences),
+    )
+    return {"sentences": sentences, "has_hallucination": has_halluc}
 
 
 # ============================================================
@@ -191,14 +243,19 @@ class SelfVerifier:
 
         try:
             messages = build_verify_messages(question, answer, snippets)
-            raw = self.llm.chat(messages, temperature=0.0, max_tokens=400)
+            # max_tokens=1024：答案切句较多时 400 会截断 JSON（中文 token 密度低）
+            # 实测 8 句答案的 JSON 约 900+ 字符，400 tokens 不够
+            raw = self.llm.chat(messages, temperature=0.0, max_tokens=1024)
         except Exception as e:
             logger.warning(f"Self-RAG 验证 LLM 调用失败，跳过: {e}")
             return None
 
         parsed = parse_verify_response(raw)
         if parsed is None:
-            logger.warning("Self-RAG 验证返回解析失败，跳过")
+            logger.warning(
+                "Self-RAG 验证返回解析失败，跳过。raw[:200]=%s",
+                (raw or "")[:200],
+            )
             return None
 
         sentences = parsed["sentences"]

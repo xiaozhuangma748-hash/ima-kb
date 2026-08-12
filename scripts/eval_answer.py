@@ -190,6 +190,8 @@ def evaluate_answers(
     judge_llm,
     limit: Optional[int] = None,
     category_filter: Optional[str] = None,
+    enable_hyde: bool = True,
+    enable_decompose: bool = True,
 ) -> dict:
     """对评测集跑端到端问答并评分。
 
@@ -199,6 +201,8 @@ def evaluate_answers(
         judge_llm: 裁判 LLM 客户端（需有 chat 方法）
         limit: 最多评测几题（None 全量）
         category_filter: 只评测某类别（None 全部）
+        enable_hyde: 启用 HyDE 假设答案改写（默认 True，与 RAGChain 默认一致）
+        enable_decompose: 启用子问题分解（默认 True）
 
     Returns:
         {"overall": {...}, "details": [...]}
@@ -223,7 +227,11 @@ def evaluate_answers(
         actual_answer = ""
         snippets: List[str] = []
         try:
-            answer_obj = chain.ask(question, enable_hyde=False, enable_decompose=False)
+            answer_obj = chain.ask(
+                question,
+                enable_hyde=enable_hyde,
+                enable_decompose=enable_decompose,
+            )
             actual_answer = answer_obj.content
             retrieved = answer_obj.retrieved or []
             snippets = [r.content or "" for r in retrieved[:5]]
@@ -325,6 +333,11 @@ def main():
                         help="报告输出格式")
     parser.add_argument("--output", default=str(PROJECT_ROOT / "storage/eval_answer_report.json"),
                         help="JSON 报告输出路径")
+    parser.add_argument("--hyde", dest="enable_hyde", action="store_true",
+                        help="开启 HyDE 假设答案改写（默认关闭，100 题评测显示幻觉率 +23%%）")
+    parser.add_argument("--no-decompose", dest="enable_decompose", action="store_false",
+                        help="关闭子问题分解（默认开启）")
+    parser.set_defaults(enable_hyde=False, enable_decompose=True)
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset)
@@ -349,12 +362,18 @@ def main():
     from core.llm.client import get_llm
     judge_llm = get_llm()
 
+    # 打印 query 改写配置，方便对比
+    print(f"  HyDE: {'on' if args.enable_hyde else 'off'}")
+    print(f"  Decompose: {'on' if args.enable_decompose else 'off'}")
+
     result = evaluate_answers(
         questions=questions,
         chain=chain,
         judge_llm=judge_llm,
         limit=args.limit,
         category_filter=args.category,
+        enable_hyde=args.enable_hyde,
+        enable_decompose=args.enable_decompose,
     )
 
     print_report(result)

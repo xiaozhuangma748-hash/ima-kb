@@ -299,7 +299,7 @@ class RAGChain:
         question: str,
         top_k: Optional[int] = None,
         history: Optional[List[dict]] = None,
-        enable_hyde: bool = True,
+        enable_hyde: bool = False,
         enable_decompose: bool = True,
         doc_ids: Optional[List[str]] = None,
         cross_session_context: Optional[str] = None,
@@ -312,7 +312,10 @@ class RAGChain:
             question: 用户问题
             top_k: 检索候选数（默认用配置 RAG_TOP_K）
             history: 多轮对话历史（用于 query expansion + LLM 上下文）
-            enable_hyde: 启用 HyDE 假设答案改写
+            enable_hyde: 启用 HyDE 假设答案改写（默认关闭，
+                100 题评测显示 HyDE 在本知识库上导致幻觉率从 11%→34%，
+                对 definition/cross_doc 类有提升但对 policy/negative 类严重退化，
+                需要时显式传 True 开启）
             enable_decompose: 启用子问题分解
             doc_ids: 元数据预过滤，只在这些文档中检索（None 不过滤）
             cross_session_context: 跨会话记忆文本（注入 LLM 上下文）
@@ -552,7 +555,7 @@ class RAGChain:
         question: str,
         top_k: Optional[int] = None,
         history: Optional[List[dict]] = None,
-        enable_hyde: bool = True,
+        enable_hyde: bool = False,
         enable_decompose: bool = True,
         doc_ids: Optional[List[str]] = None,
         cross_session_context: Optional[str] = None,
