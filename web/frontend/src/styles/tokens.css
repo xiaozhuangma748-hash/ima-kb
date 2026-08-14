@@ -1,0 +1,140 @@
+/* ===== 设计令牌 · DeepSeek Harness 暗色体系 + 亮色 + 主题色 =====
+   tokens.css 只在 :root 定义；[data-theme] 由 SettingsDrawer 控制。
+   accent 为 CSS 变量，可被设置抽屉切换。 */
+
+:root {
+  /* ---- 分层背景（暗色：bluish 950/900/875/850/800）---- */
+  --bg-base: #151517;
+  --bg-sidebar: #1b1b1c;
+  --bg-layer-1: #232324;
+  --bg-layer-2: #2c2c2e;
+  --bg-layer-3: #353536;
+  /* 边框四级 */
+  --border-l1: rgba(255, 255, 255, 0.06);
+  --border-l2: rgba(255, 255, 255, 0.12);
+  --border-l3: rgba(255, 255, 255, 0.16);
+  --border-l4: rgba(255, 255, 255, 0.2);
+  /* 文字层级 */
+  --label-primary: #f5f6f7;
+  --label-secondary: #cfd3d6;
+  --label-tertiary: #adb2b8;
+  --label-caption: #81858c;
+  /* 品牌蓝（默认 accent，可被设置切换） */
+  --accent: #679efe;
+  --accent-hover: #5686fe;
+  --accent-deep: #4176e6;
+  --accent-dim: rgba(103, 158, 254, 0.14);
+  --accent-glow: rgba(103, 158, 254, 0.35);
+  /* 语义色 */
+  --green: #22c55e;
+  --red: #f25a5a;
+  --yellow: #f59e0b;
+  --purple: #a78bfa;
+  --cyan: #22d3ee;
+  /* 交互反馈 */
+  --interactive-hover: rgba(255, 255, 255, 0.08);
+  --interactive-active: rgba(255, 255, 255, 0.14);
+  /* 圆角 */
+  --radius-card: 12px;
+  --radius-panel: 10px;
+  --radius-pill: 999px;
+  --radius-input: 22px;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 4px 20px rgba(0, 0, 0, 0.25);
+  --shadow-lv2: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --font-display: -apple-system, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'SF Mono', Menlo, Consolas, 'Fragment Mono', monospace;
+  /* 兼容别名 */
+  --bg-page: var(--bg-base);
+  --bg-surface-1: var(--bg-layer-1);
+  --bg-surface-2: var(--bg-layer-2);
+  --bg-surface-3: var(--bg-layer-1);
+  --bg-code: var(--bg-layer-1);
+  --bg-input: var(--bg-layer-2);
+  --border: var(--border-l2);
+  --border-subtle: var(--border-l1);
+  --border-hover: var(--border-l3);
+  --text-primary: var(--label-primary);
+  --text-secondary: var(--label-secondary);
+  --text-muted: var(--label-tertiary);
+  --text-faint: var(--label-caption);
+  /* 框架（AppFrame / Sidebar rail / Details 拖拽） */
+  --dsw-alias-bg-base: var(--bg-base);
+  --dsw-specific-sidebar-fill: var(--bg-sidebar);
+  --dsw-alias-border-l1: var(--border-l1);
+  --dsw-alias-border-l2: var(--border-l2);
+  --dsw-alias-border-l3: var(--border-l3);
+  --dsw-alias-label-primary: var(--label-primary);
+  --dsw-alias-label-secondary: var(--label-secondary);
+  --dsw-alias-label-tertiary: var(--label-tertiary);
+  --dsw-alias-label-caption: var(--label-caption);
+  --dsw-alias-interactive-bg-hover: var(--interactive-hover);
+  --dsw-alias-interactive-bg-active: var(--interactive-active);
+  --dsw-alias-button-floating-fill: var(--bg-layer-2);
+  --dsw-alias-button-floating-hover: var(--bg-layer-3);
+  --dsw-alias-state-business-primary: var(--accent);
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration: 0.2s;
+  --ds-transition-duration-fast: 0.1s;
+  --ds-transition-duration-slow: 0.3s;
+  --dsh-chat-content-width: 748px;
+}
+
+/* ===== 亮色主题（跟随系统 / 手动切换时覆盖）===== */
+html[data-theme='light'] {
+  --bg-base: #f7f8fa;
+  --bg-sidebar: #ffffff;
+  --bg-layer-1: #f3f4f6;
+  --bg-layer-2: #ffffff;
+  --bg-layer-3: #eef0f3;
+  --border-l1: rgba(0, 0, 0, 0.06);
+  --border-l2: rgba(0, 0, 0, 0.1);
+  --border-l3: rgba(0, 0, 0, 0.16);
+  --border-l4: rgba(0, 0, 0, 0.2);
+  --label-primary: #1f2937;
+  --label-secondary: #4b5563;
+  --label-tertiary: #6b7280;
+  --label-caption: #9ca3af;
+  --accent-dim: rgba(103, 158, 254, 0.14);
+  --accent-glow: rgba(103, 158, 254, 0.3);
+  --interactive-hover: rgba(0, 0, 0, 0.05);
+  --interactive-active: rgba(0, 0, 0, 0.09);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 2px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lv2: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --bg-code: #f3f4f6;
+}
+
+/* 跟随系统：手动选了 system 时由 JS 决定落到 dark/light，但保留 prefers 兜底 */
+@media (prefers-color-scheme: light) {
+  html[data-theme='system'] {
+    --bg-base: #f7f8fa;
+    --bg-sidebar: #ffffff;
+    --bg-layer-1: #f3f4f6;
+    --bg-layer-2: #ffffff;
+    --bg-layer-3: #eef0f3;
+    --border-l1: rgba(0, 0, 0, 0.06);
+    --border-l2: rgba(0, 0, 0, 0.1);
+    --border-l3: rgba(0, 0, 0, 0.16);
+    --border-l4: rgba(0, 0, 0, 0.2);
+    --label-primary: #1f2937;
+    --label-secondary: #4b5563;
+    --label-tertiary: #6b7280;
+    --label-caption: #9ca3af;
+    --interactive-hover: rgba(0, 0, 0, 0.05);
+    --interactive-active: rgba(0, 0, 0, 0.09);
+    --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 2px 12px rgba(0, 0, 0, 0.06);
+    --shadow-lv2: 0 8px 32px rgba(0, 0, 0, 0.12);
+    --bg-code: #f3f4f6;
+  }
+}
+
+/* ===== 主题色（settings.accent）===== */
+html[data-accent='blue'] { --accent: #679efe; --accent-hover: #5686fe; --accent-deep: #4176e6; }
+html[data-accent='green'] { --accent: #34d399; --accent-hover: #2fbf8c; --accent-deep: #059669; }
+html[data-accent='purple'] { --accent: #a78bfa; --accent-hover: #9b7ef5; --accent-deep: #7c3aed; }
+html[data-accent='orange'] { --accent: #fbbf24; --accent-hover: #f59e0b; --accent-deep: #d97706; }
+
+/* accent-dim / glow 需随 accent 联动（用 color-mix 重算） */
+html[data-accent] {
+  --accent-dim: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-glow: color-mix(in srgb, var(--accent) 40%, transparent);
+}

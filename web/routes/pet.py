@@ -2,7 +2,7 @@
 
 GET  /api/pet/status    宠物状态
 POST /api/pet/interact  喂食/玩耍/训练
-POST /api/pet/style     切换人格
+POST /api/pet/style     切换模式
 POST /api/pet/adopt     领养宠物
 """
 from __future__ import annotations
@@ -118,14 +118,14 @@ class PetStyleBody(BaseModel):
 
 @router.post("/pet/style")
 async def pet_style(body: PetStyleBody):
-    """切换宠物人格风格。"""
+    """切换宠物回复模式。"""
     pet = _get_pet()
     if pet is None:
         raise HTTPException(status_code=404, detail="尚未领养宠物")
 
     valid_styles = {"scholar", "warrior", "artisan", "auto"}
     if body.style not in valid_styles:
-        raise HTTPException(status_code=400, detail=f"无效风格: {body.style}，可选: {', '.join(sorted(valid_styles))}")
+        raise HTTPException(status_code=400, detail=f"无效模式: {body.style}，可选: {', '.join(sorted(valid_styles))}")
 
     try:
         from core.memory.profile import ProfileManager
@@ -136,7 +136,7 @@ async def pet_style(body: PetStyleBody):
 
         return {
             "pet": _pet_to_dict(pet),
-            "message": f"风格已切换为: {body.style}",
+            "message": f"模式已切换为: {body.style}",
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -24,6 +24,7 @@ from core.agent.tools.base import ToolContext
 from core.cli.chat import (
     _detect_pet_intent,
     _is_pet_query,
+    _is_todo_query,
     _extract_rename_target,
 )
 
@@ -742,3 +743,178 @@ class TestHandleChatRestoreEnergyShortcut:
         # 没走 LLM
         assert repl.interacted == []
         assert repl.query_answered is False
+
+
+# ============================================================
+# 10. 今日待办查询短路（_is_todo_query + _handle_chat → _todo_answer_query）
+# ============================================================
+
+class TestIsTodoQueryDetection:
+    """_is_todo_query 意图识别的命中与防误判。"""
+
+    @pytest.mark.parametrize("text", [
+        "我今天有什么任务",
+        "今天待办",
+        "今日待办",
+        "今日任务",
+        "今天的任务有哪些",
+        "今日计划",
+        "今日安排",
+        "今天要做什么",
+        "我今天要做的",
+        "待办事项",
+        "待办清单",
+        "我的待办",
+        "今天的清单",
+        "告诉我今日待办",
+        "看看今天的任务",
+        "today's tasks",
+        "Today's todos",
+        "what are my tasks for today",
+    ])
+    def test_todo_query_hit(self, text):
+        """典型待办查询应命中。"""
+        assert _is_todo_query(text) is True, f"应命中: {text}"
+
+    @pytest.mark.parametrize("text", [
+        # 纯问候/闲聊
+        "你好",
+        "喂一下宠物",
+        "帮我洗澡",
+        # 长文本政策问题（>40字）即使含关键词也应放过
+        "杭州市殡葬管理办法规定的任务有哪些，今天的政策文件需要怎么处理呢？" * 3,
+        # 政策/流程类（不含时间+名词组合）
+        "海葬流程",
+        "骨灰怎么处理",
+        "申请流程",
+        # 普通名词（无时间词）
+        "任务",
+        "待办",
+        "todo",
+        # 宠物状态查询（关键词不重叠）
+        "宠物能量还有吗",
+        "宠物状态怎么样",
+        # 问答类：非待办
+        "我今天要加班吗",
+    ])
+    def test_todo_query_miss(self, text):
+        """非待办查询不应命中（防误判）。"""
+        assert _is_todo_query(text) is False, f"不应命中: {text}"
+
+    def test_todo_query_empty_and_long_boundary(self):
+        """空文本和超长边界。"""
+        assert _is_todo_query("") is False
+        assert _is_todo_query("今天待办") is True  # 刚好短
+        # >40 字：即使含关键词也跳过（避免误判长政策问题）
+        long = "今天的任务是殡葬政策流程申请补贴奖补费用标准" * 3
+        assert _is_todo_query(long) is False
+
+
+class _DummyChatREPLWithTodo:
+    """扩展 stub：支持 todo 查询短路验证。"""
+
+    def __init__(self, pet, todo_mgr):
+        self.pet = pet
+        self.pet_interactor = PetInteractor()
+        self.pet_storage = MagicMock()
+        self.pet_shop = Shop()
+        self.task_manager = MagicMock()
+        self.art_lib = MagicMock()
+        self.interacted = []
+        self.renamed_to = None
+        self.query_answered = False
+        self.todo_answered = False
+        # 与 TodoMixin 内部属性名保持一致（self.todo_mgr）
+        self.todo_mgr = todo_mgr
+
+    from core.cli.chat import ChatMixin as _ChatMixin
+    from core.cli.commands.pet import PetMixin as _PetMixin
+    from core.cli.commands.todo import TodoMixin as _TodoMixin
+
+    def _pet_interact(self, action):
+        self.interacted.append(action)
+        method = getattr(self.pet_interactor, action)
+        result = method(self.pet)
+        self.pet_storage.save(self.pet)
+        return result
+
+    def _pet_rename(self, new_name):
+        self.renamed_to = new_name
+        old = self.pet.name
+        self.pet.name = new_name
+        self.pet_storage.save(self.pet)
+
+    def _pet_answer_query(self):
+        self.query_answered = True
+        return self._PetMixin._pet_answer_query(self)
+
+    def _todo_answer_query(self):
+        self.todo_answered = True
+        return self._TodoMixin._todo_answer_query(self)
+
+    _handle_chat = _ChatMixin._handle_chat
+
+
+class TestHandleChatTodoShortcut:
+    """_handle_chat 入口应短路到 _todo_answer_query，不触发 LLM/检索。"""
+
+    def test_today_tasks_query_triggers_shortcut(self, tmp_path):
+        """问"我今天有什么任务"应直接从 TodoManager 读取，不调 LLM。"""
+        from core.todo.manager import TodoManager
+
+        # 用临时目录隔离存储（避免读用户真实 todo.json）
+        todo_mgr = TodoManager(storage_path=tmp_path)
+        todo_mgr.add("每月20日左右统计上城区无感站点数据报表")
+        todo_mgr.add("每月20日左右统计白事服务贴心管家报告")
+
+        pet = Pet(name="小林同学", energy=100)
+        repl = _DummyChatREPLWithTodo(pet=pet, todo_mgr=todo_mgr)
+        repl.llm_available = True
+        repl.administrator = None
+        repl._admin_init_failed = False
+
+        repl._handle_chat("我今天有什么任务")
+
+        # 验证：走了待办短路，没走宠物互动/查询/LLM
+        assert repl.todo_answered is True
+        assert repl.interacted == []
+        assert repl.query_answered is False
+        assert repl.renamed_to is None
+
+    def test_shortcut_is_today_items_consistent(self, tmp_path):
+        """短路返回的内容应与 todo_mgr.list_day() 一致。"""
+        from io import StringIO
+        from rich.console import Console
+        from core.todo.manager import TodoManager
+        from core.cli import commands
+
+        todo_mgr = TodoManager(storage_path=tmp_path)
+        d1 = todo_mgr.add("任务A已完成", priority="high")
+        todo_mgr.update_status(d1.id, "done")
+        todo_mgr.add("任务B未完成", priority="medium")
+        todo_mgr.add("任务C已取消", priority="low")
+        todo_mgr.set_note(d1.id.replace("todo_", ""), "")  # no-op，保持 id 前缀路径
+
+        # 捕获输出：临时替换模块 console
+        old_console = commands.todo.console
+        buf = StringIO()
+        capture = Console(file=buf, force_terminal=False, color_system=None)
+        commands.todo.console = capture
+        try:
+            pet = Pet(name="小林")
+            repl = _DummyChatREPLWithTodo(pet=pet, todo_mgr=todo_mgr)
+            repl.llm_available = True
+            repl.administrator = None
+            repl._admin_init_failed = False
+            repl._handle_chat("今日待办")
+        finally:
+            commands.todo.console = old_console
+
+        output = buf.getvalue()
+        assert "任务A已完成" in output
+        assert "任务B未完成" in output
+        assert "任务C已取消" in output
+        # 应包含 3 条任务的统计信息
+        assert "2/3" in output or "1/3" in output or "完成率" in output
+        # 标记了短路
+        assert repl.todo_answered is True

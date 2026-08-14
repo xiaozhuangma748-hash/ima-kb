@@ -65,7 +65,9 @@ class CrossEncoderReranker:
             else:
                 logger.info(f"从 HF 镜像加载 Cross-Encoder 模型: {self._model_name}")
             # max_length 控制单次输入长度，超过会截断
-            self._model = CrossEncoder(model_path, max_length=_MAX_LENGTH)
+            # device=cpu：避免在 Mac MPS 上与向量模型/其他组件争抢 GPU 内存导致 OOM
+            # （MPS 内存上限约 9GB，cross-encoder 权重较大，常因已分配内存占满而加载失败）
+            self._model = CrossEncoder(model_path, max_length=_MAX_LENGTH, device="cpu")
             self._available = True
             logger.info("Cross-Encoder 模型加载成功")
         except Exception as e:

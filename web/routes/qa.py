@@ -7,15 +7,77 @@ from __future__ import annotations
 
 import asyncio
 import json
+import pathlib
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from config import settings
 from services.qa_service import QAService
+from web.app import STATIC_DIR
 
 router = APIRouter(tags=["qa"])
+
+_AVATAR_EXTS = ("png", "jpg", "jpeg", "webp", "gif")
+
+
+def _current_avatar_path() -> Optional[pathlib.Path]:
+    """返回当前已上传的自定义头像文件（若有）。"""
+    for ext in _AVATAR_EXTS:
+        p = STATIC_DIR / f"avatar.{ext}"
+        if p.exists():
+            return p
+    return None
+
+
+@router.get("/avatar")
+async def get_avatar():
+    """返回当前自定义 AI 头像（未设置则为 null）。"""
+    avatar = _current_avatar_path()
+    if avatar is None:
+        return {"avatar_url": None}
+    return {"avatar_url": f"/static/{avatar.name}"}
+
+
+@router.post("/avatar")
+async def upload_avatar(file: UploadFile = File(...)):
+    """上传自定义 AI 头像照片，替换默认 SVG。"""
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="仅支持图片文件（png/jpg/webp/gif）")
+    ext_map = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/webp": "webp",
+        "image/gif": "gif",
+    }
+    ext = ext_map.get(content_type)
+    if ext is None:
+        raise HTTPException(status_code=400, detail=f"不支持的图片格式：{content_type}")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="图片过大，请控制在 5MB 以内")
+    for old in STATIC_DIR.glob("avatar.*"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    (STATIC_DIR / f"avatar.{ext}").write_bytes(data)
+    return {"avatar_url": f"/static/avatar.{ext}"}
+
+
+@router.delete("/avatar")
+async def delete_avatar():
+    """删除自定义头像，恢复默认 SVG。"""
+    removed = False
+    for old in STATIC_DIR.glob("avatar.*"):
+        try:
+            old.unlink()
+            removed = True
+        except OSError:
+            pass
+    return {"removed": removed}
 
 
 @router.post("/qa/stream")
@@ -55,21 +117,27 @@ async def qa_stream(request: Request):
     async def event_stream():
         """异步 SSE 流：同步生成器放到线程中运行，不阻塞 event loop。
 
-        实现：asyncio.Queue + threading.Thread + loop.call_soon_threadsafe。
+        实现：同步 queue.Queue（线程安全，阻塞式 put 不丢事件）
+        + asyncio 侧用 run_in_executor 消费，避免 QueueFull 丢消息。
+        + stop_event 在客户端断开时通知线程退出，避免僵尸线程。
         """
         import asyncio
+        import queue as sync_queue
         import threading
 
         loop = asyncio.get_event_loop()
-        queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+        q: sync_queue.Queue = sync_queue.Queue(maxsize=4096)
+        stop_event = threading.Event()
         _SENTINEL = object()
 
         def _run_in_thread():
-            """在线程中运行同步生成器，把事件推入队列。"""
+            """在线程中运行同步生成器，把事件推入队列（阻塞式，绝不丢）。"""
             try:
                 for event in service.ask_stream(
             question, history=history, style_override=persona
         ):
+                    if stop_event.is_set():
+                        break
                     if event["type"] == "stage":
                         msg = f"data: {json.dumps({'type': 'stage', 'stage': event['stage'], 'count': event.get('count', 0)}, ensure_ascii=False)}\n\n"
                     elif event["type"] == "token":
@@ -97,32 +165,40 @@ async def qa_stream(request: Request):
                         msg = f"data: {json.dumps({'type': 'done', 'answer': result.text, 'citations': citations_data, 'sources': sources_data, 'pet_events': result.pet_events}, ensure_ascii=False)}\n\n"
                     else:
                         continue
-                    # 线程安全地把消息放入 asyncio.Queue
-                    loop.call_soon_threadsafe(queue.put_nowait, msg)
+                    # 阻塞式 put（带超时，可响应 stop_event）
+                    q.put(msg, timeout=0.5)
                 # 发送结束标记
-                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+                q.put(_SENTINEL, timeout=0.5)
             except Exception as e:
                 err_msg = f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
                 try:
-                    loop.call_soon_threadsafe(queue.put_nowait, err_msg)
+                    q.put(err_msg, timeout=0.5)
                 except Exception:
                     pass
-                loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+                try:
+                    q.put(_SENTINEL, timeout=0.5)
+                except Exception:
+                    pass
 
         # 启动线程
         thread = threading.Thread(target=_run_in_thread, daemon=True)
         thread.start()
 
-        # 异步消费队列
+        # 异步消费队列（run_in_executor 不阻塞 event loop）
+        get_task = None
         try:
             while True:
-                msg = await queue.get()
+                get_task = asyncio.ensure_future(loop.run_in_executor(None, q.get))
+                msg = await get_task
                 if msg is _SENTINEL:
                     break
                 yield msg
         finally:
-            if thread.is_alive():
-                thread.join(timeout=1.0)
+            # 客户端断开时通知线程退出，并等待其结束
+            stop_event.set()
+            if get_task and not get_task.done():
+                get_task.cancel()
+            thread.join(timeout=1.0)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

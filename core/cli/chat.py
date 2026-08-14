@@ -55,13 +55,52 @@ _PET_INTENT_RULES = [
 # 宠物状态查询关键词：命中后返回真实状态，而非让 LLM 编造
 _PET_QUERY_KEYWORDS = (
     "能量", "饱食", "心情", "清洁", "状态", "等级", "经验", "属性",
-    "怎么样", "还好吗", "还有吗", "多少", "进度", "任务",
+    "怎么样", "还好吗", "还有吗", "多少", "进度",
     "道具栏", "有什么道具", "有什么东西", "背包",
     "lv", "level",
 )
 
 # 宠物改名关键词：用正则提取新名字
 _PET_RENAME_KEYWORDS = ("改名", "名字改成", "叫", "重新命名", "改名叫")
+
+# 待办/今日任务查询关键词组合：
+# _TODO_TIME — 时间修饰（今天/今日/today）
+# _TODO_NOUN — 任务/待办等名词
+# _TODO_STRONG — 强短语，无需时间词也命中（"今日待办""待办事项"等）
+_TODO_TIME_KEYWORDS = ("今天", "今日", "today", "today's", "本日", "当天")
+_TODO_NOUN_KEYWORDS = ("任务", "待办", "todo", "要做", "要干", "计划", "安排", "事项", "清单", "日程")
+_TODO_STRONG_PHRASES = ("今日待办", "今日任务", "今日计划", "今日安排",
+                        "待办事项", "待办清单", "今日清单", "我的待办",
+                        "today's tasks", "today's todos", "my tasks", "my todos",
+                        "今天的任务", "今天的待办", "今天要做的", "今天的计划",
+                        "今天的安排", "今天的事项", "本日任务", "本日待办")
+_TODO_QUERY_VERBS = ("有什么", "有哪些", "是什么", "查看", "看看", "告诉我", "说说", "列出", "列一下", "汇报", "说一下")
+
+
+def _is_todo_query(text: str) -> bool:
+    """识别今日待办查询意图（被 _handle_chat 短路调用）。
+
+    与 _is_pet_query 互补：待办查询走短路返回真实任务列表，
+    避免走 RAG 检索（知识库无任务文档，scholar 引用要求导致 LLM 不敢答）。
+
+    判定规则（命中任一即可）：
+    1. 强短语（_TODO_STRONG_PHRASES）直接命中
+    2. 同时含 时间词 + 名词词（长度≤40 字，避免误判政策长问句）
+    3. 含 强短语 或 （时间词 + 名词） 再 + 查询动词（可选）
+    """
+    t = text.strip().lower()
+    if not t or len(t) > 40:
+        return False
+    # 1. 强短语
+    for phrase in _TODO_STRONG_PHRASES:
+        if phrase in t:
+            return True
+    # 2. 时间词 + 名词词 组合
+    has_time = any(kw in t for kw in _TODO_TIME_KEYWORDS)
+    has_noun = any(kw in t for kw in _TODO_NOUN_KEYWORDS)
+    if has_time and has_noun:
+        return True
+    return False
 
 
 def _detect_pet_intent(text: str) -> Optional[str]:
@@ -299,6 +338,12 @@ class ChatMixin:
             # 状态查询意图：返回真实状态，避免 LLM 编造
             if _is_pet_query(user_input):
                 self._pet_answer_query()
+                return
+
+            # 今日待办查询意图：短路到 _todo_answer_query，
+            # 避免走 RAG 检索（知识库无任务文档 + scholar 引用要求 → LLM 答不出）
+            if _is_todo_query(user_input):
+                self._todo_answer_query()
                 return
 
         if not self.llm_available:

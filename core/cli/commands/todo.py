@@ -405,6 +405,87 @@ class TodoMixin:
         count = self.todo_mgr.clear_day()
         console.print(f"[green]v 已清空 {count} 条任务[/green]\n")
 
+    # ---- 对话式查询（被 _handle_chat 短路调用）----
+
+    def _todo_answer_query(self) -> None:
+        """以对话形式回答今日待办查询（被 _handle_chat 意图识别调用）。
+
+        与 _todo_show_today 不同：本方法用自然语言回答而非命令面板，
+        风格与 _pet_answer_query 保持一致（宠物头像标识行 + 任务列表）。
+        短路原因：待办查询若走 RAG，知识库无任务文档 + scholar 引用要求
+        会导致 LLM 答不出，直接读 TodoManager 100% 可靠且零延迟。
+        """
+        items = self.todo_mgr.list_day()
+        stats = self.todo_mgr.stats_day()
+        today = stats["date"]
+        total = stats["total"]
+        done = stats["done"]
+        pending = stats["pending"]
+        cancelled = stats["cancelled"]
+
+        # 宠物头像标识行（有宠物时显示，无宠物时用普通 AI 标识）
+        pet = getattr(self, "pet", None)
+        if pet is not None:
+            avatar = {"scholar": "✻", "warrior": "✦", "artisan": "✼"}.get(
+                pet.branch, "✺")
+            color = {"scholar": "cyan", "warrior": "red", "artisan": "yellow"}.get(
+                pet.branch, "white")
+            console.print(f"[{color}]{avatar}[/{color}] [bold magenta]{pet.name}[/bold magenta]")
+        else:
+            console.print("[bold yellow]>[/bold yellow] [bold cyan]AI[/bold cyan]")
+        console.print()
+
+        # 自然语言叙述
+        rate_str = f"{stats['completion_rate'] * 100:.0f}%" if total else "—"
+        header = f"📋 今日待办 · {today}（{done}/{total} 完成，完成率 {rate_str}）"
+        console.print(header)
+        console.print()
+
+        if total == 0:
+            console.print("  今天没有待办事项。用 /todo add <描述> 添加吧。")
+            console.print()
+            # 桌宠推送（失败静默）
+            if _try_pet_push:
+                _try_pet_push(f"📋 今日待办 · {today}\n今天没有待办事项。", "markdown")
+            return
+
+        # 分块输出：未完成在前（与 _render_todo_list 顺序一致：status 排序）
+        _pri_label = {"high": "[red]高[/red]", "medium": "[yellow]中[/yellow]", "low": "[dim]低[/dim]"}
+        for i, item in enumerate(items, 1):
+            if item.status == "done":
+                mark = "[green]✓[/green]"
+                desc = f"[dim][s]{item.description}[/s][/dim]"
+            elif item.status == "cancelled":
+                mark = "[dim]✗[/dim]"
+                desc = f"[dim]{item.description}[/dim]"
+            else:
+                mark = "○"
+                desc = item.description
+            pri = _pri_label.get(item.priority, item.priority)
+            note = f"  [dim]// {item.note}[/dim]" if item.note else ""
+            console.print(f"  {mark} [{pri}] {i:>2}. {desc}{note}")
+
+        console.print()
+        # 完成情况摘要
+        parts = []
+        if pending:
+            parts.append(f"未完成 {pending} 项")
+        if cancelled:
+            parts.append(f"已取消 {cancelled} 项")
+        if parts:
+            console.print(f"[dim]进度：{ '、'.join(parts) }。完成任务用 /todo done <序号>[/dim]")
+            console.print()
+
+        # 桌宠气泡推送（失败静默，最多前 8 条）
+        if _try_pet_push:
+            lines = [f"📋 今日待办 · {today}（{done}/{total} 完成）"]
+            for i, item in enumerate(items[:8], 1):
+                m = "✓" if item.status == "done" else "○" if item.status == "pending" else "✗"
+                lines.append(f"{m} {i}. {item.description}")
+            if len(items) > 8:
+                lines.append(f"... 还有 {len(items) - 8} 条")
+            _try_pet_push("\n".join(lines), "markdown")
+
     # ---- 跨天处理 ----
 
     def _todo_carry_prompt(self) -> None:

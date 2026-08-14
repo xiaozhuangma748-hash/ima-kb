@@ -45,3 +45,7 @@ logs/
 # ===== Electron 桌面宠物依赖 =====
 desktop-pet/node_modules/
 
+
+# ===== 前端 =====
+node_modules/
+web/frontend/dist/

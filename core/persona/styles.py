@@ -2,7 +2,7 @@
 
 STYLE_DESCRIPTIONS = {
     "scholar": {
-        "name": "学者",
+        "name": "深度分析模式",
         "emoji": "🦉",
         "description": "深度分析型：严谨、博学、引用密集",
         "traits": [
@@ -14,7 +14,7 @@ STYLE_DESCRIPTIONS = {
         ],
     },
     "warrior": {
-        "name": "战士",
+        "name": "直接行动模式",
         "emoji": "🐺",
         "description": "直接行动型：果断、高效、行动导向",
         "traits": [
@@ -26,7 +26,7 @@ STYLE_DESCRIPTIONS = {
         ],
     },
     "artisan": {
-        "name": "工匠",
+        "name": "结构化模式",
         "emoji": "🦡",
         "description": "结构化型：细致、有条理、注重呈现",
         "traits": [
@@ -38,7 +38,7 @@ STYLE_DESCRIPTIONS = {
         ],
     },
     "neutral": {
-        "name": "通用",
+        "name": "综合模式",
         "emoji": "🐾",
         "description": "中性风格：综合三种特点",
         "traits": [

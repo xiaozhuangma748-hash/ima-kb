@@ -14,17 +14,14 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 
 WEB_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
-
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+FRONTEND_DIST_DIR = WEB_DIR / "frontend" / "dist"
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +159,11 @@ def create_app() -> FastAPI:
                 return response
         app.mount("/static", NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
+    # React 前端产物（Vite build → web/frontend/dist）
+    if FRONTEND_DIST_DIR.exists():
+        app.mount("/assets", NoCacheStaticFiles(directory=str(FRONTEND_DIST_DIR / "assets")), name="assets")
+        app.mount("/vendor", NoCacheStaticFiles(directory=str(FRONTEND_DIST_DIR / "vendor")), name="vendor")
+
     # 全局共享组件状态（懒加载）
     app.state.storage = None
     app.state.vector_index = None
@@ -183,6 +185,7 @@ def create_app() -> FastAPI:
     from web.routes.stats import router as stats_router
     from web.routes.graph import router as graph_router
     from web.routes.pet import router as pet_router
+    from web.routes.settings import router as settings_router
 
     app.include_router(qa_router, prefix="/api")
     app.include_router(ingest_router, prefix="/api")
@@ -191,49 +194,26 @@ def create_app() -> FastAPI:
     app.include_router(stats_router, prefix="/api")
     app.include_router(graph_router, prefix="/api")
     app.include_router(pet_router, prefix="/api")
+    app.include_router(settings_router, prefix="/api")
 
-    # 首页 — 单页 HTML
+    # 前端 — React 单页（Vite 构建产物）
+    index_html = FRONTEND_DIST_DIR / "index.html"
+
     @app.get("/")
-    async def index(request: Request):
-        """渲染单页 Web 后台。注入初始统计数据。"""
-        from config import settings
+    async def index():
+        """返回 React 前端入口。"""
+        if not index_html.exists():
+            return Response("前端尚未构建，请运行 `cd web/frontend && npm install && npm run build`", status_code=503)
+        return Response(index_html.read_bytes(), media_type="text/html")
 
-        storage = _get_shared_storage(request.app)
-        s = storage.stats()
-        tags = storage.list_all_tags()
-
-        # 图谱统计（使用共享实例）
-        graph_nodes = 0
-        graph_edges = 0
-        gs = _get_shared_graph_store(request.app)
-        if gs:
-            try:
-                gs_stats = gs.stats()
-                graph_nodes = gs_stats["nodes"]
-                graph_edges = gs_stats["edges"]
-            except Exception:
-                pass
-
-        # 健康检查（缓存化，避免每次开页都遍历所有文档）
-        health = _get_health_cache(request.app)
-        health_score = health.get("health_score", 100)
-        health_alerts = health.get("alerts", {})
-
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "page_title": "IMA 知识库",
-            "static_version": str(int(time.time())),
-            "initial_stats": {
-                "documents": s["documents"],
-                "chunks": s["chunks"],
-                "total_tokens": s["total_tokens"],
-                "tags_count": len(tags),
-                "graph_nodes": graph_nodes,
-                "graph_edges": graph_edges,
-                "health_score": health_score,
-            },
-            "initial_alerts": health_alerts,
-            "api_key_configured": settings.has_llm(),
-        })
+    # SPA 回退：非 /api 路径全部返回 index.html（供浏览器直接刷新子路径）
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        if full_path.startswith("api/"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="接口不存在")
+        if not index_html.exists():
+            return Response("前端尚未构建，请运行 `cd web/frontend && npm install && npm run build`", status_code=503)
+        return Response(index_html.read_bytes(), media_type="text/html")
 
     return app
