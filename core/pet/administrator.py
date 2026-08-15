@@ -161,7 +161,9 @@ class PetAdministrator:
     def ask(self, query: str, style_override: Optional[str] = None,
             history: Optional[List[Dict]] = None,
             summary: Optional[str] = None,
-            cross_session_context: Optional[str] = None) -> AnswerResult:
+            cross_session_context: Optional[str] = None,
+            use_vector: bool = True,
+            use_rerank: bool = True) -> AnswerResult:
         """主入口：用户提问 → 带引用的回答。
 
         Args:
@@ -184,10 +186,13 @@ class PetAdministrator:
 
         # 2. 混合检索（历史感知：用 summary 扩展 query，提升多轮对话召回率）
         search_query = self._expand_query_with_context(query, summary=summary, history=history)
-        candidates = self.hybrid.search(search_query, top_k=10)
+        candidates = self.hybrid.search(search_query, top_k=10, use_vector=use_vector)
 
-        # 3. LLM 重排
-        top_sources = self.reranker.rerank(query, candidates, top_n=5)
+        # 3. LLM 重排（use_rerank=False 时跳过，直接取检索结果前 5）
+        if use_rerank:
+            top_sources = self.reranker.rerank(query, candidates, top_n=5)
+        else:
+            top_sources = candidates[:5]
 
         # 4. 确定风格
         if style_override:
@@ -294,7 +299,9 @@ class PetAdministrator:
                    summary: Optional[str] = None,
                    cross_session_context: Optional[str] = None,
                    max_tokens: int = 1024,
-                   extra_system_prompt: Optional[str] = None):
+                   extra_system_prompt: Optional[str] = None,
+                   use_vector: bool = True,
+                   use_rerank: bool = True):
         """流式问答生成器。yield 事件 dict:
         - {"type": "stage", "stage": "检索", "count": N}
         - {"type": "stage", "stage": "重排", "count": N}
@@ -305,33 +312,37 @@ class PetAdministrator:
         步骤 7-9（引用提取 / 记忆更新 / 宠物经验）在流式结束后执行。
         """
         # 0. 答案级语义缓存查询（命中则直接流式返回缓存的答案）
+        # 缓存键必须包含检索模式，否则切换 use_vector/use_rerank 后
+        # 会命中旧模式的缓存答案，导致检索模式选择"看起来无效"。
         query_type = route_query(query)
         if query_type == "knowledge":
             try:
+                # 缓存键含检索模式；get 用 L1 精确匹配（query_embedding=None），
+                # 避免 L2 语义相似度把不同模式的 query 判为同一而串缓存。
+                cache_query = f"{query} [uv={int(use_vector)} ur={int(use_rerank)}]"
                 query_emb = None
                 if self.hybrid.vector.is_available():
-                    query_emb = self.hybrid.vector.embed_query(query)
-                if query_emb is not None:
-                    cached = self._answer_cache.get(query, query_emb)
-                    if cached is not None and cached.answer:
-                        logger.info(f"答案缓存命中，跳过检索+LLM: {query[:30]}...")
-                        # 清理缓存中可能遗留的 LaTeX 公式
-                        clean_answer = _sanitize_latex(cached.answer)
-                        yield {"type": "stage", "stage": "缓存", "count": 1}
-                        # 逐 token 回放缓存答案
-                        import re as _re
-                        for token in _re.findall(r'\S+|\s+', clean_answer):
-                            yield {"type": "token", "text": token}
-                        yield {
-                            "type": "done",
-                            "result": AnswerResult(
-                                text=clean_answer,
-                                citations=[],
-                                sources=[],
-                                pet_events={},
-                            ),
-                        }
-                        return
+                    query_emb = self.hybrid.vector.embed_query(cache_query)
+                cached = self._answer_cache.get(cache_query, None)
+                if cached is not None and cached.answer:
+                    logger.info(f"答案缓存命中，跳过检索+LLM: {query[:30]}...")
+                    # 清理缓存中可能遗留的 LaTeX 公式
+                    clean_answer = _sanitize_latex(cached.answer)
+                    yield {"type": "stage", "stage": "缓存", "count": 1}
+                    # 逐 token 回放缓存答案
+                    import re as _re
+                    for token in _re.findall(r'\S+|\s+', clean_answer):
+                        yield {"type": "token", "text": token}
+                    yield {
+                        "type": "done",
+                        "result": AnswerResult(
+                            text=clean_answer,
+                            citations=[],
+                            sources=[],
+                            pet_events={},
+                        ),
+                    }
+                    return
             except Exception as e:
                 logger.warning(f"答案缓存查询失败，继续正常流程: {e}")
 
@@ -349,17 +360,52 @@ class PetAdministrator:
         # 2. 混合检索（闲聊跳过检索，直接空候选）
         if should_skip_retrieval(query):
             candidates = []
-            yield {"type": "stage", "stage": "检索", "count": 0}
+            yield {"type": "stage", "stage": "检索", "count": 0, "context": {"sources": []}}
         else:
             # 历史感知：用 summary 扩展 query，提升多轮对话召回率
             search_query = self._expand_query_with_context(query, summary=summary, history=history)
-            candidates = self.hybrid.search(search_query, top_k=10)
-            yield {"type": "stage", "stage": "检索", "count": len(candidates)}
+            candidates = self.hybrid.search(search_query, top_k=10, use_vector=use_vector)
+            yield {
+                "type": "stage",
+                "stage": "检索",
+                "count": len(candidates),
+                "context": {
+                    "sources": [
+                        {
+                            "doc_id": s.doc_id,
+                            "title": s.doc_title,
+                            "paragraph_num": s.paragraph_num or (i + 1),
+                            "score": getattr(s, "score", 0),
+                            "snippet": (s.content or "")[:180],
+                        }
+                        for i, s in enumerate(candidates)
+                    ]
+                },
+            }
 
-        # 3. LLM 重排（无候选时跳过，不 yield "重排" 事件避免误导用户）
+        # 3. LLM 重排（use_rerank=False 跳过；无候选时跳过，不 yield "重排" 事件避免误导用户）
         if candidates:
-            top_sources = self.reranker.rerank(query, candidates, top_n=5)
-            yield {"type": "stage", "stage": "重排", "count": len(top_sources)}
+            if use_rerank:
+                top_sources = self.reranker.rerank(query, candidates, top_n=5)
+            else:
+                top_sources = candidates[:5]
+            yield {
+                "type": "stage",
+                "stage": "重排",
+                "count": len(top_sources),
+                "context": {
+                    "sources": [
+                        {
+                            "doc_id": s.doc_id,
+                            "title": s.doc_title,
+                            "paragraph_num": s.paragraph_num or (i + 1),
+                            "score": getattr(s, "score", 0),
+                            "snippet": (s.content or "")[:180],
+                        }
+                        for i, s in enumerate(top_sources)
+                    ]
+                },
+            }
         else:
             top_sources = []
 
@@ -403,6 +449,14 @@ class PetAdministrator:
             sources=sources_dict,
             todos=today_todos,
         )
+
+        # 4.5 上下文注入：组装 system prompt 后、LLM 生成前发送真实过程事件
+        yield {"type": "stage", "stage": "注入", "count": len(top_sources), "context": {
+            "history_count": len(history or []),
+            "has_memory": bool(cross_session_context),
+            "has_summary": bool(summary),
+            "sources_count": len(top_sources),
+        }}
 
         # 6. LLM 流式生成（带多轮历史 + 早期摘要，chat_stream 不支持重试，首帧失败直接降级）
         # 取最近 10 条历史（5 轮对话），避免 token 超限
@@ -473,7 +527,7 @@ class PetAdministrator:
                     # 缓存前清理 LaTeX，保证缓存内容也是干净的
                     clean_answer_for_cache = _sanitize_latex(answer_text)
                     self._answer_cache.put(
-                        query=query,
+                        query=cache_query,
                         query_embedding=query_emb,
                         answer=clean_answer_for_cache,
                         citations=[c.__dict__ if hasattr(c, '__dict__') else c for c in citations],

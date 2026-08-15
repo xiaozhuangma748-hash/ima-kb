@@ -127,6 +127,8 @@ class QAService:
         history: Optional[List[Dict]] = None,
         summary: Optional[str] = None,
         cross_session_context: Optional[str] = None,
+        use_vector: bool = True,
+        use_rerank: bool = True,
     ):
         """同步问答。
 
@@ -141,6 +143,8 @@ class QAService:
             history=history,
             summary=summary,
             cross_session_context=cross_session_context,
+            use_vector=use_vector,
+            use_rerank=use_rerank,
         )
 
     def ask_stream(
@@ -152,6 +156,8 @@ class QAService:
         cross_session_context: Optional[str] = None,
         max_tokens: int = 1024,
         extra_system_prompt: Optional[str] = None,
+        use_vector: bool = True,
+        use_rerank: bool = True,
     ):
         """流式问答生成器。
 
@@ -168,6 +174,8 @@ class QAService:
             cross_session_context=cross_session_context,
             max_tokens=max_tokens,
             extra_system_prompt=extra_system_prompt,
+            use_vector=use_vector,
+            use_rerank=use_rerank,
         )
 
     def save_state(self) -> None:

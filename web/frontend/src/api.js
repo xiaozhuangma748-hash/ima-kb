@@ -44,6 +44,10 @@ export const api = {
     body: JSON.stringify({ title, content }),
   }),
 
+  // ---- 已入库文档管理 ----
+  listDocuments: () => request('/api/documents?limit=200'),
+  deleteDocument: (id) => request(`/api/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   // ---- 数据分析 ----
   analyze: (file, aiInsight = true) => {
     const fd = new FormData();
@@ -88,14 +92,28 @@ export const api = {
     fd.append('file', file);
     return request('/api/avatar', { method: 'POST', body: fd });
   },
+
+  // ---- 模型 ----
+  getModels: () => request('/api/models'),
+  setModel: (model) => request('/api/model', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  }),
+  addModel: (m) => request('/api/models', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(m),
+  }),
+  deleteModel: (id) => request(`/api/models/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };
 
 // SSE 流式问答：读取 /api/qa/stream 的 NDJSON（以 \n\n 分隔的 SSE 块）
-export function streamQA({ question, history, persona, signal, onStage, onToken, onDone, onError }) {
+export function streamQA({ question, history, persona, signal, onStage, onToken, onDone, onError, useVector = true, useRerank = true }) {
   return fetch('/api/qa/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, history, persona }),
+    body: JSON.stringify({ question, history, persona, use_vector: useVector, use_rerank: useRerank }),
     signal,
   })
     .then(resp => {
@@ -124,7 +142,7 @@ export function streamQA({ question, history, persona, signal, onStage, onToken,
             let parsed;
             try { parsed = JSON.parse(data); } catch { continue; }
 
-            if (parsed.type === 'stage' && onStage) onStage(parsed.stage, parsed.count);
+            if (parsed.type === 'stage' && onStage) onStage(parsed.stage, parsed.count, parsed.context);
             else if (parsed.type === 'token' && onToken) onToken(parsed.text);
             else if (parsed.type === 'done' && onDone) onDone(parsed);
             else if (parsed.type === 'error' && onError) onError(parsed.message || '未知错误');

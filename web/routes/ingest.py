@@ -160,3 +160,45 @@ async def ingest_clip(body: ClipIngestBody, request: Request):
         "error": result.error,
         "error_type": result.error_type,
     }
+
+
+@router.get("/documents")
+async def list_documents(request: Request, limit: int = 200, offset: int = 0):
+    """返回已入库文档列表（按时间倒序）。"""
+    from web.app import _get_shared_storage
+
+    storage = _get_shared_storage(request.app)
+    docs = storage.list_documents(limit=limit, offset=offset)
+    return {
+        "total": len(docs),
+        "documents": [
+            {
+                "id": d.id,
+                "title": d.title,
+                "file_name": d.file_name,
+                "file_type": d.file_type,
+                "file_size": d.file_size,
+                "language": d.language,
+                "created_at": d.created_at,
+                "chunk_count": d.chunk_count,
+                "total_tokens": d.total_tokens,
+                "tags": d.tags,
+            }
+            for d in docs
+        ],
+    }
+
+
+@router.delete("/documents/{doc_id}")
+async def delete_documents(doc_id: str, request: Request):
+    """删除已入库文档（含分块、原文件、向量、索引）。"""
+    from fastapi import HTTPException
+
+    from web.app import _get_shared_storage, invalidate_health_cache
+
+    storage = _get_shared_storage(request.app)
+    ok = storage.delete_document(doc_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    invalidate_health_cache(request.app)
+    return {"deleted": doc_id}

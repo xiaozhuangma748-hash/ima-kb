@@ -55,14 +55,46 @@ class LLMClient:
             )
         # 延迟加载 OpenAI SDK：仅在真正实例化客户端时付出 ~294ms 导入代价
         OpenAI = _load_openai()
+        self._base_url = settings.agnes_base_url
+        self._api_key = settings.agnes_api_key
         self._client = OpenAI(
-            api_key=settings.agnes_api_key,
-            base_url=settings.agnes_base_url,
+            api_key=self._api_key,
+            base_url=self._base_url,
             timeout=60.0,  # 单次请求超时 60 秒（默认太短）
         )
         self._model = settings.llm_model
+        self._model_lock = threading.Lock()
         # 最近一次调用的 token 使用量（由 chat/chat_stream 写入）
         self.last_usage: Optional[dict] = None
+
+    @property
+    def model(self) -> str:
+        """当前使用的模型名称。"""
+        return self._model
+
+    def set_model(self, model_id: str) -> None:
+        """运行时切换模型（线程安全）。
+
+        若目标模型在注册表中配置了独立 base_url / api_key，
+        则重建底层 OpenAI 客户端以切换到对应端点。
+        """
+        with self._model_lock:
+            from core.llm.model_registry import get_model
+            meta = get_model(model_id) or {}
+            base_url = (meta.get("base_url") or settings.agnes_base_url).strip()
+            api_key = (meta.get("api_key") or settings.agnes_api_key).strip()
+            if not api_key or api_key in ("sk-xxx", "your-api-key"):
+                raise LLMError(f"模型 {model_id} 未配置有效 API Key")
+            if base_url != self._base_url or api_key != self._api_key:
+                OpenAI = _load_openai()
+                self._client = OpenAI(
+                    api_key=api_key,
+                    base_url=base_url,
+                    timeout=60.0,
+                )
+                self._base_url = base_url
+                self._api_key = api_key
+            self._model = model_id
 
     def chat(
         self,

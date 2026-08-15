@@ -112,6 +112,7 @@ class HybridRetriever:
         top_k: int = 10,
         use_cache: bool = True,
         doc_ids: Optional[List[str]] = None,
+        use_vector: bool = True,
     ) -> List[HybridResult]:
         """混合检索：BM25 + 向量并发 + RRF 融合。
 
@@ -127,7 +128,7 @@ class HybridRetriever:
         """
         # 0. 语义缓存查询（命中则直接返回）
         query_embedding = None
-        if use_cache and self.cache is not None and self.vector is not None and self.vector.is_available():
+        if use_cache and use_vector and self.cache is not None and self.vector is not None and self.vector.is_available():
             try:
                 query_embedding = self.vector.embed_query(query)
                 cached = self.cache.get(query, query_embedding)
@@ -159,7 +160,7 @@ class HybridRetriever:
             else:
                 vector_where = {"doc_id": {"$in": doc_ids}}
 
-        if self.vector is None or not self.vector.is_available():
+        if (not use_vector) or self.vector is None or not self.vector.is_available():
             # 向量不可用，纯 BM25
             bm25_results = self.bm25.search(query, top_k=top_k)
             # doc_ids 过滤（BM25 不支持 where，结果后过滤）

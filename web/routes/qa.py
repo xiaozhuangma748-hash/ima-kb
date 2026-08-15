@@ -12,6 +12,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from config import settings
 from services.qa_service import QAService
@@ -20,6 +21,67 @@ from web.app import STATIC_DIR
 router = APIRouter(tags=["qa"])
 
 _AVATAR_EXTS = ("png", "jpg", "jpeg", "webp", "gif")
+
+
+@router.get("/models")
+async def list_models():
+    """返回可用模型列表及当前模型。"""
+    from core.llm.client import get_llm, LLMError
+    from core.llm.model_registry import get_models
+    current = ""
+    try:
+        current = get_llm().model
+    except LLMError:
+        pass
+    return {"models": get_models(), "current": current}
+
+
+@router.put("/model")
+async def set_model(request: Request):
+    """切换当前使用的 LLM 模型。"""
+    from core.llm.client import get_llm, LLMError
+    from core.llm.model_registry import get_model
+    body = await request.json()
+    model_id = body.get("model", "").strip()
+    if not model_id:
+        raise HTTPException(status_code=400, detail="请指定模型 ID")
+    if get_model(model_id) is None:
+        raise HTTPException(status_code=400, detail=f"无效模型：{model_id}")
+    try:
+        get_llm().set_model(model_id)
+    except LLMError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"model": model_id}
+
+
+class ModelBody(BaseModel):
+    id: str
+    name: str = ""
+    desc: str = ""
+    base_url: str = ""
+    api_key: str = ""
+
+
+@router.post("/models")
+async def add_model(body: ModelBody):
+    """添加自定义模型。"""
+    from core.llm.model_registry import add_model as reg_add
+    try:
+        models = reg_add(body.id, body.name, body.desc, body.base_url, body.api_key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"models": models}
+
+
+@router.delete("/models/{model_id}")
+async def delete_model(model_id: str):
+    """删除自定义模型（内置模型不可删）。"""
+    from core.llm.model_registry import remove_model
+    try:
+        models = remove_model(model_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"models": models}
 
 
 def _current_avatar_path() -> Optional[pathlib.Path]:
@@ -94,6 +156,9 @@ async def qa_stream(request: Request):
     history = body.get("history", [])
     # 人格风格：scholar / warrior / artisan / neutral（Web 端可选，透传给 PetAdministrator）
     persona = body.get("persona", "").strip() or None
+    # 检索方式：use_vector / use_rerank（Web 端可选，默认混合检索 + 重排序）
+    use_vector = bool(body.get("use_vector", True))
+    use_rerank = bool(body.get("use_rerank", True))
 
     if not question:
         return StreamingResponse(_sse_error("请输入问题"), media_type="text/event-stream")
@@ -134,12 +199,16 @@ async def qa_stream(request: Request):
             """在线程中运行同步生成器，把事件推入队列（阻塞式，绝不丢）。"""
             try:
                 for event in service.ask_stream(
-            question, history=history, style_override=persona
+            question, history=history, style_override=persona,
+            use_vector=use_vector, use_rerank=use_rerank,
         ):
                     if stop_event.is_set():
                         break
                     if event["type"] == "stage":
-                        msg = f"data: {json.dumps({'type': 'stage', 'stage': event['stage'], 'count': event.get('count', 0)}, ensure_ascii=False)}\n\n"
+                        payload = {'type': 'stage', 'stage': event['stage'], 'count': event.get('count', 0)}
+                        if 'context' in event:
+                            payload['context'] = event['context']
+                        msg = f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     elif event["type"] == "token":
                         msg = f"data: {json.dumps({'type': 'token', 'text': event['text']}, ensure_ascii=False)}\n\n"
                     elif event["type"] == "done":
