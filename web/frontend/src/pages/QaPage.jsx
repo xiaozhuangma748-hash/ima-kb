@@ -22,8 +22,18 @@ const KB_NAME = '34-知识库'
 // 输入框左下角加号指令菜单：插入文档 / 清空上下文
 function CmdMenu({ setCurrentPage, beginNewSession }) {
   const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+  // 点击弹窗以外的任意位置直接关闭
+  useEffect(() => {
+    if (!open) return
+    function onDocMouseDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    return () => document.removeEventListener('mousedown', onDocMouseDown)
+  }, [open])
   return (
-    <div className="cmd-menu-wrap">
+    <div className="cmd-menu-wrap" ref={wrapRef}>
       <button
         className="cmd-menu-trigger"
         onClick={(e) => { e.stopPropagation(); setOpen(o => !o) }}
