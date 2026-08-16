@@ -20,16 +20,6 @@ export function useQA() {
   return ctx
 }
 
-const ROBOT_AVATAR_SVG = `<svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs><linearGradient id="avaGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-    <stop stop-color="#4A8AC4"/><stop offset="1" stop-color="#6799FE"/>
-  </linearGradient></defs>
-  <rect width="32" height="32" rx="8" fill="url(#avaGrad)"/>
-  <path d="M9 11C9 9.895 9.895 9 11 9H21C22.105 9 23 9.895 23 11V18C23 19.105 22.105 20 21 20H15.5L12 23.5V20H11C9.895 20 9 19.105 9 18V11Z" fill="#fff"/>
-  <circle cx="14" cy="14.5" r="1.4" fill="#4A8AC4"/>
-  <circle cx="18" cy="14.5" r="1.4" fill="#4A8AC4"/>
-</svg>`
-
 const STAGES = [
   { key: '检索', label: '检索知识库' },
   { key: '重排', label: '精选参考资料' },
@@ -41,13 +31,21 @@ export function QAProvider({ settings, children }) {
   const [messages, setMessages] = useState([])          // 当前查看会话的消息视图
   const [sources, setSources] = useState([])            // 当前查看会话的引用来源
   const [activeMarker, setActiveMarker] = useState(null)
-  const [avatarHtml, setAvatarHtml] = useState(ROBOT_AVATAR_SVG)
+  const [avatarHtml, setAvatarHtml] = useState(
+    // 初始即为已上传头像图片，避免先显示 SVG 后又切换成 img 的闪烁
+    `<img class="avatar-img" src="/static/avatar.gif" alt="AI">`
+  )
   const [sessions, setSessions] = useState(() => loadSessions())
   const [currentSessionId, setCurrentSessionId] = useState(null)
   const [persona, setPersona] = useState('neutral')
   // 检索方式：{key, useVector, useRerank} — 默认智能混合（向量+BM25+重排序）
   const [retrieval, setRetrieval] = useState({ key: 'mixed', useVector: true, useRerank: true })
   const [streamStates, setStreamStates] = useState({})  // {sid: {streaming, stage, context}}
+  // 模型选择：全局共享，QA 顶部下拉与设置-模型管理保持同步
+  const [models, setModels] = useState([])
+  const [currentModel, setCurrentModel] = useState('')
+  // 最近一次 LLM 的 token 用量（状态栏展示），随 usage 事件更新
+  const [lastUsage, setLastUsage] = useState(null)
 
   const currentSessionIdRef = useRef(currentSessionId)
   currentSessionIdRef.current = currentSessionId
@@ -57,6 +55,9 @@ export function QAProvider({ settings, children }) {
   const streamsRef = useRef({})     // {sid: {controller}}
   const liveSourcesRef = useRef({}) // {sid: sources[]}
   const liveInjectRef = useRef({})  // {sid: 注入清单{history_count, has_memory, has_summary, sources_count}}
+  const liveRetrievalRef = useRef({})  // {sid: 检索清单{sources:[{source,score,...}]}}
+  const liveLogsRef = useRef({})    // {sid: 英文运行日志行[]}，后端 log 事件为全量快照，直接覆盖
+  const liveUsageRef = useRef({})   // {sid: {input, output, total}}，LLM token 用量
 
   // 派生当前查看会话的流状态
   const currentStream = currentSessionId ? streamStates[currentSessionId] : null
@@ -65,14 +66,15 @@ export function QAProvider({ settings, children }) {
   const stageContext = currentStream ? currentStream.context : null
   const streamingSessionIds = Object.keys(streamStates).filter(sid => streamStates[sid].streaming)
 
-  // 加载头像
-  useEffect(() => {
+  // 加载头像（设置里上传/删除后调用 reloadAvatar 立即刷新各处头像）
+  const reloadAvatar = useCallback(() => {
     api.avatar().then(d => {
-      if (d.avatar_url) {
-        setAvatarHtml(`<img class="avatar-img" src="${d.avatar_url}?t=${Date.now()}" alt="AI">`)
-      }
+      // 有自定义头像用之，否则回退默认 avatar.gif
+      const src = d.avatar_url || '/static/avatar.gif'
+      setAvatarHtml(`<img class="avatar-img" src="${src}?t=${Date.now()}" alt="AI">`)
     }).catch(() => {})
   }, [])
+  useEffect(() => { reloadAvatar() }, [reloadAvatar])
 
   const beginNewSession = useCallback(() => {
     // 不中断任何后台流
@@ -87,9 +89,22 @@ export function QAProvider({ settings, children }) {
     if (!s) return
     setCurrentSessionId(sid)
     const buf = liveRef.current[sid]
-    setMessages(buf ? buf : (s.messages || []))
-    setSources(liveSourcesRef.current[sid] || [])
+    const msgs = buf ? buf : (s.messages || [])
+    setMessages(msgs)
+    // sources 优先取内存（流式中的会话），否则从最后一条带 worklog 的回答恢复（刷新后引用仍可点开）
+    let srcs = liveSourcesRef.current[sid] || null
+    if (!srcs) {
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].worklog?.sources?.length) { srcs = msgs[i].worklog.sources; break }
+      }
+    }
+    setSources(srcs || [])
     setActiveMarker(null)
+    // 从最后一条带 worklog.usage 的回答恢复 token 用量（刷新后状态栏仍显示）
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].worklog?.usage) { setLastUsage(msgs[i].worklog.usage); return }
+    }
+    setLastUsage(null)
   }, [])
 
   const deleteSession = useCallback((sid) => {
@@ -99,6 +114,7 @@ export function QAProvider({ settings, children }) {
     delete liveRef.current[sid]
     delete streamsRef.current[sid]
     delete liveSourcesRef.current[sid]
+    delete liveRetrievalRef.current[sid]
     setStreamStates(prev => { const c = { ...prev }; delete c[sid]; return c })
     if (currentSessionId === sid) {
       setCurrentSessionId(null)
@@ -107,9 +123,11 @@ export function QAProvider({ settings, children }) {
     }
   }, [currentSessionId])
 
-  const send = useCallback((text) => {
+  const send = useCallback((text, opts = {}) => {
     const trimmed = (text || '').trim()
     if (!trimmed) return
+    // 流式输出开关：关闭时后端仍走流式，但前端不逐字渲染，等生成结束一次性写入完整答案
+    const streamMode = opts.streaming !== false
 
     // 归属会话：复用当前会话，否则新建
     let sid = currentSessionId
@@ -117,10 +135,11 @@ export function QAProvider({ settings, children }) {
       ? (liveRef.current[sid] || loadSessions().find(x => x.id === sid)?.messages || [])
       : []
     // 发送即插入空的 assistant 占位消息，让"工作过程"在检索/重排/注入阶段（首个 token 到达前）就出现
+    // createdAt 供轨迹视图显示每轮问答时间
     const newMessages = [
       ...base,
-      { role: 'user', content: trimmed },
-      { role: 'assistant', content: '', worklog: null },
+      { role: 'user', content: trimmed, createdAt: new Date().toISOString() },
+      { role: 'assistant', content: '', worklog: null, createdAt: new Date().toISOString() },
     ]
     if (!sid) {
       const created = createSession(newMessages)
@@ -162,6 +181,8 @@ export function QAProvider({ settings, children }) {
         const i = STAGES.findIndex(s => s.key === key)
         // 注入阶段携带注入清单（历史条数/记忆/摘要/片段数），供生成结束后写进 worklog
         if (key === '注入' && context) liveInjectRef.current[sid] = context
+        // 检索阶段携带候选来源列表（含 source 类型），供生成结束后写进 worklog，展示来源分布
+        if (key === '检索' && context) liveRetrievalRef.current[sid] = context
         setStreamStates(prev => ({
           ...prev,
           [sid]: {
@@ -172,8 +193,21 @@ export function QAProvider({ settings, children }) {
           },
         }))
       },
+      onLog: (logs) => {
+        // 后端每次发全量日志快照，直接覆盖；轨迹视图与排查都以此为准
+        if (!streamsRef.current[sid]) return
+        liveLogsRef.current[sid] = logs
+      },
+      onUsage: (usage) => {
+        // LLM token 用量，供状态栏展示真实 token 数
+        if (!streamsRef.current[sid]) return
+        liveUsageRef.current[sid] = usage
+        setLastUsage(usage)
+      },
       onToken: (t) => {
         if (!streamsRef.current[sid]) return
+        // 非流式：不逐字追加，保留空占位，等 onDone 一次性写入完整答案
+        if (!streamMode) return
         const buf = liveRef.current[sid] || []
         const next = buf.slice()
         const last = next[next.length - 1]
@@ -204,19 +238,37 @@ export function QAProvider({ settings, children }) {
       ? parsed.citations.map(c => ({
           marker: c.marker,
           title: c.title,
-          snippet: '',
+          doc_id: c.doc_id,
+          snippet: c.preview || c.snippet || '',
+          paragraph_num: c.paragraph_num,
           score: (parsed.sources || []).find(s => s.doc_id === c.doc_id)?.score || 0,
         }))
-      : (parsed.sources || [])
+      : (parsed.sources || []).map(s => ({
+          marker: s.marker || 'r1',
+          title: s.doc_title || s.title || '未命名',
+          doc_id: s.doc_id,
+          snippet: s.preview || s.snippet || '',
+          paragraph_num: s.paragraph_num,
+          score: s.score || 0,
+        }))
     // 工作过程快照：随回答一起保留，供生成结束后仍显示在回复上方
     const inject = liveInjectRef.current[sid] || null
     delete liveInjectRef.current[sid]
+    const retrievalMeta = liveRetrievalRef.current[sid] || null
+    delete liveRetrievalRef.current[sid]
+    const runLogs = liveLogsRef.current[sid] || []
+    delete liveLogsRef.current[sid]
+    const usage = liveUsageRef.current[sid] || null
+    delete liveUsageRef.current[sid]
     const worklog = {
       sources: srcs,
       personaKey: persona,
       retrievalKey: retrieval.key,
+      retrievalMeta,
       history: (history || []).slice(-10),
       inject,
+      logs: runLogs,
+      usage,
     }
     const buf = liveRef.current[sid] || []
     const next = buf.slice()
@@ -277,10 +329,24 @@ export function QAProvider({ settings, children }) {
     setStreamStates(prev => { const c = { ...prev }; delete c[sid]; return c })
   }, [currentSessionId])
 
+  const loadModels = useCallback(() => {
+    api.getModels().then(data => {
+      setModels(data.models || [])
+      setCurrentModel(data.current || '')
+    }).catch(() => {})
+  }, [])
+
+  const switchModel = useCallback(async (id) => {
+    const data = await api.setModel(id)
+    setCurrentModel(data.model)
+    return data.model
+  }, [])
+
   const value = {
-    messages, streaming, stage, stageContext, sources, activeMarker, avatarHtml,
+    messages, streaming, stage, stageContext, sources, activeMarker, avatarHtml, reloadAvatar,
     persona, setPersona, retrieval, setRetrieval, sessions, currentSessionId, streamingSessionIds,
     beginNewSession, restoreSession, deleteSession, send, stop,
+    models, currentModel, loadModels, switchModel, lastUsage,
     highlightMarker: setActiveMarker,
   }
 

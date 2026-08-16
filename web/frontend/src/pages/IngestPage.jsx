@@ -51,6 +51,7 @@ export default function IngestPage() {
   const [typeFilter, setTypeFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [stats, setStats] = useState(null)
+  const [dragOver, setDragOver] = useState(false)
 
   const loadDocs = () => {
     setLoading(true)
@@ -183,10 +184,11 @@ export default function IngestPage() {
       <div className="ingest-panel">
         {activeMethod === 'file' && (
           <div
-            className={`dropzone ${false ? 'dragging' : ''}`}
+            className={`dropzone ${dragOver ? 'dragging' : ''}`}
             onClick={() => fileInputRef.current?.click()}
-            onDragOver={e => { e.preventDefault() }}
-            onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files) }}
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={e => { e.preventDefault(); setDragOver(false) }}
+            onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files) }}
           >
             <div className="dropzone-icon">📂</div>
             <div className="dropzone-text"><strong>拖拽文件到此处</strong> 或点击选择</div>

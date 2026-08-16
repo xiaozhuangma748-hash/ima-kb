@@ -47,12 +47,15 @@ export const api = {
   // ---- 已入库文档管理 ----
   listDocuments: () => request('/api/documents?limit=200'),
   deleteDocument: (id) => request(`/api/documents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  getDocumentContent: (docId) => request(`/api/documents/${encodeURIComponent(docId)}/content`),
 
   // ---- 数据分析 ----
-  analyze: (file, aiInsight = true) => {
+  analyze: (file, aiInsight = true, sheet = null) => {
     const fd = new FormData();
     fd.append('file', file);
-    return request(`/api/analyze?ai_insight=${aiInsight}`, { method: 'POST', body: fd });
+    const params = new URLSearchParams({ ai_insight: String(aiInsight) });
+    if (sheet) params.set('sheet', sheet);
+    return request(`/api/analyze?${params.toString()}`, { method: 'POST', body: fd });
   },
 
   // ---- 图谱 ----
@@ -92,6 +95,7 @@ export const api = {
     fd.append('file', file);
     return request('/api/avatar', { method: 'POST', body: fd });
   },
+  deleteAvatar: () => request('/api/avatar', { method: 'DELETE' }),
 
   // ---- 模型 ----
   getModels: () => request('/api/models'),
@@ -109,7 +113,7 @@ export const api = {
 };
 
 // SSE 流式问答：读取 /api/qa/stream 的 NDJSON（以 \n\n 分隔的 SSE 块）
-export function streamQA({ question, history, persona, signal, onStage, onToken, onDone, onError, useVector = true, useRerank = true }) {
+export function streamQA({ question, history, persona, signal, onStage, onToken, onLog, onUsage, onDone, onError, useVector = true, useRerank = true }) {
   return fetch('/api/qa/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -144,6 +148,8 @@ export function streamQA({ question, history, persona, signal, onStage, onToken,
 
             if (parsed.type === 'stage' && onStage) onStage(parsed.stage, parsed.count, parsed.context);
             else if (parsed.type === 'token' && onToken) onToken(parsed.text);
+            else if (parsed.type === 'log' && onLog) onLog(parsed.logs || []);
+            else if (parsed.type === 'usage' && onUsage) onUsage({ input: parsed.input || 0, output: parsed.output || 0, total: parsed.total || 0 });
             else if (parsed.type === 'done' && onDone) onDone(parsed);
             else if (parsed.type === 'error' && onError) onError(parsed.message || '未知错误');
           }

@@ -5,10 +5,9 @@ const DEFAULTS = {
   theme: 'dark',            // dark | light | system
   accent: 'blue',           // blue | green | purple | orange
   streaming: true,
-  use_rerank: true,
+  use_rerank: true,         // 搜索页"向量检索/LLM 重排序"开关初始值
   use_vector: true,
   auto_expand_sources: true,
-  show_suggestions: true,
   animations: true,
 };
 

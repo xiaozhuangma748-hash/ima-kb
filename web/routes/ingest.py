@@ -189,6 +189,28 @@ async def list_documents(request: Request, limit: int = 200, offset: int = 0):
     }
 
 
+@router.get("/documents/{doc_id}/content")
+async def get_document_content(doc_id: str, request: Request):
+    """按 doc_id 获取文档完整内容（用于引用查看）。"""
+    from fastapi import HTTPException
+
+    from web.app import _get_shared_storage
+
+    storage = _get_shared_storage(request.app)
+    doc = storage.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    chunks = storage.get_chunks(doc.id)
+    content = "\n".join(c.content for c in chunks)
+    return {
+        "doc_id": doc.id,
+        "title": doc.title,
+        "file_name": doc.file_name,
+        "chunk_count": doc.chunk_count,
+        "content": content,
+    }
+
+
 @router.delete("/documents/{doc_id}")
 async def delete_documents(doc_id: str, request: Request):
     """删除已入库文档（含分块、原文件、向量、索引）。"""

@@ -3,9 +3,10 @@
 // 回复模式：四种模式切换
 // 模型管理：查看/添加/删除 LLM 模型
 // 持久化到后端 config 文件
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQA, RETRIEVAL_MODES } from '../store/qa.jsx'
 import { Toggle } from '../ui/Base.jsx'
+import { useToast } from '../ui/Toast.jsx'
 import { api } from '../api.js'
 
 const THEME_OPTIONS = [
@@ -23,10 +24,7 @@ const ACCENT_OPTIONS = [
 
 const TOGGLES = [
   { key: 'streaming', label: '流式输出' },
-  { key: 'use_rerank', label: 'LLM 重排序' },
-  { key: 'use_vector', label: '向量检索' },
   { key: 'auto_expand_sources', label: '引用来源自动展开' },
-  { key: 'show_suggestions', label: '输入建议' },
   { key: 'animations', label: '动画过渡' },
 ]
 
@@ -67,27 +65,49 @@ const PERSONAS = [
 const EMPTY_FORM = { id: '', name: '', desc: '', base_url: '', api_key: '' }
 
 export default function SettingsDrawer({ settings, updateSettings, onClose }) {
-  const { persona, setPersona, retrieval, setRetrieval } = useQA()
+  const { persona, setPersona, retrieval, setRetrieval, models, currentModel, loadModels, switchModel, avatarHtml, reloadAvatar } = useQA()
+  const { showToast } = useToast()
   const [menu, setMenu] = useState('basic')
   const set = (k, v) => updateSettings({ [k]: v })
 
-  // ---- 模型管理状态 ----
-  const [models, setModels] = useState([])
-  const [currentModel, setCurrentModel] = useState('')
+  // ---- 头像上传 ----
+  const avatarInputRef = useRef(null)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const uploadAvatar = async (file) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) { showToast('仅支持图片文件', 'error'); return }
+    setAvatarBusy(true)
+    try {
+      await api.uploadAvatar(file)
+      reloadAvatar()
+      showToast('头像已更新', 'success')
+    } catch (e) {
+      showToast(`头像上传失败：${e.message}`, 'error')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+  const resetAvatar = async () => {
+    setAvatarBusy(true)
+    try {
+      await api.deleteAvatar()
+      reloadAvatar()
+      showToast('已恢复默认头像', 'success')
+    } catch (e) {
+      showToast(`恢复失败：${e.message}`, 'error')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
+  // ---- 模型管理状态（与 QA 顶部下拉全局共享）----
   const [form, setForm] = useState(EMPTY_FORM)
   const [formError, setFormError] = useState('')
   const [formMsg, setFormMsg] = useState('')
 
-  const loadModels = () => {
-    api.getModels().then(data => {
-      setModels(data.models || [])
-      setCurrentModel(data.current || '')
-    }).catch(() => {})
-  }
-
   useEffect(() => {
     if (menu === 'models') loadModels()
-  }, [menu])
+  }, [menu, loadModels])
 
   const addModel = async () => {
     setFormError('')
@@ -97,8 +117,8 @@ export default function SettingsDrawer({ settings, updateSettings, onClose }) {
       return
     }
     try {
-      const data = await api.addModel(form)
-      setModels(data.models || [])
+      await api.addModel(form)
+      loadModels()
       setForm(EMPTY_FORM)
       setFormMsg('模型已添加')
     } catch (e) {
@@ -109,27 +129,17 @@ export default function SettingsDrawer({ settings, updateSettings, onClose }) {
   const deleteModel = async (id) => {
     if (!confirm(`确定删除模型 ${id}？`)) return
     try {
-      const data = await api.deleteModel(id)
-      setModels(data.models || [])
+      await api.deleteModel(id)
       // 若删除的是当前使用中的模型，回退到列表里第一个模型
       if (currentModel === id) {
-        const first = (data.models || [])[0]
-        if (first) {
-          const r = await api.setModel(first.id)
-          setCurrentModel(r.model)
+        const first = (models || [])[0]
+        if (first && first.id !== id) {
+          await switchModel(first.id)
         }
       }
+      loadModels()
     } catch (e) {
       setFormError(e.message || '删除失败')
-    }
-  }
-
-  const switchModel = async (id) => {
-    try {
-      const data = await api.setModel(id)
-      setCurrentModel(data.model)
-    } catch (e) {
-      setFormError(e.message || '切换失败')
     }
   }
 
@@ -184,6 +194,28 @@ export default function SettingsDrawer({ settings, updateSettings, onClose }) {
                       ))}
                     </div>
                   </div>
+                </section>
+
+                <section className="drawer-sec">
+                  <h3>AI 头像</h3>
+                  <div className="setting-row">
+                    <span className="setting-label">自定义头像</span>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <span className="avatar-preview" dangerouslySetInnerHTML={{ __html: avatarHtml }} />
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        style={{ display: 'none' }}
+                        onChange={e => { uploadAvatar(e.target.files?.[0]); e.target.value = '' }}
+                      />
+                      <button className="btn btn-sm" disabled={avatarBusy} onClick={() => avatarInputRef.current?.click()}>
+                        {avatarBusy ? '处理中...' : '上传图片'}
+                      </button>
+                      <button className="btn btn-sm" disabled={avatarBusy} onClick={resetAvatar}>恢复默认</button>
+                    </div>
+                  </div>
+                  <div className="setting-hint">支持 png / jpg / webp / gif，5MB 以内，立即对问答区生效</div>
                 </section>
 
                 <section className="drawer-sec">

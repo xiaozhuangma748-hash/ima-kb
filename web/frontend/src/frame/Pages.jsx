@@ -6,14 +6,14 @@ import DashboardPage from '../pages/DashboardPage.jsx'
 import GraphPage from '../pages/GraphPage.jsx'
 import PetPage from '../pages/PetPage.jsx'
 
-export default function Pages({ currentPage, settings, openDetails, closeDetails }) {
+export default function Pages({ currentPage, settings, setCurrentPage }) {
   switch (currentPage) {
     case 'ingest': return <IngestPage />
-    case 'search': return <SearchPage settings={settings} openDetails={openDetails} />
+    case 'search': return <SearchPage settings={settings} />
     case 'analyze': return <AnalyzePage />
     case 'dashboard': return <DashboardPage />
-    case 'graph': return <GraphPage openDetails={openDetails} />
+    case 'graph': return <GraphPage />
     case 'pet': return <PetPage />
-    default: return <QaPage settings={settings} />
+    default: return <QaPage settings={settings} setCurrentPage={setCurrentPage} />
   }
 }

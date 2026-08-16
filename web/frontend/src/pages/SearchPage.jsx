@@ -6,6 +6,7 @@ import { useToast } from '../ui/Toast.jsx'
 function escapeReg(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 
 export default function SearchPage({ settings }) {
+  // settings.use_vector / use_rerank 仅作开关初始值
   const { showToast } = useToast()
   const [q, setQ] = useState('')
   const [useVector, setUseVector] = useState(settings.use_vector !== false)

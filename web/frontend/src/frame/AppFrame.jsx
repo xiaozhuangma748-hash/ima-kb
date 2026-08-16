@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { computeColumns, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT, DETAILS_DEFAULT } from './columns.js'
+import { computeColumns, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.js'
 import Sidebar from './Sidebar.jsx'
 import TopTabs from './TopTabs.jsx'
 import SettingsDrawer from './SettingsDrawer.jsx'
-import DetailsPanel from './DetailsPanel.jsx'
 import Pages from './Pages.jsx'
 import { QAProvider, useQA } from '../store/qa.jsx'
 
@@ -72,10 +71,8 @@ function AppFrameInner({ settings, updateSettings, currentPage, setCurrentPage }
   const frameRef = useRef(null)
   const [viewport, setViewport] = useState(() => window.innerWidth)
 
-  // 侧栏：0=折叠；details：0=关闭
+  // 侧栏：0=折叠
   const [sidebarPref, setSidebarPref] = useState(SIDEBAR_DEFAULT)
-  const [detailsPref, setDetailsPref] = useState(0)
-  const [detailsContent, setDetailsContent] = useState(null) // {title, node}
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [narrowExpanded, setNarrowExpanded] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -85,7 +82,7 @@ function AppFrameInner({ settings, updateSettings, currentPage, setCurrentPage }
   const sidebarCollapsed = narrow ? !narrowExpanded : sidebarPref === 0
   const sidebarPreference = sidebarCollapsed ? 0 : sidebarPref === 0 ? SIDEBAR_DEFAULT : sidebarPref
 
-  const cols = computeColumns(viewport, sidebarPreference, detailsPref === 0 ? 0 : detailsPref)
+  const cols = computeColumns(viewport, sidebarPreference)
   const colsRef = useRef(cols)
   colsRef.current = cols
 
@@ -107,11 +104,8 @@ function AppFrameInner({ settings, updateSettings, currentPage, setCurrentPage }
   }, [])
 
   const sidebarBase = useRef(0)
-  const detailsBase = useRef(0)
   const onSidebarStart = useCallback(() => { sidebarBase.current = colsRef.current.sidebar; setDragging(true) }, [])
-  const onDetailsStart = useCallback(() => { detailsBase.current = colsRef.current.details; setDragging(true) }, [])
   const onSidebarDrag = useCallback((dx) => setSidebarPref(sidebarBase.current + dx), [])
-  const onDetailsDrag = useCallback((dx) => setDetailsPref(detailsBase.current - dx), [])
   const onDragEnd = useCallback(() => setDragging(false), [])
 
   const toggleSidebar = () => {
@@ -119,18 +113,11 @@ function AppFrameInner({ settings, updateSettings, currentPage, setCurrentPage }
     setSidebarPref(v => (v === 0 ? SIDEBAR_DEFAULT : 0))
   }
 
-  const openDetails = useCallback((content) => {
-    setDetailsContent(content)
-    setDetailsPref(v => (v === 0 ? DETAILS_DEFAULT : v))
-  }, [])
-
-  const closeDetails = useCallback(() => setDetailsPref(0), [])
-
   return (
     <div
         ref={frameRef}
         className="app-frame"
-        style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` }}
+        style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr)` }}
         data-dragging={dragging || undefined}
       >
         <div className="frame-col frame-sidebar">
@@ -154,21 +141,13 @@ function AppFrameInner({ settings, updateSettings, currentPage, setCurrentPage }
             <Pages
               currentPage={currentPage}
               settings={settings}
-              openDetails={openDetails}
-              closeDetails={closeDetails}
+              setCurrentPage={setCurrentPage}
             />
           </div>
         </div>
 
-        <div className="frame-col frame-details">
-          <DetailsPanel content={detailsContent} onClose={closeDetails} />
-        </div>
-
         {!sidebarCollapsed && (
           <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />
-        )}
-        {cols.details > 0 && (
-          <DragHandle side="details" left={viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />
         )}
 
         {settingsOpen && (

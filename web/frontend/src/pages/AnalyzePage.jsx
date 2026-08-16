@@ -26,19 +26,19 @@ export default function AnalyzePage() {
     setError('')
   }
 
-  const analyze = () => {
+  const analyze = (targetSheet = null, withAI = true) => {
     if (!file || busy) {
       if (!file) showToast('请先选择文件', 'error', 2500)
       return
     }
     setBusy(true)
     setError('')
-    setData(null)
-    api.analyze(file, true)
+    if (!targetSheet) setData(null)
+    api.analyze(file, withAI, targetSheet)
       .then(d => {
         setData(d)
         setSheet(d.current_sheet || null)
-        showToast(`分析完成：${d.filename || file.name}`, 'success')
+        if (!targetSheet) showToast(`分析完成：${d.filename || file.name}`, 'success')
       })
       .catch(err => {
         setError(err.message)
@@ -61,7 +61,7 @@ export default function AnalyzePage() {
         <div className="header-actions">
           <input type="file" id="analyze-file-input" accept=".xlsx,.xls,.csv,.tsv,.json" style={{ display: 'none' }} onChange={onFileChange} />
           <Btn onClick={pick}>📁 选择文件</Btn>
-          <Btn variant="primary" onClick={analyze} disabled={busy}>{busy ? '分析中...' : '🤖 AI 分析'}</Btn>
+          <Btn variant="primary" onClick={() => analyze()} disabled={busy}>{busy ? '分析中...' : '🤖 AI 分析'}</Btn>
         </div>
       </div>
 
@@ -106,7 +106,12 @@ export default function AnalyzePage() {
           {data.sheets?.length > 1 && (
             <div className="sheet-tabs">
               {data.sheets.map(s => (
-                <button key={s} className={`sheet-tab ${s === sheet ? 'active' : ''}`} onClick={() => setSheet(s)}>{s}</button>
+                <button
+                  key={s}
+                  className={`sheet-tab ${s === sheet ? 'active' : ''}`}
+                  disabled={busy}
+                  onClick={() => { if (s !== sheet) analyze(s, false) }}
+                >{s}</button>
               ))}
             </div>
           )}

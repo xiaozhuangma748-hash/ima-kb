@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime as _datetime
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
@@ -311,10 +312,24 @@ class PetAdministrator:
         步骤 1-5 与 ask() 完全一致；步骤 6 改用 chat_stream()；
         步骤 7-9（引用提取 / 记忆更新 / 宠物经验）在流式结束后执行。
         """
+        # 运行日志：英文技术日志行，随流式事件发给前端轨迹视图，供用户排查问题
+        import time as _time
+        _t0 = _time.perf_counter()
+        _run_logs: list = []
+
+        def _log(msg: str) -> None:
+            # 绝对时钟时间(HH:MM:SS.mmm) + 相对启动耗时(秒)，便于对照实际执行时刻定位耗时
+            _clock = _datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            _run_logs.append(f"[{_clock} | {_time.perf_counter() - _t0:7.3f}s] {msg}")
+
         # 0. 答案级语义缓存查询（命中则直接流式返回缓存的答案）
         # 缓存键必须包含检索模式，否则切换 use_vector/use_rerank 后
         # 会命中旧模式的缓存答案，导致检索模式选择"看起来无效"。
         query_type = route_query(query)
+        cache_query: Optional[str] = None
+        query_emb = None
+        _log(f"query.route -> type={query_type} len={len(query)}")
+        _log(f"retrieval.mode -> use_vector={use_vector} use_rerank={use_rerank}")
         if query_type == "knowledge":
             try:
                 # 缓存键含检索模式；get 用 L1 精确匹配（query_embedding=None），
@@ -328,6 +343,9 @@ class PetAdministrator:
                     logger.info(f"答案缓存命中，跳过检索+LLM: {query[:30]}...")
                     # 清理缓存中可能遗留的 LaTeX 公式
                     clean_answer = _sanitize_latex(cached.answer)
+                    _log(f"cache.hit -> key=\"{query[:36]}...\" uv={int(use_vector)} ur={int(use_rerank)}")
+                    _log("done -> served from cache, retrieval+llm skipped")
+                    yield {"type": "log", "logs": list(_run_logs)}
                     yield {"type": "stage", "stage": "缓存", "count": 1}
                     # 逐 token 回放缓存答案
                     import re as _re
@@ -343,8 +361,10 @@ class PetAdministrator:
                         ),
                     }
                     return
+                _log(f"cache.miss -> key=\"{query[:36]}...\" uv={int(use_vector)} ur={int(use_rerank)}")
             except Exception as e:
                 logger.warning(f"答案缓存查询失败，继续正常流程: {e}")
+                _log(f"cache.error -> {e}")
 
         # 1. 加载记忆
         profile = self.profile_mgr.get_profile()
@@ -356,15 +376,29 @@ class PetAdministrator:
                 today_todos = self.todo_mgr.list_day()
             except Exception as e:
                 logger.warning(f"加载今日待办失败: {e}")
+        _log(f"memory.load -> tasks={len(active_tasks)} todos={len(today_todos)} "
+             f"style={profile.preferred_style or 'auto'}")
 
         # 2. 混合检索（闲聊跳过检索，直接空候选）
         if should_skip_retrieval(query):
             candidates = []
+            _log("retrieval.skip -> chitchat query, no retrieval needed")
+            yield {"type": "log", "logs": list(_run_logs)}
             yield {"type": "stage", "stage": "检索", "count": 0, "context": {"sources": []}}
         else:
             # 历史感知：用 summary 扩展 query，提升多轮对话召回率
             search_query = self._expand_query_with_context(query, summary=summary, history=history)
+            if search_query != query:
+                _log(f"retrieval.expand -> query rewritten, len {len(query)} -> {len(search_query)}")
+            _t = _time.perf_counter()
             candidates = self.hybrid.search(search_query, top_k=10, use_vector=use_vector)
+            _log(f"retrieval.search -> candidates={len(candidates)} use_vector={use_vector} "
+                 f"took={_time.perf_counter() - _t:.3f}s")
+            if candidates:
+                _log("retrieval.top3 -> " + "; ".join(
+                    f"{s.doc_title}#{s.paragraph_num or '?'}({getattr(s, 'source', 'bm25')})"
+                    for s in candidates[:3]))
+            yield {"type": "log", "logs": list(_run_logs)}
             yield {
                 "type": "stage",
                 "stage": "检索",
@@ -376,6 +410,7 @@ class PetAdministrator:
                             "title": s.doc_title,
                             "paragraph_num": s.paragraph_num or (i + 1),
                             "score": getattr(s, "score", 0),
+                            "source": getattr(s, "source", "bm25"),
                             "snippet": (s.content or "")[:180],
                         }
                         for i, s in enumerate(candidates)
@@ -386,9 +421,13 @@ class PetAdministrator:
         # 3. LLM 重排（use_rerank=False 跳过；无候选时跳过，不 yield "重排" 事件避免误导用户）
         if candidates:
             if use_rerank:
+                _t = _time.perf_counter()
                 top_sources = self.reranker.rerank(query, candidates, top_n=5)
+                _log(f"rerank.llm -> {len(candidates)} -> {len(top_sources)} took={_time.perf_counter() - _t:.3f}s")
             else:
                 top_sources = candidates[:5]
+                _log(f"rerank.skip -> disabled, truncated {len(candidates)} -> {len(top_sources)}")
+            yield {"type": "log", "logs": list(_run_logs)}
             yield {
                 "type": "stage",
                 "stage": "重排",
@@ -449,8 +488,13 @@ class PetAdministrator:
             sources=sources_dict,
             todos=today_todos,
         )
+        _log(f"prompt.build -> style={style} sources={len(sources_dict)} "
+             f"system_prompt_chars={len(system_prompt)}")
 
         # 4.5 上下文注入：组装 system prompt 后、LLM 生成前发送真实过程事件
+        _log(f"inject.context -> history={len(history or [])} "
+             f"memory={bool(cross_session_context)} summary={bool(summary)}")
+        yield {"type": "log", "logs": list(_run_logs)}
         yield {"type": "stage", "stage": "注入", "count": len(top_sources), "context": {
             "history_count": len(history or []),
             "has_memory": bool(cross_session_context),
@@ -473,6 +517,9 @@ class PetAdministrator:
         answer_text = ""
         # 通知 REPL 参考资料数量，用于流式实时清理越界 [n] 引用标记
         yield {"type": "source_count", "count": len(top_sources)}
+        _log(f"llm.start -> model={getattr(self.llm, 'model', 'unknown')} "
+             f"messages={len(messages)} max_tokens={max_tokens}")
+        _t = _time.perf_counter()
         try:
             for token in self.llm.chat_stream(
                 messages=messages,
@@ -481,8 +528,19 @@ class PetAdministrator:
             ):
                 answer_text += token
                 yield {"type": "token", "text": token}
+            # 读取 LLM 客户端记录的 token 使用量（含输入/输出/总 token）
+            _usage = getattr(self.llm, "last_usage", None) or {}
+            _in = _usage.get("input", 0)
+            _out = _usage.get("output", 0)
+            _total = _usage.get("total", _in + _out)
+            if _total:
+                # 单独发 usage 事件，供前端状态栏展示真实 token 数
+                yield {"type": "usage", "input": _in, "output": _out, "total": _total}
+            _log(f"llm.done -> chars={len(answer_text)} tokens={_total} "
+                 f"took={_time.perf_counter() - _t:.3f}s")
         except LLMError as e:
             logger.warning(f"LLM 流式生成失败，降级为检索模式: {e}")
+            _log(f"llm.error -> {e}; falling back to retrieval-only answer")
             # 先 yield 降级 stage 事件，确保桌宠气泡从"重排"切换到"降级"
             # 即使后续 token 推送失败（socket 断开等），气泡也不会卡在"重排"状态
             yield {"type": "stage", "stage": "降级", "count": len(top_sources)}
@@ -503,9 +561,11 @@ class PetAdministrator:
         answer_text = _sanitize_memory_markers(answer_text)
         try:
             citations = extract_citations(answer_text, sources_dict)
+            _log(f"citation.extract -> found={len(citations)}")
         except Exception as e:
             logger.warning(f"引用提取失败: {e}")
             citations = []
+            _log(f"citation.error -> {e}")
 
         # 8. 更新记忆（静默，失败不影响回答）
         try:
@@ -532,9 +592,13 @@ class PetAdministrator:
                         answer=clean_answer_for_cache,
                         citations=[c.__dict__ if hasattr(c, '__dict__') else c for c in citations],
                     )
+                    _log("cache.put -> answer cached")
             except Exception as e:
                 logger.warning(f"答案缓存写入失败: {e}")
+                _log(f"cache.put.error -> {e}")
 
+        _log(f"done -> total_time={_time.perf_counter() - _t0:.3f}s")
+        yield {"type": "log", "logs": list(_run_logs)}
         yield {
             "type": "done",
             "result": AnswerResult(

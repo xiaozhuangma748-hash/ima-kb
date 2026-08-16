@@ -85,9 +85,9 @@ async def delete_model(model_id: str):
 
 
 def _current_avatar_path() -> Optional[pathlib.Path]:
-    """返回当前已上传的自定义头像文件（若有）。"""
+    """返回当前已上传的自定义头像文件（若有）。仓库自带 avatar.gif 为默认头像，不算自定义。"""
     for ext in _AVATAR_EXTS:
-        p = STATIC_DIR / f"avatar.{ext}"
+        p = STATIC_DIR / f"custom_avatar.{ext}"
         if p.exists():
             return p
     return None
@@ -95,7 +95,7 @@ def _current_avatar_path() -> Optional[pathlib.Path]:
 
 @router.get("/avatar")
 async def get_avatar():
-    """返回当前自定义 AI 头像（未设置则为 null）。"""
+    """返回当前自定义 AI 头像（未设置则为 null，前端显示默认 avatar.gif）。"""
     avatar = _current_avatar_path()
     if avatar is None:
         return {"avatar_url": None}
@@ -104,7 +104,7 @@ async def get_avatar():
 
 @router.post("/avatar")
 async def upload_avatar(file: UploadFile = File(...)):
-    """上传自定义 AI 头像照片，替换默认 SVG。"""
+    """上传自定义 AI 头像照片，覆盖旧的自定义头像（不影响默认 avatar.gif）。"""
     content_type = file.content_type or ""
     if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="仅支持图片文件（png/jpg/webp/gif）")
@@ -120,20 +120,20 @@ async def upload_avatar(file: UploadFile = File(...)):
     data = await file.read()
     if len(data) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="图片过大，请控制在 5MB 以内")
-    for old in STATIC_DIR.glob("avatar.*"):
+    for old in STATIC_DIR.glob("custom_avatar.*"):
         try:
             old.unlink()
         except OSError:
             pass
-    (STATIC_DIR / f"avatar.{ext}").write_bytes(data)
-    return {"avatar_url": f"/static/avatar.{ext}"}
+    (STATIC_DIR / f"custom_avatar.{ext}").write_bytes(data)
+    return {"avatar_url": f"/static/custom_avatar.{ext}"}
 
 
 @router.delete("/avatar")
 async def delete_avatar():
-    """删除自定义头像，恢复默认 SVG。"""
+    """删除自定义头像，恢复默认 avatar.gif。"""
     removed = False
-    for old in STATIC_DIR.glob("avatar.*"):
+    for old in STATIC_DIR.glob("custom_avatar.*"):
         try:
             old.unlink()
             removed = True
@@ -211,6 +211,12 @@ async def qa_stream(request: Request):
                         msg = f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     elif event["type"] == "token":
                         msg = f"data: {json.dumps({'type': 'token', 'text': event['text']}, ensure_ascii=False)}\n\n"
+                    elif event["type"] == "log":
+                        # 运行日志快照（英文技术日志），供前端轨迹视图展示排查信息
+                        msg = f"data: {json.dumps({'type': 'log', 'logs': event.get('logs', [])}, ensure_ascii=False)}\n\n"
+                    elif event["type"] == "usage":
+                        # LLM token 用量，供前端状态栏展示真实 token 数
+                        msg = f"data: {json.dumps({'type': 'usage', 'input': event.get('input', 0), 'output': event.get('output', 0), 'total': event.get('total', 0)}, ensure_ascii=False)}\n\n"
                     elif event["type"] == "done":
                         result = event["result"]
                         # 保存宠物状态和记忆
@@ -223,6 +229,8 @@ async def qa_stream(request: Request):
                                 "title": c.title,
                                 "paragraph_num": c.paragraph_num,
                                 "doc_id": c.doc_id,
+                                # 命中片段原文，供轨迹视图就地展示真实日志
+                                "preview": getattr(c, "snippet", "") or getattr(c, "preview", ""),
                             })
                         sources_data = []
                         for s in result.sources:
@@ -230,6 +238,9 @@ async def qa_stream(request: Request):
                                 "doc_id": s.doc_id,
                                 "doc_title": s.doc_title,
                                 "score": getattr(s, "score", 0),
+                                "source": getattr(s, "source", ""),
+                                "paragraph_num": getattr(s, "paragraph_num", 0),
+                                "preview": (getattr(s, "content", "") or "")[:180],
                             })
                         msg = f"data: {json.dumps({'type': 'done', 'answer': result.text, 'citations': citations_data, 'sources': sources_data, 'pet_events': result.pet_events}, ensure_ascii=False)}\n\n"
                     else:

@@ -25,10 +25,9 @@ _DEFAULTS = {
     "theme": "dark",          # dark | light | system
     "accent": "blue",         # blue | green | purple | orange
     "streaming": True,
-    "use_rerank": True,
+    "use_rerank": True,       # 搜索页开关初始值
     "use_vector": True,
     "auto_expand_sources": True,
-    "show_suggestions": True,
     "animations": True,
 }
 
@@ -79,7 +78,6 @@ class SettingsBody(BaseModel):
     use_rerank: bool = True
     use_vector: bool = True
     auto_expand_sources: bool = True
-    show_suggestions: bool = True
     animations: bool = True
 
 
